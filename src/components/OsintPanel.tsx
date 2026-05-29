@@ -28,7 +28,6 @@ const TABS = [
   { id: 'phone', label: 'PHONE INTEL', icon: Phone, placeholder: 'Phone number (e.g. +1...)', color: '#FF9500' },
   { id: 'leaks', label: 'DATA LEAKS', icon: ShieldAlert, placeholder: 'Email address', color: '#E040FB' },
   { id: 'github', label: 'GITHUB RECON', icon: Terminal, placeholder: 'GitHub username', color: '#87CEEB' },
-  { id: 'crypto', label: 'CRYPTO TRACE', icon: Bitcoin, placeholder: 'BTC or ETH address', color: '#F7931A' },
   { id: 'sweep', label: 'IP SWEEP', icon: Crosshair, placeholder: 'Enter IP address (e.g. 8.8.8.8)', color: '#FF3D3D' },
 ];
 
@@ -128,7 +127,11 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
         setHistory(prev => [{ tab: activeTab, query, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 9)]);
         
         // Geolocate the target in the background
-        if (activeTab !== 'sweep' && activeTab !== 'vuln' && activeTab !== 'crypto' && activeTab !== 'mac' && activeTab !== 'bgp' && activeTab !== 'github' && activeTab !== 'leaks' && activeTab !== 'phone') {
+        if (activeTab === 'phone') {
+          if (data.lat && data.lng && onScanGeolocate) {
+             onScanGeolocate(query, { lat: data.lat, lng: data.lng, type: 'phone', region: data.region });
+          }
+        } else if (activeTab !== 'sweep' && activeTab !== 'vuln' && activeTab !== 'crypto' && activeTab !== 'mac' && activeTab !== 'bgp' && activeTab !== 'github' && activeTab !== 'leaks' && activeTab !== 'phone') {
           fetch(`/api/osint/ip?ip=${encodeURIComponent(query)}`)
             .then(r => r.json())
             .then(locData => {
@@ -456,12 +459,27 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
           <SectionHeader title="DATA LEAK SWEEP" icon={ShieldAlert} color="#E040FB" />
           <ResultRow label="Email Target" value={r.email} color="#E040FB" />
           <ResultRow label="Status" value={r.breached ? 'COMPROMISED' : 'SECURE'} color={r.breached ? '#FF1744' : '#00E676'} />
+          
+          {r.breached && r.data_exposed?.length > 0 && (
+            <div className="mt-2 p-2 border border-[#E040FB]/30 bg-[#E040FB]/10 rounded">
+              <span className="text-[10px] font-mono text-[#E040FB] font-bold mb-1 block">EXPOSED DATA POINTS</span>
+              <div className="flex flex-wrap gap-1">
+                {r.data_exposed.map((dc: string) => (
+                  <span key={dc} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#1A1A18] text-[#E8E6E0] border border-[#E040FB]/20">{dc}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {r.breached && r.breaches?.length > 0 && (
             <div className="mt-2 p-2 border border-red-500/30 bg-red-500/10 rounded">
               <span className="text-[10px] font-mono text-red-400 font-bold mb-1 block">KNOWN BREACHES ({r.breaches.length})</span>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-col gap-1">
                 {r.breaches.map((b: string) => (
-                  <span key={b} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#1A1A18] text-red-300">{b}</span>
+                  <a key={b} href={`https://haveibeenpwned.com/PwnedWebsites#${b}`} target="_blank" rel="noreferrer" className="text-[9px] font-mono px-2 py-1 rounded bg-[#1A1A18] text-red-300 hover:text-white hover:bg-red-500/30 flex items-center justify-between transition-colors">
+                    <span>{b}</span>
+                    <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
                 ))}
               </div>
             </div>
@@ -528,40 +546,7 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
       );
     }
 
-    // ── CRYPTO ──
-    if (activeTab === 'crypto') {
-      const sanctioned = !!r.sanctioned;
-      return (
-        <div>
-          <SectionHeader title="CRYPTO WALLET INTELLIGENCE" icon={Bitcoin} color="#F7931A" />
-          {sanctioned && (
-            <div className="mb-2 px-2 py-1.5 rounded border border-red-500/40 bg-red-500/15 flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-              <span className="text-[10px] font-mono font-bold text-red-400 tracking-wider">
-                SANCTIONED — {r.sanctions?.source || 'OFAC SDN'}
-              </span>
-            </div>
-          )}
-          <ResultRow label="Address" value={r.address} color="#F7931A" />
-          <ResultRow label="Chain" value={r.chain} color={r.chain === 'BTC' ? '#F7931A' : '#627EEA'} />
-          <ResultRow label="Balance" value={`${r.balance} ${r.balance_unit}`} />
-          <ResultRow label="TX Count" value={r.tx_count} />
-          {r.total_received !== undefined && <ResultRow label="Total Recv" value={`${r.total_received} ${r.balance_unit}`} />}
-          {r.total_sent !== undefined && <ResultRow label="Total Sent" value={`${r.total_sent} ${r.balance_unit}`} />}
-          <ResultRow label="First Seen" value={r.first_seen} />
-          <ResultRow label="Last Seen" value={r.last_seen} />
-          {r.explorer && (
-            <div className="mt-2">
-              <a href={r.explorer} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[10px] font-mono text-[#F7931A] hover:underline">
-                <ExternalLink className="w-2.5 h-2.5" /> Open in block explorer
-              </a>
-            </div>
-          )}
-          {renderFallbackExcluding(['address','chain','balance','balance_unit','balance_satoshis','balance_wei','tx_count','total_received','total_sent','first_seen','last_seen','explorer','sanctioned','sanctions','timestamp'])}
-        </div>
-      );
-    }
+
 
     // Fallback for other tools
     return renderFallback();

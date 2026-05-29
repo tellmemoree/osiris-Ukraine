@@ -7,21 +7,40 @@ export async function GET(req: Request) {
   if (!email) return NextResponse.json({ error: 'Missing email parameter' }, { status: 400 });
 
   try {
-    const res = await fetch(`https://api.xposedornot.com/v1/check-email/${encodeURIComponent(email)}`, {
+    // We will call the breach-analytics endpoint to get deep details on what exactly was leaked.
+    const res = await fetch(`https://api.xposedornot.com/v1/breach-analytics?email=${encodeURIComponent(email)}`, {
       headers: { 'Accept': 'application/json' }
     });
     
     if (res.status === 404) {
-      return NextResponse.json({ email, breached: false, breaches: [] });
+      return NextResponse.json({ email, breached: false, breaches: [], data_exposed: [] });
     }
 
     if (!res.ok) throw new Error(`XposedOrNot API HTTP ${res.status}`);
 
     const data = await res.json();
+    
+    // Parse the analytics data
+    let breachList = [];
+    let dataExposed = new Set<string>();
+
+    if (data.BreachesSummary && data.BreachesSummary.site) {
+       breachList = data.BreachesSummary.site.split(';').filter(Boolean);
+    }
+    
+    if (data.ExposedData && Array.isArray(data.ExposedData)) {
+       data.ExposedData.forEach((item: any) => {
+          if (item.data_classes && Array.isArray(item.data_classes)) {
+             item.data_classes.forEach((dc: string) => dataExposed.add(dc));
+          }
+       });
+    }
+
     return NextResponse.json({
       email,
-      breached: true,
-      breaches: data.breaches?.[0] || []
+      breached: breachList.length > 0,
+      breaches: breachList,
+      data_exposed: Array.from(dataExposed).sort()
     });
   } catch (error: any) {
     return NextResponse.json({ error: 'Leak lookup failed', detail: error.message }, { status: 502 });
