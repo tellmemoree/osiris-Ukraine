@@ -4,8 +4,8 @@ import { stealthFetch } from '@/lib/stealthFetch';
 
 /**
  * OSIRIS — Ukrainian Air Raid Alerts API
- * Fetches active air raid and threat alerts from alerts.in.ua.
- * No API key required for the active alerts endpoint.
+ * Fetches active air raid alerts from alerts.com.ua (keyless, no token required).
+ * The endpoint returns all 25 oblasts with an `alert` boolean; we filter to active.
  */
 
 const OBLAST_COORDS: Record<string, [number, number]> = {
@@ -37,22 +37,20 @@ const OBLAST_COORDS: Record<string, [number, number]> = {
   'Crimea': [34.102, 44.952],
 };
 
-type AlertType = 'AIR' | 'ARTILLERY' | 'URBAN_FIGHTS' | 'CHEMICAL' | 'NUCLEAR' | 'INFO';
-
-type RawAlert = {
-  regionId?: number;
-  regionName?: string;
-  regionType?: string;
-  alertType?: AlertType;
-  startedAt?: string;
-  [key: string]: unknown;
+// Raw shape returned by alerts.com.ua/api/states
+type RawState = {
+  id?: number;
+  name?: string;     // Ukrainian oblast name (matches OBLAST_COORDS keys)
+  name_en?: string;  // English oblast name (used for display)
+  alert?: boolean;
+  changed?: string;  // ISO timestamp of last status change
 };
 
 type EnrichedAlert = {
   regionId: number | null;
   regionName: string;
   regionType: string;
-  alertType: AlertType | string;
+  alertType: string;
   startedAt: string;
   lat: number | null;
   lng: number | null;
@@ -60,31 +58,32 @@ type EnrichedAlert = {
 
 export async function GET() {
   try {
-    const res = await stealthFetch('https://api.alerts.in.ua/v1/alerts/active.json', {
+    const res = await stealthFetch('https://alerts.com.ua/api/states', {
       signal: AbortSignal.timeout(8000),
     });
 
     if (!res.ok) {
-      console.error(`[OSIRIS] alerts.in.ua responded with ${res.status}`);
-      return NextResponse.json({ alerts: [], total: 0, error: `alerts.in.ua returned ${res.status}` });
+      console.error(`[OSIRIS] alerts.com.ua responded with ${res.status}`);
+      return NextResponse.json({ alerts: [], total: 0, error: `alerts.com.ua returned ${res.status}` });
     }
 
-    const raw: RawAlert[] = await res.json();
-    const rawAlerts = Array.isArray(raw) ? raw : [];
+    const raw = await res.json();
+    const states: RawState[] = Array.isArray(raw?.states) ? raw.states : [];
 
-    const alerts: EnrichedAlert[] = rawAlerts.map((alert) => {
-      const regionName = alert.regionName ?? '';
-      const coords = OBLAST_COORDS[regionName] ?? null;
-      return {
-        regionId: alert.regionId ?? null,
-        regionName,
-        regionType: alert.regionType ?? '',
-        alertType: alert.alertType ?? '',
-        startedAt: alert.startedAt ?? '',
-        lat: coords ? coords[1] : null,
-        lng: coords ? coords[0] : null,
-      };
-    });
+    const alerts: EnrichedAlert[] = states
+      .filter((s) => s.alert === true)
+      .map((s) => {
+        const coords = OBLAST_COORDS[s.name ?? ''] ?? null;
+        return {
+          regionId: s.id ?? null,
+          regionName: s.name_en || s.name || 'Unknown',
+          regionType: 'oblast',
+          alertType: 'AIR',
+          startedAt: s.changed ?? '',
+          lat: coords ? coords[1] : null,
+          lng: coords ? coords[0] : null,
+        };
+      });
 
     const activeRegions = new Set(alerts.map((a) => a.regionName)).size;
 
