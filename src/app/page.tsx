@@ -122,7 +122,7 @@ export default function Dashboard() {
     jets: false,
     military: false,
     maritime: true,
-    ships: false,
+    ships: true,
     satellites: false,
     balloons: false,
     cctv: true,

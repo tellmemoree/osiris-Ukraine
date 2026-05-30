@@ -62,6 +62,24 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     { name: 'teleSUR EN', city: 'Caracas', country: 'VE', lat: 10.491, lng: -66.902, url: 'https://www.youtube.com/embed/live_stream?channel=UCmuTmpLY35O3csvhyA6vrkg&autoplay=1&mute=1', category: 'mainstream', region: 'americas' },
   ];
 
+  // Ukrainian / Russia-Ukraine war OSINT Telegram channels (monitored by /api/news).
+  // Always listed as intel sources; SOURCE link opens the channel web preview.
+  const TELEGRAM_SOURCES = [
+    { name: 'DeepState UA', channel: 'DeepStateUA' },
+    { name: 'WarTranslated', channel: 'wartranslated' },
+    { name: 'Liveuamap', channel: 'Liveuamap' },
+    { name: 'Militaryland', channel: 'Militaryland' },
+    { name: 'UA Insider', channel: 'UA_Insider' },
+    { name: 'Rezident UA', channel: 'Rezident_UA' },
+    { name: 'UA General Staff', channel: 'GeneralStaffUA' },
+    { name: 'UA Forces', channel: 'ua_forces' },
+    { name: 'Ukraine War Report', channel: 'UkraineWarReport' },
+    { name: 'OSINTtechnical', channel: 'OSINTtechnical' },
+    { name: 'Faytuks', channel: 'Faytuks' },
+    { name: 'Rybar', channel: 'rybar' },
+    { name: 'Grey Zone', channel: 'grey_zone' },
+  ];
+
   // Build unified alert feed
   const alerts: any[] = [];
 
@@ -95,6 +113,16 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
       source: `${f.city}, ${f.country}`,
       lat: f.lat, lng: f.lng,
       feedUrl: f.url, severity: 'LOW', category: f.category,
+    });
+  });
+
+  // Ukrainian Telegram intel sources (always listed; open channel externally)
+  TELEGRAM_SOURCES.forEach(t => {
+    alerts.push({
+      type: 'feed', title: t.name,
+      source: `t.me/${t.channel}`,
+      severity: 'LOW', category: 'conflict',
+      url: `https://t.me/s/${t.channel}`,
     });
   });
 

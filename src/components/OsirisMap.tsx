@@ -470,10 +470,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
       // Maritime Ships (moving entities)
       map.addLayer({ id: 'ship-dots', type: 'circle', source: 'maritime-ships', paint: {
-        // Shadow-fleet (sanctioned) vessels render larger so they stand out
+        // Shadow-fleet (sanctioned) vessels render larger so they stand out.
+        // Base radius enlarged so vessels are an easy click/tap target.
         'circle-radius': ['case', ['==', ['get','shadow_fleet'], true],
-          ['interpolate',['linear'],['zoom'], 1,4, 5,6, 10,9],
-          ['interpolate',['linear'],['zoom'], 1,2, 5,4, 10,6]],
+          ['interpolate',['linear'],['zoom'], 1,5, 5,7, 10,10],
+          ['interpolate',['linear'],['zoom'], 1,3, 5,5, 10,8]],
         // Shadow-fleet = magenta, overriding the type color
         'circle-color': ['case', ['==', ['get','shadow_fleet'], true], '#E040FB',
           ['match', ['get','type'], 'military','#FF1744', 'tanker','#FF9500', 'cargo','#00BCD4', '#fff']],
@@ -824,7 +825,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const p = e.features[0].properties as any;
       const coords = (e.features[0].geometry as any).coordinates;
       const isShadow = p.shadow_fleet === true || p.shadow_fleet === 'true';
-      const color = isShadow ? '#E040FB' : p.type === 'military' ? '#FF1744' : p.type === 'tanker' ? '#FF9500' : '#00BCD4';
+      const shipType = (p.type || 'cargo').toString();
+      const color = isShadow ? '#E040FB' : shipType === 'military' ? '#FF1744' : shipType === 'tanker' ? '#FF9500' : '#00BCD4';
       popup(coords, `<div style="${pStyle}border:1px solid ${color}40;">
         <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
           <span style="color:${color};font-size:12px;font-weight:700;letter-spacing:0.1em;">🚢 ${p.name}</span>
@@ -832,7 +834,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         </div>
         ${isShadow ? `<div style="color:#E040FB;font-size:9px;font-weight:700;margin-bottom:6px;">⚠ SHADOW FLEET — sanctioned / dark vessel</div>` : ''}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
-          <div><span style="color:#5C5A54;">TYPE</span><br/><span style="color:${color};">${p.type.toUpperCase()}</span></div>
+          <div><span style="color:#5C5A54;">TYPE</span><br/><span style="color:${color};">${shipType.toUpperCase()}</span></div>
           <div><span style="color:#5C5A54;">SPEED</span><br/><span style="color:#E8E6E0;">${p.speed} knots</span></div>
           <div><span style="color:#5C5A54;">HEADING</span><br/><span style="color:#E8E6E0;">${p.heading}°</span></div>
           <div><span style="color:#5C5A54;">DEST</span><br/><span style="color:#E8E6E0;">${p.destination || 'UNKNOWN'}</span></div>
@@ -954,14 +956,16 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   // Helper to set GeoJSON
   const setGeo = useCallback((source: string, features: any[]) => {
-    const src = mapRef.current?.getSource(source) as any;
-    if (src) src.setData({ type: 'FeatureCollection', features });
+    const map = mapRef.current;
+    const src = map?.getSource(source) as any;
+    if (src) { src.setData({ type: 'FeatureCollection', features }); map?.triggerRepaint(); }
   }, []);
 
   const setVis = useCallback((ids: string[], visible: boolean) => {
     const map = mapRef.current;
     if (!map) return;
     ids.forEach(id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none'); });
+    map.triggerRepaint();
   }, []);
 
   // Flight data → GeoJSON (GPU rendered)
@@ -1023,7 +1027,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady) return;
     setGeo('maritime', activeLayers.maritime && data.maritime_ports ? data.maritime_ports.map((p: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] }, properties: { name: p.name, country: p.country, type: p.type, volume: p.volume, fleet: p.fleet, rank: p.rank } })) : []);
     setGeo('maritime-choke', activeLayers.maritime && data.maritime_chokepoints ? data.maritime_chokepoints.map((c: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: { name: c.name, traffic: c.traffic, risk: c.risk } })) : []);
-    setGeo('maritime-ships', activeLayers.ships && data.maritime_ships ? data.maritime_ships.map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, shadow_fleet: s.shadow_fleet === true } })) : []);
+    setGeo('maritime-ships', activeLayers.ships && data.maritime_ships ? data.maritime_ships.filter((s: any) => Number.isFinite(s.lat) && Number.isFinite(s.lng) && Math.abs(s.lat) <= 90 && Math.abs(s.lng) <= 180 && !(s.lat === 0 && s.lng === 0)).map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, shadow_fleet: s.shadow_fleet === true } })) : []);
   }, [mapReady, data.maritime_ports, data.maritime_chokepoints, data.maritime_ships, activeLayers.maritime, activeLayers.ships, setGeo]);
 
   useEffect(() => {

@@ -374,13 +374,27 @@ export async function GET() {
     };
   });
 
+  // Cap the vessels returned to the client to keep the 10s poll + GeoJSON
+  // rebuild light: keep all shadow-fleet matches, then fill to ~6000 with the
+  // most recently-updated vessels. Full set above still drives port congestion.
+  const SHIP_RESPONSE_CAP = 6000;
+  let responseShips = ships;
+  if (ships.length > SHIP_RESPONSE_CAP) {
+    const flagged = ships.filter((s: any) => s.shadow_fleet);
+    const rest = ships
+      .filter((s: any) => !s.shadow_fleet)
+      .sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0))
+      .slice(0, Math.max(0, SHIP_RESPONSE_CAP - flagged.length));
+    responseShips = [...flagged, ...rest];
+  }
+
   return NextResponse.json({
     ports: dynamicPorts,
     chokepoints: dynamicChokepoints,
-    ships: ships,
+    ships: responseShips,
     total_ports: dynamicPorts.length,
     total_chokepoints: dynamicChokepoints.length,
-    total_ships: ships.length,
+    total_ships: responseShips.length,
     timestamp: new Date().toISOString(),
   }, {
     headers: { 
