@@ -42,6 +42,9 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     { name: 'Euronews', city: 'Lyon', country: 'FR', lat: 45.764, lng: 4.836, url: 'https://www.youtube.com/embed/live_stream?channel=UCtUbOIRGKZkW7555n6x6q6g&autoplay=1&mute=1', category: 'mainstream', region: 'europe' },
     { name: 'TRT World', city: 'Istanbul', country: 'TR', lat: 41.008, lng: 28.978, url: 'https://www.youtube.com/embed/live_stream?channel=UC7fWeaHZQg1p9-4v98L1D1A&autoplay=1&mute=1', category: 'mainstream', region: 'europe' },
     { name: 'UKRINFORM', city: 'Kyiv', country: 'UA', lat: 50.450, lng: 30.523, url: 'https://www.youtube.com/embed/live_stream?channel=UCaDkCK6iFHPE0lmpaYL-WxQ&autoplay=1&mute=1', category: 'conflict', region: 'europe' },
+    { name: 'Espreso TV', city: 'Kyiv', country: 'UA', lat: 50.450, lng: 30.523, url: 'https://www.youtube.com/embed/live_stream?channel=UCMEiyV8N2J93GdPNltPYM6w&autoplay=1&mute=1', category: 'conflict', region: 'europe' },
+    { name: 'Kyiv Independent', city: 'Kyiv', country: 'UA', lat: 50.448, lng: 30.530, url: 'https://www.youtube.com/embed/live_stream?channel=UCGAC5yzlYgjKoJABDZ7zEyw&autoplay=1&mute=1', category: 'conflict', region: 'europe' },
+    { name: '5 Channel', city: 'Kyiv', country: 'UA', lat: 50.455, lng: 30.520, url: 'https://www.youtube.com/embed/live_stream?channel=UCICQXUdfFxgMAlyxssw1-Vw&autoplay=1&mute=1', category: 'conflict', region: 'europe' },
     // ── Middle East ──
     { name: 'Al Jazeera EN', city: 'Doha', country: 'QA', lat: 25.286, lng: 51.534, url: 'https://www.youtube.com/embed/live_stream?channel=UCNye-wNBqNL5ZzHSJj3l8Bg&autoplay=1&mute=1', category: 'mainstream', region: 'middleeast' },
     { name: 'Al Mayadeen', city: 'Beirut', country: 'LB', lat: 33.8886, lng: 35.4955, url: 'https://www.youtube.com/embed/live_stream?channel=UCZCFHCU-2eGF7V5ciMkoPHw&autoplay=1&mute=1', category: 'conflict', region: 'middleeast' },

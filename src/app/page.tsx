@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -122,6 +122,7 @@ export default function Dashboard() {
     jets: false,
     military: false,
     maritime: true,
+    ships: false,
     satellites: false,
     balloons: false,
     cctv: true,
@@ -143,6 +144,19 @@ export default function Dashboard() {
   const [liveFeedUrl, setLiveFeedUrl] = useState<string | null>(null);
   const [liveFeedName, setLiveFeedName] = useState('');
   const [liveFeedEmbedAllowed, setLiveFeedEmbedAllowed] = useState(true);
+  // Bottom-center HUD visibility (user-dismissible; persisted across reloads)
+  const [hudVisible, setHudVisible] = useState(true);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('osiris-hud-hidden') === '1') setHudVisible(false);
+  }, []);
+  const toggleHud = useCallback(() => {
+    setHudVisible(v => {
+      const next = !v;
+      try { localStorage.setItem('osiris-hud-hidden', next ? '0' : '1'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   // Splash screen
   useEffect(() => {
@@ -340,8 +354,8 @@ export default function Dashboard() {
       fetchEndpoint('/api/cctv?region=all&v=2');
       layerFetchedRef.current.add('cctv');
     }
-    // Maritime
-    if (activeLayers.maritime && !layerFetchedRef.current.has('maritime')) {
+    // Maritime (ports/chokepoints) and/or Live Ships — one fetch feeds both
+    if ((activeLayers.maritime || activeLayers.ships) && !layerFetchedRef.current.has('maritime')) {
       fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships }));
       layerFetchedRef.current.add('maritime');
     }
@@ -401,7 +415,7 @@ export default function Dashboard() {
     if (activeLayers.radiation) {
       intervals.push(setInterval(() => fetchEndpoint('/api/radiation', d => ({ radiation: d.stations })), 300000)); // 5m
     }
-    if (activeLayers.maritime) {
+    if (activeLayers.maritime || activeLayers.ships) {
       intervals.push(setInterval(() => fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships })), 10000)); // 10s
     }
     if (activeLayers.air_raids) {
@@ -1027,7 +1041,7 @@ export default function Dashboard() {
       )}
 
       {/* ── BOTTOM CENTER (desktop) ── */}
-      {!isMobile && (
+      {!isMobile && hudVisible && (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 3, duration: 0.8 }} className="desktop-only absolute bottom-5 left-1/2 -translate-x-1/2 z-[200] pointer-events-auto">
           <div className="glass-panel px-5 py-2.5 flex items-center gap-0 osiris-glow relative overflow-hidden" style={{ borderImage: 'linear-gradient(90deg, rgba(212,175,55,0.05), rgba(212,175,55,0.2), rgba(212,175,55,0.05)) 1', borderImageSlice: 1, borderWidth: '1px', borderStyle: 'solid' }}>
 
@@ -1093,6 +1107,18 @@ export default function Dashboard() {
 
           </div>
         </motion.div>
+      )}
+
+      {/* ── HUD hide/show toggle (desktop) ── */}
+      {!isMobile && (
+        <button
+          onClick={toggleHud}
+          title={hudVisible ? 'Hide HUD' : 'Show HUD'}
+          className="desktop-only absolute bottom-1 left-1/2 -translate-x-1/2 z-[210] pointer-events-auto glass-panel px-2 py-0.5 flex items-center gap-1 text-[8px] font-mono tracking-wider text-[var(--text-muted)] hover:text-[var(--gold-primary)] transition-colors"
+        >
+          {hudVisible ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronUp className="w-2.5 h-2.5" />}
+          {hudVisible ? 'HIDE HUD' : 'SHOW HUD'}
+        </button>
       )}
 
       {/* ── Scale Bar (desktop) ── */}

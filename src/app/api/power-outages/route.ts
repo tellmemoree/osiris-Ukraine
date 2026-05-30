@@ -3,10 +3,12 @@ import { NextResponse } from 'next/server';
 import { stealthFetch } from '@/lib/stealthFetch';
 
 /**
- * OSIRIS — Ukrainian Power Outages API
- * Attempts live data from YASNO (Kyiv scheduled blackouts) and Ukrenergo,
- * falling back to a hardcoded baseline of known persistent outage patterns
- * across all Ukrainian oblasts.
+ * OSIRIS — Ukrainian Power Outages API (strictly live)
+ * Markers are emitted ONLY when a live source confirms active outages:
+ *   - YASNO public API  → Kyiv / Kyiv Oblast scheduled blackouts (when reachable)
+ *   - ua.energy scrape  → nationwide emergency disconnect notices
+ * When neither source reports active outages, the response is empty — the map
+ * shows nothing rather than stale "known pattern" data.
  */
 
 type OutageType = 'scheduled' | 'emergency' | 'unknown';
@@ -22,54 +24,40 @@ type OutageRecord = {
   source: string;
 };
 
-const BASELINE_OUTAGES: OutageRecord[] = [
-  { regionName: 'Donetska Oblast',        lat: 48.000, lng: 37.800, type: 'emergency',  severity: 'full',    schedule: 'Conflict zone — infrastructure destroyed', source: 'Known' },
-  { regionName: 'Luhanska Oblast',        lat: 48.566, lng: 39.300, type: 'emergency',  severity: 'full',    schedule: 'Occupied territory — grid severed',        source: 'Known' },
-  { regionName: 'Zaporizka Oblast',       lat: 47.838, lng: 35.139, type: 'emergency',  severity: 'partial', schedule: '8-12h/day',  source: 'Ukrenergo' },
-  { regionName: 'Khersonska Oblast',      lat: 46.635, lng: 32.601, type: 'emergency',  severity: 'partial', schedule: '8-12h/day',  source: 'Ukrenergo' },
-  { regionName: 'Kharkivska Oblast',      lat: 49.990, lng: 36.230, type: 'emergency',  severity: 'partial', schedule: '8-16h/day',  source: 'Ukrenergo' },
-  { regionName: 'Sumska Oblast',          lat: 50.910, lng: 34.800, type: 'emergency',  severity: 'partial', schedule: '6-12h/day',  source: 'Ukrenergo' },
-  { regionName: 'Mykolaivska Oblast',     lat: 46.975, lng: 31.994, type: 'emergency',  severity: 'partial', schedule: '6-10h/day',  source: 'Ukrenergo' },
-  { regionName: 'Dnipropetrovska Oblast', lat: 48.465, lng: 35.046, type: 'scheduled',  severity: 'partial', schedule: '4-8h/day',   source: 'DTEK' },
-  { regionName: 'Kyivska Oblast',         lat: 50.450, lng: 30.523, type: 'scheduled',  severity: 'partial', schedule: '4-8h/day',   source: 'YASNO' },
-  { regionName: 'Kyiv City',             lat: 50.452, lng: 30.518, type: 'scheduled',  severity: 'partial', schedule: '4-8h/day',   source: 'YASNO' },
-  { regionName: 'Odeska Oblast',          lat: 46.482, lng: 30.723, type: 'scheduled',  severity: 'partial', schedule: '4-8h/day',   source: 'Oblenergo' },
-  { regionName: 'Poltavska Oblast',       lat: 49.588, lng: 34.551, type: 'scheduled',  severity: 'partial', schedule: '4-6h/day',   source: 'Oblenergo' },
-  { regionName: 'Cherkaska Oblast',       lat: 49.445, lng: 32.060, type: 'scheduled',  severity: 'partial', schedule: '4-6h/day',   source: 'Oblenergo' },
-  { regionName: 'Zhytomyrska Oblast',     lat: 50.255, lng: 28.658, type: 'scheduled',  severity: 'partial', schedule: '4-6h/day',   source: 'Oblenergo' },
-  { regionName: 'Lvivska Oblast',         lat: 49.839, lng: 24.029, type: 'scheduled',  severity: 'partial', schedule: '2-4h/day',   source: 'Oblenergo' },
-  { regionName: 'Ivano-Frankivska Oblast',lat: 48.922, lng: 24.711, type: 'scheduled',  severity: 'partial', schedule: '2-4h/day',   source: 'Oblenergo' },
-  { regionName: 'Ternopilska Oblast',     lat: 49.553, lng: 25.594, type: 'scheduled',  severity: 'partial', schedule: '2-4h/day',   source: 'Oblenergo' },
-  { regionName: 'Vinnytska Oblast',       lat: 49.233, lng: 28.468, type: 'scheduled',  severity: 'partial', schedule: '2-4h/day',   source: 'Oblenergo' },
-  { regionName: 'Khmelnytska Oblast',     lat: 49.423, lng: 26.987, type: 'scheduled',  severity: 'partial', schedule: '2-4h/day',   source: 'Oblenergo' },
-  { regionName: 'Chernivtetska Oblast',   lat: 48.292, lng: 25.940, type: 'scheduled',  severity: 'partial', schedule: '2-4h/day',   source: 'Oblenergo' },
-  { regionName: 'Rivnenska Oblast',       lat: 50.620, lng: 26.251, type: 'scheduled',  severity: 'partial', schedule: '2-4h/day',   source: 'Oblenergo' },
-  { regionName: 'Volynska Oblast',        lat: 50.747, lng: 25.325, type: 'scheduled',  severity: 'partial', schedule: '2-4h/day',   source: 'Oblenergo' },
-  { regionName: 'Zakarpatska Oblast',     lat: 48.620, lng: 23.297, type: 'scheduled',  severity: 'partial', schedule: '1-2h/day',   source: 'Oblenergo' },
-  { regionName: 'Chernihivska Oblast',    lat: 51.498, lng: 31.285, type: 'emergency',  severity: 'partial', schedule: '6-10h/day',  source: 'Ukrenergo' },
-  { regionName: 'Kirovohradska Oblast',   lat: 48.508, lng: 32.262, type: 'scheduled',  severity: 'partial', schedule: '4-6h/day',   source: 'Oblenergo' },
-];
-
-function baselineResponse(): NextResponse {
-  return NextResponse.json(
-    {
-      outages: BASELINE_OUTAGES,
-      total: BASELINE_OUTAGES.length,
-      live_data: false,
-      timestamp: new Date().toISOString(),
-    },
-    {
-      headers: {
-        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
-      },
-    }
-  );
-}
+// Coordinate reference only — NOT always-on outage data. Used to place markers
+// when a live source confirms an outage for a given oblast.
+const OBLAST_COORDS: Record<string, [number, number]> = {
+  'Vinnytska Oblast': [49.233, 28.468],
+  'Volynska Oblast': [50.747, 25.325],
+  'Dnipropetrovska Oblast': [48.465, 35.046],
+  'Donetska Oblast': [48.000, 37.800],
+  'Zhytomyrska Oblast': [50.255, 28.658],
+  'Zakarpatska Oblast': [48.620, 23.297],
+  'Zaporizka Oblast': [47.838, 35.139],
+  'Ivano-Frankivska Oblast': [48.922, 24.711],
+  'Kyivska Oblast': [50.450, 30.523],
+  'Kyiv City': [50.452, 30.518],
+  'Kirovohradska Oblast': [48.508, 32.262],
+  'Luhanska Oblast': [48.566, 39.300],
+  'Lvivska Oblast': [49.839, 24.029],
+  'Mykolaivska Oblast': [46.975, 31.994],
+  'Odeska Oblast': [46.482, 30.723],
+  'Poltavska Oblast': [49.588, 34.551],
+  'Rivnenska Oblast': [50.620, 26.251],
+  'Sumska Oblast': [50.910, 34.800],
+  'Ternopilska Oblast': [49.553, 25.594],
+  'Kharkivska Oblast': [49.990, 36.230],
+  'Khersonska Oblast': [46.635, 32.601],
+  'Khmelnytska Oblast': [49.423, 26.987],
+  'Cherkaska Oblast': [49.445, 32.060],
+  'Chernivtetska Oblast': [48.292, 25.940],
+  'Chernihivska Oblast': [51.498, 31.285],
+};
 
 /**
- * Attempt to enrich the Kyiv / Kyiv Oblast baseline entries with live
- * schedule data from the YASNO public API.
- * Returns null if the API is unavailable or returns unexpected data.
+ * Attempt to read live scheduled-blackout data from the YASNO public API.
+ * Returns Kyiv City / Kyiv Oblast records on a successful 200, or null if the
+ * API is unavailable (e.g. 503) — in which case no YASNO markers are emitted.
  */
 async function fetchYasno(): Promise<OutageRecord[] | null> {
   try {
@@ -83,14 +71,12 @@ async function fetchYasno(): Promise<OutageRecord[] | null> {
       return null;
     }
 
-    // The YASNO payload is a large schedule object; we treat a successful
-    // 200 response as confirmation that scheduled outages are active and
-    // return enriched records for Kyiv City and Kyivska Oblast.
-    // Detailed group-level parsing would require a separate integration.
+    // A successful 200 confirms scheduled blackouts are being published.
+    // Deep group-level parsing would require a separate integration.
     const _data: unknown = await res.json();
-    void _data; // payload available for future deep-parsing
+    void _data;
 
-    const kyivEntries: OutageRecord[] = [
+    return [
       {
         regionName: 'Kyiv City',
         lat: 50.452,
@@ -110,8 +96,6 @@ async function fetchYasno(): Promise<OutageRecord[] | null> {
         source: 'YASNO (live)',
       },
     ];
-
-    return kyivEntries;
   } catch (err) {
     console.error('[OSIRIS] YASNO fetch error:', err);
     return null;
@@ -120,7 +104,7 @@ async function fetchYasno(): Promise<OutageRecord[] | null> {
 
 /**
  * Scrape ua.energy for emergency disconnect notices.
- * Returns true if the page contains Ukrainian-language emergency outage text.
+ * Returns true only if the page currently contains emergency outage text.
  */
 async function checkUkrenergoEmergency(): Promise<boolean> {
   try {
@@ -133,71 +117,79 @@ async function checkUkrenergoEmergency(): Promise<boolean> {
       return false;
     }
 
-    const html = await res.text();
+    const html = (await res.text()).toLowerCase();
     const emergencyPatterns = [
       'аварійне відключення',
       'аварійні відключення',
       'аварійного відключення',
       'екстрене відключення',
+      'екстрені відключення',
     ];
 
-    return emergencyPatterns.some((pattern) =>
-      html.toLowerCase().includes(pattern.toLowerCase())
-    );
+    return emergencyPatterns.some((pattern) => html.includes(pattern));
   } catch (err) {
     console.error('[OSIRIS] ua.energy scrape error:', err);
     return false;
   }
 }
 
+function respond(outages: OutageRecord[], liveData: boolean): NextResponse {
+  return NextResponse.json(
+    {
+      outages,
+      total: outages.length,
+      live_data: liveData,
+      timestamp: new Date().toISOString(),
+    },
+    {
+      headers: {
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+      },
+    }
+  );
+}
+
 export async function GET() {
   try {
-    // Run both live sources in parallel to minimise latency.
     const [yasnoRecords, ukrenergoEmergency] = await Promise.all([
       fetchYasno(),
       checkUkrenergoEmergency(),
     ]);
 
-    const liveData = yasnoRecords !== null;
+    const outages: OutageRecord[] = [];
+    const covered = new Set<string>();
 
-    if (!liveData) {
-      // Both live sources failed — return full baseline.
-      return baselineResponse();
+    // 1. YASNO scheduled blackouts (Kyiv) when the API is live.
+    if (yasnoRecords) {
+      for (const r of yasnoRecords) {
+        outages.push(r);
+        covered.add(r.regionName);
+      }
     }
 
-    // Merge: replace Kyiv entries from YASNO; keep all other baseline entries.
-    const yasnoRegions = new Set(yasnoRecords.map((r) => r.regionName));
-    const merged: OutageRecord[] = [
-      ...BASELINE_OUTAGES.filter((r) => !yasnoRegions.has(r.regionName)),
-      ...yasnoRecords,
-    ];
-
-    // If ua.energy signals a national emergency, up-classify remaining
-    // scheduled entries to emergency type where they are not already.
+    // 2. ua.energy emergency declaration → nationwide emergency markers.
+    // Ukrenergo emergency shutdowns are grid-wide, so emit one emergency
+    // marker per oblast not already covered by a more specific source.
     if (ukrenergoEmergency) {
-      for (const record of merged) {
-        if (record.type === 'scheduled') {
-          record.type = 'emergency';
-        }
+      for (const [regionName, [lat, lng]] of Object.entries(OBLAST_COORDS)) {
+        if (covered.has(regionName)) continue;
+        outages.push({
+          regionName,
+          lat,
+          lng,
+          type: 'emergency',
+          severity: 'partial',
+          schedule: 'Emergency disconnections in effect (Ukrenergo)',
+          source: 'Ukrenergo (live)',
+        });
       }
     }
 
-    return NextResponse.json(
-      {
-        outages: merged,
-        total: merged.length,
-        live_data: true,
-        timestamp: new Date().toISOString(),
-      },
-      {
-        headers: {
-          'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
-        },
-      }
-    );
+    const liveData = yasnoRecords !== null || ukrenergoEmergency;
+    return respond(outages, liveData);
   } catch (error) {
     console.error('[OSIRIS] Power outages fetch error:', error);
-    // Never return 500 — fall back to baseline.
-    return baselineResponse();
+    // Never return 500 — on total failure report no active outages.
+    return respond([], false);
   }
 }

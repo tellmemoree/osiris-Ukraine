@@ -40,7 +40,8 @@ const LAYER_GROUPS = [
     icon: Ship,
     color: '#00BCD4',
     layers: [
-      { key: 'maritime', label: 'Maritime / Naval', icon: Ship, color: '#00BCD4', dataKey: 'maritime_ships,maritime_ports,maritime_chokepoints' },
+      { key: 'maritime', label: 'Maritime / Naval', icon: Anchor, color: '#00BCD4', dataKey: 'maritime_ports,maritime_chokepoints' },
+      { key: 'ships', label: 'Live Ships (AIS)', icon: Ship, color: '#00BCD4', dataKey: 'maritime_ships' },
       { key: 'satellites', label: 'Satellites', icon: Satellite, color: '#D4AF37', dataKey: 'satellites' },
     ],
   },

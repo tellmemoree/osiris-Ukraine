@@ -149,6 +149,9 @@ function connectAisStream() {
         [[1.0, 103.0], [3.0, 104.5]],
         // Taiwan Strait
         [[22.0, 118.0], [26.0, 121.0]],
+        // Black Sea + Sea of Azov + Bosphorus mouth (Ukraine theatre: Odesa,
+        // Crimea, Kerch Strait, grain corridor, shadow-fleet tankers)
+        [[41.0, 27.0], [47.5, 42.0]],
         // Rotterdam / English Channel
         [[50.0, 0.0], [53.0, 5.0]],
         // US West Coast (LA/LB)
