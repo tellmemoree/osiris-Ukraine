@@ -50,6 +50,13 @@ const PORTS = [
   { name: 'Kharg Island', country: 'IR', lat: 29.24, lng: 50.33, type: 'energy', volume: '2.0M bpd' },
   { name: 'Primorsk', country: 'RU', lat: 60.35, lng: 28.70, type: 'energy', volume: '1.6M bpd' },
 
+  // ── Ukraine / Black Sea (grain corridor + conflict zone) ──
+  { name: 'Reni', country: 'UA', lat: 45.450, lng: 28.270, type: 'port', volume: 'Grain corridor' },
+  { name: 'Izmail', country: 'UA', lat: 45.349, lng: 28.838, type: 'port', volume: 'Grain corridor' },
+  { name: 'Kiliya', country: 'UA', lat: 45.448, lng: 29.268, type: 'port', volume: 'Grain corridor' },
+  { name: 'Odesa', country: 'UA', lat: 46.482, lng: 30.723, type: 'port', volume: 'Strategic Black Sea' },
+  { name: 'Chornomorsk', country: 'UA', lat: 46.302, lng: 30.657, type: 'port', volume: 'Grain export' },
+
   // ── Major Naval Bases ──
   { name: 'Norfolk Naval Station', country: 'US', lat: 36.95, lng: -76.33, type: 'naval', fleet: 'US Atlantic Fleet' },
   { name: 'San Diego Naval Base', country: 'US', lat: 32.69, lng: -117.15, type: 'naval', fleet: 'US Pacific Fleet' },
@@ -64,6 +71,7 @@ const PORTS = [
   { name: 'Changi Naval Base', country: 'SG', lat: 1.33, lng: 104.01, type: 'naval', fleet: 'Republic of Singapore Navy' },
   { name: 'Visakhapatnam', country: 'IN', lat: 17.69, lng: 83.30, type: 'naval', fleet: 'Indian Navy Eastern Command' },
   { name: 'Mumbai Naval', country: 'IN', lat: 18.93, lng: 72.84, type: 'naval', fleet: 'Indian Navy Western Command' },
+  { name: 'Novorossiysk (Black Sea Fleet)', country: 'RU', lat: 44.724, lng: 37.769, type: 'naval', fleet: 'Russian Black Sea Fleet (relocated from Sevastopol)' },
 ];
 
 const CHOKEPOINTS = [
@@ -77,7 +85,18 @@ const CHOKEPOINTS = [
   { name: 'Cape of Good Hope', lat: -34.36, lng: 18.47, traffic: 'Alt route Suez', risk: 'LOW' },
   { name: 'Taiwan Strait', lat: 24.00, lng: 119.00, traffic: '88% large ships', risk: 'ELEVATED' },
   { name: 'Lombok Strait', lat: -8.47, lng: 115.72, traffic: 'Alt Malacca', risk: 'LOW' },
+  { name: 'Kerch Strait', lat: 45.354, lng: 36.470, traffic: 'Black Sea–Azov transit', risk: 'CRITICAL' },
+  // Note: Bosphorus (Istanbul) skipped — already covered by 'Turkish Straits' entry above (same coordinates).
 ];
+
+// --- Shadow Fleet IMO Watchlist (KSI/CREA public lists) ---
+// IMO numbers of known sanctioned / dark-fleet vessels.
+const SHADOW_FLEET_IMOS = new Set([
+  9246234, 9274848, 9167667, 9251899, 9389650, 9374910, 9256887, 9246258,
+  9178523, 9210220, 9381867, 9193215, 9230670, 9285449, 9285451, 9302872,
+  9344720, 9368292, 9400801, 9412205, 9436222, 9469688, 9502518, 9543009,
+  9596068, 9629948, 9648701, 9668519, 9699030, 9704043, 9727785, 9747416,
+]);
 
 // --- Global AIS Stream Client (In-Memory Cache) ---
 // Note: In a true serverless environment, this state would reset per invocation.
@@ -179,6 +198,10 @@ function connectAisStream() {
         existing.name = staticData.Name ? staticData.Name.trim() : existing.name;
         existing.destination = staticData.Destination ? staticData.Destination.trim() : existing.destination;
         existing.type = getOsirisShipType(staticData.Type);
+        // Cross-reference against shadow fleet watchlist (IMO available in ShipStaticData)
+        if (staticData.ImoNumber && SHADOW_FLEET_IMOS.has(staticData.ImoNumber)) {
+          existing.shadow_fleet = true;
+        }
       }
 
       // Only store if we have coordinates
@@ -260,6 +283,7 @@ async function fetchVesselApiFallback() {
     }
 
     // Merge into global cache
+    // TODO: cross-reference AIS vessel.mmsi against SHADOW_FLEET_IMOS once satellite feed provides IMO numbers
     for (const ship of ghostShips) {
       shipsCache.set(ship.mmsi, {
         id: ship.mmsi, mmsi: ship.mmsi, lat: ship.lat, lng: ship.lng, speed: ship.speed,

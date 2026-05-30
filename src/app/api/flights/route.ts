@@ -54,6 +54,26 @@ const MILITARY_INDICATORS = new Set([
 
 const AIRLINE_CODE_RE = /^([A-Z]{3})\d/;
 
+// Russian military callsign/registration patterns for KAB bomb-risk detection
+function isRussianMilitary(flight: any): boolean {
+  const callsign = (flight.flight || '').trim().toUpperCase();
+  const reg = (flight.r || '').trim().toUpperCase();
+  return (
+    callsign.startsWith('RFF') ||
+    callsign.startsWith('RRF') ||
+    callsign.startsWith('RU') ||
+    callsign.startsWith('CRIMEA') ||
+    callsign.startsWith('BARS') ||
+    reg.startsWith('RF-') ||
+    reg.startsWith('RA-')
+  );
+}
+
+// Returns true if a position is within the Ukraine border threat bounding box
+function nearUkraineBorder(lat: number, lng: number): boolean {
+  return lat >= 44 && lat <= 52 && lng >= 22 && lng <= 42;
+}
+
 async function fetchRegion(region: typeof REGIONS[0]): Promise<any[]> {
   try {
     const url = `https://api.adsb.lol/v2/lat/${region.lat}/lon/${region.lon}/dist/${region.dist}`;
@@ -104,10 +124,13 @@ function classifyFlight(f: any) {
     category = 'private';
   }
 
+  const classifiedLat = Math.round(lat * 100000) / 100000;
+  const classifiedLng = Math.round(lon * 100000) / 100000;
+
   return {
     callsign,
-    lat: Math.round(lat * 100000) / 100000,
-    lng: Math.round(lon * 100000) / 100000,
+    lat: classifiedLat,
+    lng: classifiedLng,
     alt: Math.round(altMeters),
     heading: Math.round(heading),
     speed_knots: speedKnots,
@@ -121,6 +144,7 @@ function classifyFlight(f: any) {
     grounded: isGrounded,
     nac_p: f.nac_p,
     type: 'flight',
+    bomb_risk: isRussianMilitary(f) && nearUkraineBorder(classifiedLat, classifiedLng) && typeof altRaw === 'number' && altRaw > 19685 && altRaw < 45931,
   };
 }
 

@@ -12,7 +12,16 @@ export const dynamic = 'force-dynamic';
 const RSS_FEEDS = [
   { url: 'https://feeds.bbci.co.uk/news/world/rss.xml', source: 'BBC World' },
   { url: 'https://www.aljazeera.com/xml/rss/all.xml', source: 'Al Jazeera' },
-  { url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', source: 'NYT World' }
+  { url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', source: 'NYT World' },
+  { url: 'https://kyivindependent.com/feed/', source: 'Kyiv Independent' },
+  { url: 'https://www.ukrinform.ua/rss/block-lastnews', source: 'Ukrinform' },
+  { url: 'https://www.ukrinform.ua/rss/block-war', source: 'Ukrinform War' },
+  { url: 'https://www.unian.info/rss/war', source: 'UNIAN War' },
+  { url: 'https://www.pravda.com.ua/eng/rss/', source: 'Ukrainska Pravda' },
+  { url: 'https://euromaidanpress.com/feed/', source: 'Euromaidan Press' },
+  { url: 'https://www.understandingwar.org/rss.xml', source: 'ISW' },
+  { url: 'https://meduza.io/rss/all', source: 'Meduza' },
+  { url: 'https://www.rferl.org/api/z_yqpiiyu-qxq', source: 'RFE/RL' },
 ];
 
 // Lightweight geo-dictionary for mapping news keywords to coordinates
@@ -49,10 +58,31 @@ const GEO_DICT: Record<string, [number, number]> = {
   'france': [2.2137, 46.2276],
   'germany': [10.4515, 51.1657],
   'uk': [-3.4359, 55.3781],
-  'mexico': [-102.5528, 23.6345]
+  'mexico': [-102.5528, 23.6345],
+  // Frontline cities
+  'bakhmut': [38.000, 48.596], 'avdiivka': [37.750, 47.967], 'toretsk': [37.820, 48.415],
+  'chasiv yar': [37.859, 48.577], 'kupiansk': [37.617, 49.709], 'vovchansk': [36.940, 50.291],
+  'lyman': [37.802, 48.984], 'kostiantynivka': [37.700, 48.528],
+  'pokrovsk': [37.176, 48.279], 'kurakhove': [37.272, 47.988],
+  'orikhiv': [35.784, 47.568], 'robotyne': [35.843, 47.455],
+  // Occupied/strategic
+  'mariupol': [37.549, 47.097], 'melitopol': [35.363, 46.847],
+  'berdyansk': [36.790, 46.756], 'energodar': [34.655, 47.500],
+  'kramatorsk': [37.556, 48.731], 'sloviansk': [37.616, 48.865],
+  'kherson': [32.601, 46.635], 'zaporizhzhia': [35.139, 47.838],
+  'sumy': [34.800, 50.910], 'mykolaiv': [31.994, 46.975],
+  'odesa': [30.723, 46.482], 'dnipro': [35.046, 48.465],
+  'kharkiv': [36.230, 49.990], 'poltava': [34.551, 49.588],
+  // Russian border
+  'belgorod': [36.587, 50.595], 'kursk': [36.193, 51.730],
+  'bryansk': [34.364, 53.243], 'voronezh': [39.184, 51.672],
+  // Crimea
+  'crimea': [34.102, 44.952], 'sevastopol': [33.522, 44.587], 'kerch': [36.470, 45.354],
+  // Moldova/Belarus
+  'chisinau': [28.864, 47.010], 'tiraspol': [29.643, 46.843], 'minsk': [27.561, 53.904],
 };
 
-const CONFLICT_KEYWORDS = ['attack', 'strike', 'missile', 'drone', 'war', 'troops', 'military', 'protest', 'riot', 'police', 'clash', 'bomb', 'killed', 'forces'];
+const CONFLICT_KEYWORDS = ['attack', 'strike', 'missile', 'drone', 'war', 'troops', 'military', 'protest', 'riot', 'police', 'clash', 'bomb', 'killed', 'forces', 'mobilization', 'counterattack', 'offensive', 'ceasefire', 'shelling', 'artillery', 'occupied', 'liberated', 'incursion', 'bridgehead', 'shahed', 'himars', 'kab', 'glide bomb'];
 
 export async function GET() {
   try {
