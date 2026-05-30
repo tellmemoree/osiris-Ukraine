@@ -137,6 +137,8 @@ export default function Dashboard() {
     gps_jamming: false,
     day_night: true,
     sdk_stream: true,
+    air_raids: false,
+    power_outages: false,
   });
   const [liveFeedUrl, setLiveFeedUrl] = useState<string | null>(null);
   const [liveFeedName, setLiveFeedName] = useState('');
@@ -373,6 +375,16 @@ export default function Dashboard() {
       fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events }));
       layerFetchedRef.current.add('gdelt');
     }
+    // Air Raid Alerts
+    if (activeLayers.air_raids && !layerFetchedRef.current.has('air_raids')) {
+      fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts }));
+      layerFetchedRef.current.add('air_raids');
+    }
+    // Power Outages
+    if (activeLayers.power_outages && !layerFetchedRef.current.has('power_outages')) {
+      fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages }));
+      layerFetchedRef.current.add('power_outages');
+    }
 
   }, [activeLayers]);
 
@@ -391,6 +403,12 @@ export default function Dashboard() {
     }
     if (activeLayers.maritime) {
       intervals.push(setInterval(() => fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships })), 10000)); // 10s
+    }
+    if (activeLayers.air_raids) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })), 60000)); // 1 min
+    }
+    if (activeLayers.power_outages) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })), 300000)); // 5 min
     }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);

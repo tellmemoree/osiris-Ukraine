@@ -109,7 +109,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-cctv', '#39FF14', 10);
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -168,6 +168,37 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,2, 5,4, 10,8],
         'circle-color': '#FF6B00', 'circle-opacity': 0.5, 'circle-blur': 0.5,
       }});
+
+      // Air Raid Alerts — pulsing red (Ukraine-specific alerts)
+      map.addLayer({ id: 'raid-glow', type: 'circle', source: 'air-raid-alerts', paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,12, 5,20, 10,30],
+        'circle-color': '#FF1744', 'circle-opacity': 0.12, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'raid-dots', type: 'circle', source: 'air-raid-alerts', paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,5, 5,8, 10,12],
+        'circle-color': '#FF1744', 'circle-opacity': 0.9,
+        'circle-stroke-width': 2, 'circle-stroke-color': '#FF1744', 'circle-stroke-opacity': 0.5,
+      }});
+      map.addLayer({ id: 'raid-label', type: 'symbol', source: 'air-raid-alerts', minzoom: 4, layout: {
+        'text-field': ['get','regionName'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.8], 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#FF1744', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // Power Outages — amber/yellow grid-down indicators
+      map.addLayer({ id: 'outage-glow', type: 'circle', source: 'power-outages', paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,10, 5,16, 10,24],
+        'circle-color': '#FFD500', 'circle-opacity': 0.1, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'outage-dots', type: 'circle', source: 'power-outages', paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,4, 5,7, 10,10],
+        'circle-color': ['match', ['get','type'], 'emergency','#FF6B00', '#FFD500'],
+        'circle-opacity': 0.85,
+        'circle-stroke-width': 1.5, 'circle-stroke-color': '#FFD500', 'circle-stroke-opacity': 0.4,
+      }});
+      map.addLayer({ id: 'outage-label', type: 'symbol', source: 'power-outages', minzoom: 4, layout: {
+        'text-field': ['get','regionName'], 'text-size': 8, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.6], 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#FFD500', 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
       // CCTV — outer glow ring
       map.addLayer({ id: 'cctv-glow', type: 'circle', source: 'cctv', paint: {
@@ -571,6 +602,41 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
+    // ── Air Raid Alerts ──
+    map.on('click', 'raid-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      popup(coords, `<div style="${pStyle}border:1px solid rgba(255,23,68,0.4);">
+        <div style="color:#FF1744;font-size:13px;font-weight:700;margin-bottom:6px;">🚨 AIR RAID ALERT</div>
+        <div style="font-size:10px;color:#E8E6E0;margin-bottom:8px;">${p.regionName||'Unknown region'}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
+          <div><span style="color:#5C5A54;">TYPE</span><br/><span style="color:#FF1744;">${p.alertType||'AIR'}</span></div>
+          <div><span style="color:#5C5A54;">SINCE</span><br/><span style="color:#E8E6E0;">${p.startedAt ? new Date(p.startedAt).toUTCString().slice(17,22)+' UTC' : '—'}</span></div>
+        </div>
+        <a href="https://alerts.in.ua" target="_blank" style="${linkStyle}color:#FF1744;border:1px solid rgba(255,23,68,0.4);background:rgba(255,23,68,0.1);">🔗 ALERTS.IN.UA</a>
+      </div>`);
+    });
+
+    // ── Power Outages ──
+    map.on('click', 'outage-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      const typeColor = p.type === 'emergency' ? '#FF6B00' : '#FFD500';
+      popup(coords, `<div style="${pStyle}border:1px solid rgba(255,213,0,0.3);">
+        <div style="color:${typeColor};font-size:13px;font-weight:700;margin-bottom:6px;">⚡ POWER OUTAGE</div>
+        <div style="font-size:10px;color:#E8E6E0;margin-bottom:8px;">${p.regionName||'Unknown region'}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
+          <div><span style="color:#5C5A54;">TYPE</span><br/><span style="color:${typeColor};">${(p.type||'unknown').toUpperCase()}</span></div>
+          <div><span style="color:#5C5A54;">SEVERITY</span><br/><span style="color:#E8E6E0;">${(p.severity||'—').toUpperCase()}</span></div>
+          <div><span style="color:#5C5A54;">SCHEDULE</span><br/><span style="color:#E8E6E0;">${p.schedule||'—'}</span></div>
+          <div><span style="color:#5C5A54;">SOURCE</span><br/><span style="color:#E8E6E0;">${p.source||'—'}</span></div>
+        </div>
+        <a href="https://ua.energy" target="_blank" style="${linkStyle}color:#FFD500;border:1px solid rgba(255,213,0,0.4);background:rgba(255,213,0,0.1);">🔗 UKRENERGO</a>
+      </div>`);
+    });
+
     // ── GDELT Conflicts (with source article) ──
     map.on('click', 'gdelt-dots', e => {
       if (!e.features?.length) return;
@@ -638,7 +704,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Generic hover for clickables ──
-    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-air','sdk-air-glow','sdk-intel','sdk-intel-glow'].forEach(layer => {
+    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-air','sdk-air-glow','sdk-intel','sdk-intel-glow','raid-dots','outage-dots'].forEach(layer => {
       map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
     });
@@ -1225,6 +1291,26 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
+    setGeo('air-raid-alerts', activeLayers.air_raids && data.air_raids
+      ? data.air_raids.filter((a: any) => a.lat && a.lng).map((a: any) => ({
+          type: 'Feature', geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
+          properties: { regionName: a.regionName, alertType: a.alertType, startedAt: a.startedAt, regionId: a.regionId },
+        }))
+      : []);
+  }, [mapReady, data.air_raids, activeLayers.air_raids, setGeo]);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    setGeo('power-outages', activeLayers.power_outages && data.power_outages
+      ? data.power_outages.filter((o: any) => o.lat && o.lng).map((o: any) => ({
+          type: 'Feature', geometry: { type: 'Point', coordinates: [o.lng, o.lat] },
+          properties: { regionName: o.regionName, type: o.type, severity: o.severity, schedule: o.schedule, source: o.source },
+        }))
+      : []);
+  }, [mapReady, data.power_outages, activeLayers.power_outages, setGeo]);
+
+  useEffect(() => {
+    if (!mapReady) return;
     setGeo('live-news', activeLayers.live_news && data.live_feeds ? data.live_feeds.map((f: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [f.lng, f.lat] }, properties: { name: f.name, city: f.city, country: f.country, url: f.url, category: f.category, embed_allowed: f.embed_allowed !== false } })) : []);
   }, [mapReady, data.live_feeds, activeLayers.live_news, setGeo]);
 
@@ -1295,6 +1381,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['sdk-sea','sdk-air','sdk-intel'], activeLayers.sdk_stream !== false);
     // Sweep layers always visible when data is present (controlled by useEffect)
     setVis(['sweep-connections','sweep-pulse-ring','sweep-device-glow','sweep-device-dots','sweep-device-labels'], true);
+    setVis(['raid-glow','raid-dots','raid-label'], activeLayers.air_raids);
+    setVis(['outage-glow','outage-dots','outage-label'], activeLayers.power_outages);
   }, [mapReady, activeLayers, setVis]);
 
   // IP Sweep visualization
