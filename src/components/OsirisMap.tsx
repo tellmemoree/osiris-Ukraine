@@ -169,6 +169,30 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'circle-color': '#FF6B00', 'circle-opacity': 0.5, 'circle-blur': 0.5,
       }});
 
+      // Ukraine admin boundary fill sources (static assets).
+      // Filled red when air-raid alerts are active — oblast OR district level.
+      map.addSource('ukraine-oblast-fill', { type: 'geojson', data: '/ukraine-oblasts.geojson' });
+      map.addSource('ukraine-district-fill', { type: 'geojson', data: '/ukraine-districts.geojson' });
+
+      // Oblast fill — shown when level==='oblast' alert; district fill when level==='district'.
+      // Both layers sit below the dot layers so dots render on top.
+      map.addLayer({ id: 'raid-oblast-fill', type: 'fill', source: 'ukraine-oblast-fill',
+        filter: ['in', ['get', 'name_en'], ['literal', []]],
+        paint: { 'fill-color': '#FF1744', 'fill-opacity': 0.22 }
+      });
+      map.addLayer({ id: 'raid-oblast-outline', type: 'line', source: 'ukraine-oblast-fill',
+        filter: ['in', ['get', 'name_en'], ['literal', []]],
+        paint: { 'line-color': '#FF1744', 'line-width': 1.5, 'line-opacity': 0.55 }
+      });
+      map.addLayer({ id: 'raid-district-fill', type: 'fill', source: 'ukraine-district-fill',
+        filter: ['in', ['get', 'name_ua'], ['literal', []]],
+        paint: { 'fill-color': '#FF1744', 'fill-opacity': 0.28 }
+      });
+      map.addLayer({ id: 'raid-district-outline', type: 'line', source: 'ukraine-district-fill',
+        filter: ['in', ['get', 'name_ua'], ['literal', []]],
+        paint: { 'line-color': '#FF1744', 'line-width': 1, 'line-opacity': 0.6 }
+      });
+
       // Air Raid Alerts — pulsing red (Ukraine-specific alerts).
       // Oblast-wide alerts render larger; raion (district) alerts render tighter.
       map.addLayer({ id: 'raid-glow', type: 'circle', source: 'air-raid-alerts', paint: {
@@ -500,6 +524,15 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-field': ['get','name'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 1.4], 'text-allow-overlap': false,
       }, paint: { 'text-color': '#E040FB', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // Hide disputed boundary lines from the Carto base style (e.g. dashed
+      // line drawn between Crimea and mainland Ukraine). Regex catches any
+      // variant name the CDN may use without hard-coding layer IDs.
+      map.getStyle().layers.forEach((l: any) => {
+        if (/disputed/i.test(l.id)) {
+          try { map.setLayoutProperty(l.id, 'visibility', 'none'); } catch {}
+        }
+      });
 
       setMapReady(true);
     });
@@ -1329,12 +1362,31 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
-    setGeo('air-raid-alerts', activeLayers.air_raids && data.air_raids
-      ? data.air_raids.filter((a: any) => a.lat && a.lng).map((a: any) => ({
-          type: 'Feature', geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
-          properties: { regionName: a.regionName, alertType: a.alertType, startedAt: a.startedAt, regionId: a.regionId, level: a.level, oblast: a.oblast },
-        }))
-      : []);
+    const alerts = activeLayers.air_raids && data.air_raids ? data.air_raids : [];
+    const dotFeatures = alerts.filter((a: any) => a.lat && a.lng).map((a: any) => ({
+      type: 'Feature', geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
+      properties: { regionName: a.regionName, alertType: a.alertType, startedAt: a.startedAt, regionId: a.regionId, level: a.level, oblast: a.oblast },
+    }));
+    setGeo('air-raid-alerts', dotFeatures);
+
+    // Update polygon fills: oblast alerts fill the oblast polygon;
+    // district alerts fill only the specific rayon — NOT the parent oblast.
+    // Normalize apostrophes: vadimklimenko API may return curly ' (U+2019),
+    // GeoJSON was built with straight ' (U+0027).
+    const normalizeApos = (s: string) => s.replace(/['‘’ʼ]/g, "'");
+    const map = mapRef.current;
+    if (map?.getLayer('raid-oblast-fill')) {
+      const oblastNames = activeLayers.air_raids
+        ? alerts.filter((a: any) => a.level === 'oblast').map((a: any) => normalizeApos(a.regionName as string)).filter(Boolean)
+        : [];
+      const districtNames = activeLayers.air_raids
+        ? alerts.filter((a: any) => a.level === 'district').map((a: any) => normalizeApos(a.regionName as string)).filter(Boolean)
+        : [];
+      map.setFilter('raid-oblast-fill',    ['in', ['get', 'name_en'], ['literal', oblastNames]]);
+      map.setFilter('raid-oblast-outline', ['in', ['get', 'name_en'], ['literal', oblastNames]]);
+      map.setFilter('raid-district-fill',    ['in', ['get', 'name_ua'], ['literal', districtNames]]);
+      map.setFilter('raid-district-outline', ['in', ['get', 'name_ua'], ['literal', districtNames]]);
+    }
   }, [mapReady, data.air_raids, activeLayers.air_raids, setGeo]);
 
   useEffect(() => {
@@ -1420,7 +1472,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['sdk-sea','sdk-air','sdk-intel'], activeLayers.sdk_stream !== false);
     // Sweep layers always visible when data is present (controlled by useEffect)
     setVis(['sweep-connections','sweep-pulse-ring','sweep-device-glow','sweep-device-dots','sweep-device-labels'], true);
-    setVis(['raid-glow','raid-dots','raid-label'], activeLayers.air_raids);
+    setVis(['raid-oblast-fill','raid-oblast-outline','raid-district-fill','raid-district-outline','raid-glow','raid-dots','raid-label'], activeLayers.air_raids);
     setVis(['outage-glow','outage-dots','outage-label'], activeLayers.power_outages);
   }, [mapReady, activeLayers, setVis]);
 

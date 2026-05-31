@@ -24,7 +24,7 @@ const RISK_COLORS: Record<string, string> = {
 export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsProps) {
   const [expanded, setExpanded] = useState(true);
   const [maximized, setMaximized] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'news' | 'quakes' | 'feeds'>('all');
+  const [filter, setFilter] = useState<'all' | 'ukraine' | 'news' | 'quakes' | 'feeds'>('all');
 
   // Built-in live feeds — verified video IDs (synced with /api/live-news)
   const BUILTIN_FEEDS = [
@@ -124,9 +124,10 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     });
   });
 
-  const filtered = filter === 'all' ? alerts :
-    filter === 'news' ? alerts.filter(a => a.type === 'news') :
-    filter === 'quakes' ? alerts.filter(a => a.type === 'quake') :
+  const filtered = filter === 'all'     ? alerts :
+    filter === 'ukraine' ? alerts.filter(a => a.type === 'news' && (a.source || '').startsWith('t.me/')) :
+    filter === 'news'    ? alerts.filter(a => a.type === 'news') :
+    filter === 'quakes'  ? alerts.filter(a => a.type === 'quake') :
     alerts.filter(a => a.type === 'feed');
 
   const getIcon = (type: string) => {
@@ -152,8 +153,8 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
         <div className="flex items-center gap-2">
           <Radio className="w-3.5 h-3.5 text-[#FF4081]" />
           <span className="hud-text text-[10px] text-[var(--text-primary)]">LIVE ALERTS</span>
-          <span className="gotham-tag gotham-tag--high" style={{ fontSize: '7px', padding: '1px 5px' }}>{alerts.filter(a => a.type === 'news' || a.type === 'quake').length}</span>
-          <span className="gotham-tag gotham-tag--info" style={{ fontSize: '7px', padding: '1px 4px' }}>{BUILTIN_FEEDS.length} FEEDS</span>
+          <span className="gotham-tag gotham-tag--critical" style={{ fontSize: '7px', padding: '1px 5px' }}>{alerts.filter(a => a.type === 'news' && (a.source || '').startsWith('t.me/')).length} UA</span>
+          <span className="gotham-tag gotham-tag--info" style={{ fontSize: '7px', padding: '1px 4px' }}>{alerts.filter(a => a.type === 'news' && !(a.source || '').startsWith('t.me/')).length} WORLD</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-[#FF4081] animate-osiris-pulse" />
@@ -175,13 +176,14 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
           >
             {/* Filters */}
             <div className="flex gap-1 mb-2">
-              {(['all', 'news', 'quakes', 'feeds'] as const).map(f => (
+              {(['all', 'ukraine', 'news', 'quakes', 'feeds'] as const).map(f => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
                   className={`px-2 py-1 rounded text-[9px] font-mono tracking-wider transition-all ${filter === f ? 'bg-[var(--hover-accent)] text-[var(--text-primary)] border border-[var(--border-primary)]' : 'text-[var(--text-muted)] border border-transparent hover:text-[var(--text-secondary)]'}`}
+                  style={f === 'ukraine' && filter === f ? { color: '#FF1744', borderColor: 'rgba(255,23,68,0.5)' } : undefined}
                 >
-                  {f.toUpperCase()}
+                  {f === 'ukraine' ? '🇺🇦 UA WAR' : f.toUpperCase()}
                 </button>
               ))}
             </div>
