@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -122,6 +122,8 @@ export default function Dashboard() {
     jets: false,
     military: false,
     maritime: true,
+    ships: true,
+    shadow_fleet: false,
     satellites: false,
     balloons: false,
     cctv: true,
@@ -137,10 +139,25 @@ export default function Dashboard() {
     gps_jamming: false,
     day_night: true,
     sdk_stream: true,
+    air_raids: false,
+    power_outages: false,
   });
   const [liveFeedUrl, setLiveFeedUrl] = useState<string | null>(null);
   const [liveFeedName, setLiveFeedName] = useState('');
   const [liveFeedEmbedAllowed, setLiveFeedEmbedAllowed] = useState(true);
+  // Bottom-center HUD visibility (user-dismissible; persisted across reloads)
+  const [hudVisible, setHudVisible] = useState(true);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('osiris-hud-hidden') === '1') setHudVisible(false);
+  }, []);
+  const toggleHud = useCallback(() => {
+    setHudVisible(v => {
+      const next = !v;
+      try { localStorage.setItem('osiris-hud-hidden', next ? '0' : '1'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   // Splash screen
   useEffect(() => {
@@ -274,7 +291,14 @@ export default function Dashboard() {
       if (res.ok) {
         const json = await res.json();
         const d = transform ? transform(json) : json;
-        dataRef.current = { ...dataRef.current, ...d };
+        // Don't clobber a previously-good non-empty array with a transient
+        // empty one (e.g. Telegram rate-limit returns empty news). Keep last good.
+        const merged: Record<string, any> = { ...dataRef.current };
+        for (const [k, v] of Object.entries(d)) {
+          if (Array.isArray(v) && v.length === 0 && Array.isArray(merged[k]) && merged[k].length > 0) continue;
+          merged[k] = v;
+        }
+        dataRef.current = merged;
         setDataVersion(v => v + 1);
         setBackendStatus('connected');
       }
@@ -302,7 +326,7 @@ export default function Dashboard() {
     // Polling — OPTIMIZED intervals to minimize edge requests
     const intervals = [
       setInterval(() => fetchEndpoint('/api/earthquakes'), 900000),  // 15 min (was 5)
-      setInterval(() => fetchEndpoint('/api/news'), 1800000),        // 30 min (was 10)
+      setInterval(() => fetchEndpoint('/api/news'), 180000),         // 3 min (recover fast from transient empty)
       setInterval(() => fetchEndpoint('/api/markets', d => ({ markets: d })), 900000), // 15 min (was 5)
     ];
     return () => {
@@ -338,8 +362,8 @@ export default function Dashboard() {
       fetchEndpoint('/api/cctv?region=all&v=2');
       layerFetchedRef.current.add('cctv');
     }
-    // Maritime
-    if (activeLayers.maritime && !layerFetchedRef.current.has('maritime')) {
+    // Maritime (ports/chokepoints) and/or Live Ships — one fetch feeds both
+    if ((activeLayers.maritime || activeLayers.ships || activeLayers.shadow_fleet) && !layerFetchedRef.current.has('maritime')) {
       fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships }));
       layerFetchedRef.current.add('maritime');
     }
@@ -373,6 +397,16 @@ export default function Dashboard() {
       fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events }));
       layerFetchedRef.current.add('gdelt');
     }
+    // Air Raid Alerts
+    if (activeLayers.air_raids && !layerFetchedRef.current.has('air_raids')) {
+      fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts }));
+      layerFetchedRef.current.add('air_raids');
+    }
+    // Power Outages
+    if (activeLayers.power_outages && !layerFetchedRef.current.has('power_outages')) {
+      fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages }));
+      layerFetchedRef.current.add('power_outages');
+    }
 
   }, [activeLayers]);
 
@@ -389,8 +423,14 @@ export default function Dashboard() {
     if (activeLayers.radiation) {
       intervals.push(setInterval(() => fetchEndpoint('/api/radiation', d => ({ radiation: d.stations })), 300000)); // 5m
     }
-    if (activeLayers.maritime) {
+    if (activeLayers.maritime || activeLayers.ships || activeLayers.shadow_fleet) {
       intervals.push(setInterval(() => fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships })), 10000)); // 10s
+    }
+    if (activeLayers.air_raids) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })), 60000)); // 1 min
+    }
+    if (activeLayers.power_outages) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })), 300000)); // 5 min
     }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);
@@ -1009,7 +1049,7 @@ export default function Dashboard() {
       )}
 
       {/* ── BOTTOM CENTER (desktop) ── */}
-      {!isMobile && (
+      {!isMobile && hudVisible && (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 3, duration: 0.8 }} className="desktop-only absolute bottom-5 left-1/2 -translate-x-1/2 z-[200] pointer-events-auto">
           <div className="glass-panel px-5 py-2.5 flex items-center gap-0 osiris-glow relative overflow-hidden" style={{ borderImage: 'linear-gradient(90deg, rgba(212,175,55,0.05), rgba(212,175,55,0.2), rgba(212,175,55,0.05)) 1', borderImageSlice: 1, borderWidth: '1px', borderStyle: 'solid' }}>
 
@@ -1075,6 +1115,18 @@ export default function Dashboard() {
 
           </div>
         </motion.div>
+      )}
+
+      {/* ── HUD hide/show toggle (desktop) ── */}
+      {!isMobile && (
+        <button
+          onClick={toggleHud}
+          title={hudVisible ? 'Hide HUD' : 'Show HUD'}
+          className="desktop-only absolute bottom-7 left-1/2 -translate-x-1/2 z-[210] pointer-events-auto glass-panel px-2 py-0.5 flex items-center gap-1 text-[8px] font-mono tracking-wider text-[var(--text-muted)] hover:text-[var(--gold-primary)] transition-colors"
+        >
+          {hudVisible ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronUp className="w-2.5 h-2.5" />}
+          {hudVisible ? 'HIDE HUD' : 'SHOW HUD'}
+        </button>
       )}
 
       {/* ── Scale Bar (desktop) ── */}

@@ -19,6 +19,7 @@ export default function GlobalStatusBar() {
   const [cyber, setCyber] = useState<any>(null);
   const [openCount, setOpenCount] = useState(0);
   const [hoveredRisk, setHoveredRisk] = useState<CountryRisk | null>(null);
+  const [showCves, setShowCves] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -45,6 +46,7 @@ export default function GlobalStatusBar() {
 
   const topRisks = risks.slice(0, 6);
   const cveCount = cyber?.stats?.active_cves || 0;
+  const cveList: any[] = Array.isArray(cyber?.threats) ? cyber.threats : [];
 
   const riskColor = (level: string) =>
     level === 'CRITICAL' ? '#FF3D3D' : level === 'HIGH' ? '#FF9500' : level === 'ELEVATED' ? '#FFD700' : '#00E676';
@@ -77,11 +79,6 @@ export default function GlobalStatusBar() {
           <span style={{ color: riskColor(r.risk_level) }} className="font-bold">{r.risk_score}</span>
         </span>
       ))}
-      <span className="text-[var(--border-primary)] mx-1">|</span>
-      <span className="inline-flex items-center gap-1 mx-2">
-        <span className="text-[#E040FB]">CYBER</span>
-        <span className="text-[var(--text-primary)]">{cveCount} CVEs</span>
-      </span>
     </>
   );
 
@@ -90,7 +87,7 @@ export default function GlobalStatusBar() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ delay: 4, duration: 0.8 }}
-      className="hidden md:block absolute bottom-0 left-0 right-0 z-[198] pointer-events-none"
+      className={`hidden md:block absolute bottom-0 left-0 right-0 pointer-events-none ${showCves ? 'z-[300]' : 'z-[198]'}`}
     >
       <div className="h-[22px] overflow-hidden bg-[var(--bg-panel)]/80 border-t border-[var(--border-secondary)]/50 flex items-center text-[8px] font-mono tracking-wider backdrop-blur-sm">
         {/* Static label */}
@@ -106,7 +103,54 @@ export default function GlobalStatusBar() {
             {tickerContent}
           </div>
         </div>
+
+        {/* Static, clickable CYBER segment → toggles CVE list */}
+        <button
+          onClick={() => setShowCves(v => !v)}
+          className={`flex-shrink-0 px-2 h-full flex items-center gap-1 border-l border-[var(--border-secondary)]/50 bg-[var(--bg-panel)] pointer-events-auto transition-colors hover:bg-[var(--hover-accent)] ${showCves ? 'bg-[var(--hover-accent)]' : ''}`}
+          title="Show active exploited CVEs (CISA KEV)"
+        >
+          <span className="text-[#E040FB]">CYBER</span>
+          <span className="text-[var(--text-primary)]">{cveCount} CVEs</span>
+          <span className="text-[var(--text-muted)] text-[7px]">{showCves ? '▾' : '▴'}</span>
+        </button>
       </div>
+
+      {/* CVE list popover */}
+      {showCves && (
+        <>
+          {/* click-away backdrop */}
+          <div className="fixed inset-0 z-[299] pointer-events-auto" onClick={() => setShowCves(false)} />
+          <div className="absolute bottom-[26px] right-2 z-[300] pointer-events-auto w-[340px] max-h-[300px] overflow-y-auto styled-scrollbar glass-panel p-2 text-[9px] font-mono">
+            <div className="flex items-center justify-between mb-1.5 px-1">
+              <span className="text-[#E040FB] font-bold tracking-wider">ACTIVE EXPLOITED CVEs</span>
+              <span className="text-[var(--text-muted)]">CISA KEV · {cveList.length}</span>
+            </div>
+            {cveList.length === 0 ? (
+              <div className="px-1 py-2 text-[var(--text-muted)]">No CVEs reported in the current window.</div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {cveList.map((c: any) => (
+                  <a
+                    key={c.id}
+                    href={`https://nvd.nist.gov/vuln/detail/${c.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block px-1.5 py-1 rounded border border-[var(--border-secondary)]/40 hover:border-[#E040FB]/50 hover:bg-[var(--hover-accent)] transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[#E040FB] font-bold">{c.id}</span>
+                      <span className="text-[var(--text-muted)] text-[8px]">{c.date}</span>
+                    </div>
+                    <div className="text-[var(--text-secondary)] leading-snug truncate">{c.name}</div>
+                    <div className="text-[var(--text-muted)] text-[8px] truncate">{c.vendor}{c.product ? ` · ${c.product}` : ''}</div>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Hover tooltip for risk scores */}
       {hoveredRisk && (

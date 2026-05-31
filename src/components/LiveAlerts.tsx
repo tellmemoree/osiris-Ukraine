@@ -24,7 +24,7 @@ const RISK_COLORS: Record<string, string> = {
 export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsProps) {
   const [expanded, setExpanded] = useState(true);
   const [maximized, setMaximized] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'news' | 'quakes' | 'feeds'>('all');
+  const [filter, setFilter] = useState<'all' | 'ukraine' | 'news' | 'quakes' | 'feeds'>('all');
 
   // Built-in live feeds — verified video IDs (synced with /api/live-news)
   const BUILTIN_FEEDS = [
@@ -42,6 +42,9 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     { name: 'Euronews', city: 'Lyon', country: 'FR', lat: 45.764, lng: 4.836, url: 'https://www.youtube.com/embed/live_stream?channel=UCtUbOIRGKZkW7555n6x6q6g&autoplay=1&mute=1', category: 'mainstream', region: 'europe' },
     { name: 'TRT World', city: 'Istanbul', country: 'TR', lat: 41.008, lng: 28.978, url: 'https://www.youtube.com/embed/live_stream?channel=UC7fWeaHZQg1p9-4v98L1D1A&autoplay=1&mute=1', category: 'mainstream', region: 'europe' },
     { name: 'UKRINFORM', city: 'Kyiv', country: 'UA', lat: 50.450, lng: 30.523, url: 'https://www.youtube.com/embed/live_stream?channel=UCaDkCK6iFHPE0lmpaYL-WxQ&autoplay=1&mute=1', category: 'conflict', region: 'europe' },
+    { name: 'Espreso TV', city: 'Kyiv', country: 'UA', lat: 50.450, lng: 30.523, url: 'https://www.youtube.com/embed/live_stream?channel=UCMEiyV8N2J93GdPNltPYM6w&autoplay=1&mute=1', category: 'conflict', region: 'europe' },
+    { name: 'Kyiv Independent', city: 'Kyiv', country: 'UA', lat: 50.448, lng: 30.530, url: 'https://www.youtube.com/embed/live_stream?channel=UCGAC5yzlYgjKoJABDZ7zEyw&autoplay=1&mute=1', category: 'conflict', region: 'europe' },
+    { name: '5 Channel', city: 'Kyiv', country: 'UA', lat: 50.455, lng: 30.520, url: 'https://www.youtube.com/embed/live_stream?channel=UCICQXUdfFxgMAlyxssw1-Vw&autoplay=1&mute=1', category: 'conflict', region: 'europe' },
     // ── Middle East ──
     { name: 'Al Jazeera EN', city: 'Doha', country: 'QA', lat: 25.286, lng: 51.534, url: 'https://www.youtube.com/embed/live_stream?channel=UCNye-wNBqNL5ZzHSJj3l8Bg&autoplay=1&mute=1', category: 'mainstream', region: 'middleeast' },
     { name: 'Al Mayadeen', city: 'Beirut', country: 'LB', lat: 33.8886, lng: 35.4955, url: 'https://www.youtube.com/embed/live_stream?channel=UCZCFHCU-2eGF7V5ciMkoPHw&autoplay=1&mute=1', category: 'conflict', region: 'middleeast' },
@@ -57,6 +60,22 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     { name: 'SABC News', city: 'Johannesburg', country: 'ZA', lat: -26.204, lng: 28.047, url: 'https://www.youtube.com/embed/live_stream?channel=UC8yH-uI81UUtEMDsowQyx1g&autoplay=1&mute=1', category: 'mainstream', region: 'africa' },
     // ── Latin America ──
     { name: 'teleSUR EN', city: 'Caracas', country: 'VE', lat: 10.491, lng: -66.902, url: 'https://www.youtube.com/embed/live_stream?channel=UCmuTmpLY35O3csvhyA6vrkg&autoplay=1&mute=1', category: 'mainstream', region: 'americas' },
+  ];
+
+  // Ukrainian / Russia-Ukraine war OSINT Telegram channels (monitored by /api/news).
+  // Always listed as intel sources; SOURCE link opens the channel web preview.
+  const TELEGRAM_SOURCES = [
+    { name: 'DeepState UA', channel: 'DeepStateUA' },
+    { name: 'WarTranslated', channel: 'wartranslated' },
+    { name: 'Liveuamap', channel: 'Liveuamap' },
+    { name: 'Militaryland', channel: 'Militaryland' },
+    { name: 'UA Insider', channel: 'UA_Insider' },
+    { name: 'UA General Staff', channel: 'GeneralStaffUA' },
+    { name: 'UA Forces', channel: 'ua_forces' },
+    { name: 'Ukraine War Report', channel: 'UkraineWarReport' },
+    { name: 'OSINTtechnical', channel: 'OSINTtechnical' },
+    { name: 'Faytuks', channel: 'Faytuks' },
+    { name: 'Rybar', channel: 'rybar' },
   ];
 
   // Build unified alert feed
@@ -95,9 +114,20 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     });
   });
 
-  const filtered = filter === 'all' ? alerts :
-    filter === 'news' ? alerts.filter(a => a.type === 'news') :
-    filter === 'quakes' ? alerts.filter(a => a.type === 'quake') :
+  // Ukrainian Telegram intel sources (always listed; open channel externally)
+  TELEGRAM_SOURCES.forEach(t => {
+    alerts.push({
+      type: 'feed', title: t.name,
+      source: `t.me/${t.channel}`,
+      severity: 'LOW', category: 'conflict',
+      url: `https://t.me/s/${t.channel}`,
+    });
+  });
+
+  const filtered = filter === 'all'     ? alerts :
+    filter === 'ukraine' ? alerts.filter(a => a.type === 'news' && (a.source || '').startsWith('t.me/')) :
+    filter === 'news'    ? alerts.filter(a => a.type === 'news') :
+    filter === 'quakes'  ? alerts.filter(a => a.type === 'quake') :
     alerts.filter(a => a.type === 'feed');
 
   const getIcon = (type: string) => {
@@ -114,7 +144,7 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: 0.5, duration: 0.6 }}
-      className={`glass-panel flex flex-col overflow-hidden pointer-events-auto shrink-0 resize-y min-h-[200px] transition-all duration-300 ${maximized ? 'fixed inset-4 z-[9999] bg-[#0a0a09]/95 backdrop-blur-3xl' : ''}`}
+      className={`glass-panel flex flex-col overflow-hidden pointer-events-auto shrink-0 transition-all duration-300 ${expanded && !maximized ? 'resize-y min-h-[200px]' : ''} ${maximized ? 'fixed inset-4 z-[9999] bg-[#0a0a09]/95 backdrop-blur-3xl' : ''}`}
     >
       <button
         onClick={() => setExpanded(!expanded)}
@@ -123,8 +153,8 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
         <div className="flex items-center gap-2">
           <Radio className="w-3.5 h-3.5 text-[#FF4081]" />
           <span className="hud-text text-[10px] text-[var(--text-primary)]">LIVE ALERTS</span>
-          <span className="gotham-tag gotham-tag--high" style={{ fontSize: '7px', padding: '1px 5px' }}>{alerts.filter(a => a.type === 'news' || a.type === 'quake').length}</span>
-          <span className="gotham-tag gotham-tag--info" style={{ fontSize: '7px', padding: '1px 4px' }}>{BUILTIN_FEEDS.length} FEEDS</span>
+          <span className="gotham-tag gotham-tag--critical" style={{ fontSize: '7px', padding: '1px 5px' }}>{alerts.filter(a => a.type === 'news' && (a.source || '').startsWith('t.me/')).length} UA</span>
+          <span className="gotham-tag gotham-tag--info" style={{ fontSize: '7px', padding: '1px 4px' }}>{alerts.filter(a => a.type === 'news' && !(a.source || '').startsWith('t.me/')).length} WORLD</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-[#FF4081] animate-osiris-pulse" />
@@ -146,13 +176,14 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
           >
             {/* Filters */}
             <div className="flex gap-1 mb-2">
-              {(['all', 'news', 'quakes', 'feeds'] as const).map(f => (
+              {(['all', 'ukraine', 'news', 'quakes', 'feeds'] as const).map(f => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
                   className={`px-2 py-1 rounded text-[9px] font-mono tracking-wider transition-all ${filter === f ? 'bg-[var(--hover-accent)] text-[var(--text-primary)] border border-[var(--border-primary)]' : 'text-[var(--text-muted)] border border-transparent hover:text-[var(--text-secondary)]'}`}
+                  style={f === 'ukraine' && filter === f ? { color: '#FF1744', borderColor: 'rgba(255,23,68,0.5)' } : undefined}
                 >
-                  {f.toUpperCase()}
+                  {f === 'ukraine' ? '🇺🇦 UA WAR' : f.toUpperCase()}
                 </button>
               ))}
             </div>
