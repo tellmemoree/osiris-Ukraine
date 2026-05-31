@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import WebSocket from 'ws';
 import { flagFromMmsi } from '@/lib/mmsi-flags';
-import { getShadowFleetImos } from '@/lib/shadowFleet';
+import { getShadowFleetImos, getShadowFleetMmsis } from '@/lib/shadowFleet';
 
 /**
  * OSIRIS — Maritime Intelligence
@@ -204,6 +204,13 @@ function connectAisStream() {
       const existing: Ship = shipsCache.get(mmsi) ?? {
         id: mmsi, mmsi, timestamp: Date.now(), lat: 0, lng: 0, speed: 0,
       };
+
+      // Primary shadow-fleet match: MMSI rides on EVERY message (incl. position
+      // reports), so a sanctioned MMSI flags the vessel immediately — no need to
+      // wait for the infrequent ShipStaticData/IMO message below.
+      if (getShadowFleetMmsis().has(mmsi)) {
+        shadowMmsi.add(mmsi);
+      }
 
       // Extract Name from MetaData if available (present in most messages)
       if (parsed.MetaData?.ShipName) {
