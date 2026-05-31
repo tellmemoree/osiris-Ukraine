@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import WebSocket from 'ws';
+import { flagFromMmsi } from '@/lib/mmsi-flags';
 
 /**
  * OSIRIS — Maritime Intelligence
@@ -387,6 +388,12 @@ export async function GET() {
       .slice(0, Math.max(0, SHIP_RESPONSE_CAP - flagged.length));
     responseShips = [...flagged, ...rest];
   }
+
+  // Enrich with flag state derived from the MMSI (ITU MID → ISO country).
+  responseShips = responseShips.map((s: any) => {
+    const f = flagFromMmsi(s.mmsi);
+    return { ...s, flag: f ? f.iso : null, flag_emoji: f ? f.emoji : null };
+  });
 
   return NextResponse.json({
     ports: dynamicPorts,

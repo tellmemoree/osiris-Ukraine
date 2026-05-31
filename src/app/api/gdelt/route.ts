@@ -102,9 +102,17 @@ export async function GET() {
           const titleMatch = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i) || item.match(/<title>(.*?)<\/title>/i);
           const linkMatch = item.match(/<link>(.*?)<\/link>/i);
           const descMatch = item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/i) || item.match(/<description>(.*?)<\/description>/i);
-          
+          const dateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/i);
+
           if (!titleMatch || !linkMatch) continue;
-          
+
+          // Time of origin: RSS pubDate (fallback to now if missing/invalid).
+          // Skip events older than 24h so the map self-clears.
+          const parsed = dateMatch ? new Date(dateMatch[1]) : new Date();
+          const published = Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+          const ageHours = (Date.now() - new Date(published).getTime()) / 3600000;
+          if (ageHours > 24) continue;
+
           const title = titleMatch[1];
           const link = linkMatch[1];
           const desc = descMatch ? descMatch[1] : '';
@@ -138,6 +146,7 @@ export async function GET() {
               url: link,
               html: `<a href="${link}" target="_blank">${title}</a><br/><i>Source: ${feed.source}</i>`,
               type: 'conflict',
+              published,
             });
           }
         }

@@ -70,14 +70,12 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     { name: 'Liveuamap', channel: 'Liveuamap' },
     { name: 'Militaryland', channel: 'Militaryland' },
     { name: 'UA Insider', channel: 'UA_Insider' },
-    { name: 'Rezident UA', channel: 'Rezident_UA' },
     { name: 'UA General Staff', channel: 'GeneralStaffUA' },
     { name: 'UA Forces', channel: 'ua_forces' },
     { name: 'Ukraine War Report', channel: 'UkraineWarReport' },
     { name: 'OSINTtechnical', channel: 'OSINTtechnical' },
     { name: 'Faytuks', channel: 'Faytuks' },
     { name: 'Rybar', channel: 'rybar' },
-    { name: 'Grey Zone', channel: 'grey_zone' },
   ];
 
   // Build unified alert feed

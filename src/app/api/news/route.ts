@@ -11,8 +11,8 @@ const TELEGRAM_CHANNELS = [
   'OSINTtechnical', 'Faytuks', 'Liveuamap', 'CyberKnow',
   'GeneralStaffUA', 'ukraine_now', 'ua_forces',
   'UA_Insider', 'wartranslated', 'DefMonitor', 'UkraineWarReport',
-  'Militaryland', 'Rezident_UA', 'DeepStateUA',
-  'rybar', 'grey_zone',
+  'Militaryland', 'DeepStateUA',
+  'rybar',
 ];
 
 const FALLBACK_FEEDS = {
@@ -75,19 +75,21 @@ function findCoords(text: string): [number, number] | null {
 
 function parseTelegramHTML(html: string, channel: string): any[] {
   const items: any[] = [];
-  const messageBlockRegex = /<div class="tgme_widget_message_wrap js-widget_message_wrap"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/gi;
-  let blockMatch;
+  // Split on the per-message wrapper so each chunk contains the message body
+  // AND its footer (where the <time datetime> date link lives). The previous
+  // block regex stopped before the footer, so every item fell back to now().
+  const blocks = html.split('tgme_widget_message_wrap').slice(1);
 
-  while ((blockMatch = messageBlockRegex.exec(html)) !== null) {
-    const blockHtml = blockMatch[0];
+  for (const blockHtml of blocks) {
     const textRegex = /<div class="tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/i;
     const textMatch = blockHtml.match(textRegex);
     if (!textMatch) continue;
-    
-    let text = textMatch[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+
+    const text = textMatch[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
     if (!text || text.length < 10) continue;
 
-    const dateRegex = /<a class="tgme_widget_message_date" href="(https:\/\/t\.me\/[^"]+)".*?<time datetime="([^"]+)"/i;
+    // [\s\S]*? handles attributes/newlines between the date link and <time>.
+    const dateRegex = /<a class="tgme_widget_message_date" href="(https:\/\/t\.me\/[^"]+)"[\s\S]*?<time[^>]*datetime="([^"]+)"/i;
     const dateMatch = blockHtml.match(dateRegex);
     const link = dateMatch ? dateMatch[1] : `https://t.me/${channel}`;
     const pubDate = dateMatch ? dateMatch[2] : new Date().toISOString();

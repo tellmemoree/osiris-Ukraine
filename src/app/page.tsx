@@ -123,6 +123,7 @@ export default function Dashboard() {
     military: false,
     maritime: true,
     ships: true,
+    shadow_fleet: false,
     satellites: false,
     balloons: false,
     cctv: true,
@@ -362,7 +363,7 @@ export default function Dashboard() {
       layerFetchedRef.current.add('cctv');
     }
     // Maritime (ports/chokepoints) and/or Live Ships — one fetch feeds both
-    if ((activeLayers.maritime || activeLayers.ships) && !layerFetchedRef.current.has('maritime')) {
+    if ((activeLayers.maritime || activeLayers.ships || activeLayers.shadow_fleet) && !layerFetchedRef.current.has('maritime')) {
       fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships }));
       layerFetchedRef.current.add('maritime');
     }
@@ -422,7 +423,7 @@ export default function Dashboard() {
     if (activeLayers.radiation) {
       intervals.push(setInterval(() => fetchEndpoint('/api/radiation', d => ({ radiation: d.stations })), 300000)); // 5m
     }
-    if (activeLayers.maritime || activeLayers.ships) {
+    if (activeLayers.maritime || activeLayers.ships || activeLayers.shadow_fleet) {
       intervals.push(setInterval(() => fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships })), 10000)); // 10s
     }
     if (activeLayers.air_raids) {
