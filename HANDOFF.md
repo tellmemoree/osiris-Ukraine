@@ -106,6 +106,55 @@ will be provided** when this is picked up — do not start without it.
   `OBLAST_INFO` Ukrainian keys), `src/components/OsirisMap.tsx` (`air-raid-alerts` source
   + `raid-oblast-fill`/`raid-district-fill` layers), and the oblast polygon GeoJSON asset.
 
+### 7. 🔧 TODO — set up the recon (active-scan) tools
+The OsintPanel recon tools split into two tiers:
+- **Keyless & working now:** DNS, WHOIS, BGP/ASN, SSL certs, Shodan **InternetDB**,
+  IP geo, CVE, threats, MAC, phone, leaks, GitHub, sanctions — all hit public keyless
+  endpoints (no env vars in `src/app/api/osint/*`).
+- **Not configured / non-functional:** the active **port-scan / Nmap sweep**
+  (`/api/scanner`) returns `503 "Scanner not configured"` until `SCANNER_URL` +
+  `SCANNER_KEY` point at a real scanner backend. Set both in `.env`.
+  - **Touch points:** `src/app/api/scanner/route.ts:9-10,41-42`,
+    `src/app/api/osint/sweep/route.ts`, `src/components/OsintPanel.tsx` (sweep UI).
+- **Optional richer recon:** a real **`SHODAN_API_KEY`** — today only the free keyless
+  `internetdb.shodan.io` is used (`src/app/api/osint/shodan/route.ts:12`), which has no
+  host search and no exposed-service/RTSP discovery. A full key unlocks host search and
+  directly feeds #9 (camera discovery).
+- **⚠️ Authorization caveat:** active scanning must target only assets you are
+  authorized to scan. Gate the scanner backend (allow-list / auth) before exposing it;
+  do not ship an open relay.
+
+### 8. 🔧 TODO — more OSINT coverage on Russia
+Russia currently appears only incidentally: news/gdelt keyword hits, maritime Russian
+ports + Black Sea Fleet, and `isRussianMilitary()` in flights. Add dedicated RU OSINT:
+- **Sources:** RU milblogger / regional-emergency Telegram channels (only `rybar` is in
+  the news list today — extend `TELEGRAM_CHANNELS`), RU rail/logistics and airfield
+  activity, thermal anomalies over RU military sites (NASA FIRMS is already wired in
+  `fires/route.ts` — add RU areas of interest).
+- **Geo precision:** the news `KEYWORD_COORDS` and gdelt `GEO_DICT` only carry RU border
+  oblasts (Belgorod/Kursk/Bryansk/Voronezh/Rostov) — extend to interior oblasts/cities
+  for finer placement.
+- **Touch points:** `src/app/api/news/route.ts` (`TELEGRAM_CHANNELS`, `KEYWORD_COORDS`),
+  `src/app/api/gdelt/route.ts` (`GEO_DICT`), `src/app/api/fires/route.ts` (AOIs), and
+  possibly a dedicated `/api/russia-*` route if the signals warrant their own layer.
+
+### 9. 🔧 TODO — Russia cameras
+The CCTV layer (`/api/cctv`) covers only US / UK / Canada traffic cams (TfL, WSDOT,
+Caltrans, 511 Ontario/Alberta, Ville MTL, …) — **zero RU/UA coverage**. Add Russian
+public camera feeds:
+- **Public RU traffic-cam portals:** many RU cities/regions publish open JSON/MJPEG
+  camera feeds (regional traffic / ЦОДД portals). Add them as new source functions in
+  `cctv/route.ts` mirroring the existing pattern — each emits
+  `{ id, lat, lng, name, city, country, feed_url, source }` pushed into `allCams`. They
+  render through the existing `cctv` map layer with no frontend changes.
+- **Exposed-camera discovery (optional, depends on #7 Shodan key):** Shodan host search
+  can surface RTSP/webcam banners by RU geo.
+- **⚠️ Legal/ethical caveat:** index only cameras that are *intentionally public*
+  (official traffic/city feeds). Do **not** access or expose private/credentialed
+  cameras. Document the source provenance per feed.
+- **Touch points:** `src/app/api/cctv/route.ts` (add RU source fns + merge into
+  `allCams`); markers already render via the `cctv` layer in `OsirisMap.tsx`.
+
 ---
 
 ## Notes
