@@ -1,12 +1,12 @@
 # Handoff — osiris-Ukraine review follow-ups
 
 Context: this branch was reviewed against TypeScript/Next.js best practices. The
-items below were **fixed** in the review-cleanup commit; the **Open decisions**
-are deliberately left for a maintainer call before implementation.
+original review-cleanup commit is recorded first; the follow-up items raised after
+it were worked in a later session and are now mostly **resolved** — see status tags.
 
 ---
 
-## Done in the review-cleanup commit
+## Done in the review-cleanup commit (70e2862)
 
 - **Line endings:** `maritime` + `flights` had drifted to CRLF, inflating diffs and
   polluting blame. Normalized to LF and added `.gitattributes` (`* text=auto eol=lf`).
@@ -23,118 +23,96 @@ are deliberately left for a maintainer call before implementation.
 
 ---
 
-## Open decisions (need a maintainer call)
+## Resolved in the follow-up session (eda5ca8, b4eb139, ac012f3)
 
-### 1. Remove synthetic "ghost ship" injection — `maritime/route.ts`
-`fetchVesselApiFallback()` does **not** call a real API. When `VESSEL_API_KEY` is set
-it fabricates 75–110 random vessels (`name: "V-SAT ####"`, `flag: "S-AIS"`) in the
-Hormuz and Suez boxes, with randomized positions/speeds tuned to *deliberately trip*
-the congestion + chokepoint-risk thresholds (`numHormuz = 45–65`, `numSuez = 30–45`).
-This synthetic data is then served from `/api/maritime` indistinguishably from live AIS.
+### 1. ✅ DONE — synthetic "ghost ship" injection removed
+`fetchVesselApiFallback()` (which fabricated 75–110 random `V-SAT`/`S-AIS` vessels
+tuned to trip CRITICAL congestion/chokepoint thresholds and served them as live AIS)
+is **deleted entirely**, along with its `GET()` call. Port/chokepoint stats now
+reflect only real vessels. Commit `eda5ca8`.
 
-- **Risk:** fake "CRITICAL congestion" / "CRITICAL chokepoint" intel; undermines trust
-  in every maritime signal and the `shadow_fleet` flagging built on top of it.
-- **Options:**
-  1. **Delete** `fetchVesselApiFallback()` and its `GET()` call (recommended — it is
-     not a real integration).
-  2. Gate behind an explicit `OSIRIS_DEMO=1` flag and label the ships as synthetic in
-     the payload (e.g. `synthetic: true`) so the UI can mark them.
-  3. Implement the real VesselAPI REST call sketched in the comment at the top of the
-     function (needs an actual endpoint + key + response mapping).
-- **Touch points:** function def ~L241, `await fetchVesselApiFallback()` in `GET()`,
-  and the `// TODO: cross-reference against getShadowFleetImos() once the satellite
-  feed provides IMO numbers` note.
+### 2. ✅ DONE — KAB threat re-wired to Telegram OSINT (not the air-raid feed)
+**The original plan's premise was wrong** and is corrected here: `/api/air-raids` is
+wired to `vadimklimenko.com/map/statuses.json`, which is **binary on/off per
+oblast/raion with no threat type** — NOT `alerts.com.ua`. And `alerts.in.ua`
+(token-gated) has **no KAB category** either (only `air_raid`/`artillery`/`chemical`/
+`nuclear`). KAB warnings exist only as free text in UA OSINT Telegram channels.
 
-### 2. Re-wire the KAB bomb-risk data path — `flights/route.ts`
-`bomb_risk` is derived from ADS-B (`adsb.lol`). That feed only shows aircraft
-*broadcasting* ADS-B, but aircraft actually releasing KAB/UMPK glide bombs near the
-front fly with transponders **off**. So the planes we most want to flag are exactly
-the ones the feed never shows — `bomb_risk` is structurally low-recall and is now
-documented as a best-effort heuristic only.
+Built `/api/kab-threats` (commit `ac012f3`): scrapes UA threat channels, regex-detects
+KAB/UMPK/glide-bomb mentions across UK/RU/EN with Unicode-aware word boundaries
+(unit-tested to reject `кабінет`/`кабель`/`Kabul`/`кабани`), attributes each to an
+oblast by keyword, 3h window, one aggregated marker per oblast (count + latest text +
+sources). 60s cache + coalescing. Wired as a deep-orange `kab_threats` map layer
+mirroring the air-raid pattern (LayerPanel toggle, glow/dots/label, click popup with a
+"heuristic — verify before acting" caveat).
 
-- **Target design:** drive KAB threat from the **air-raid alert feeds**, not ADS-B.
-  `alerts.com.ua` (already wired in `/api/air-raids`) exposes a threat type for KAB/
-  guided-bomb warnings ("загроза застосування КАБ"). Surface that as the real signal;
-  keep `isRussianMilitary()` + bounding box only as a supplementary ADS-B overlay.
-- **Touch points:** `src/app/api/air-raids/route.ts` (add/parse threat-type field),
-  `src/app/api/flights/route.ts` (`bomb_risk`, `isRussianMilitary`, `nearUkraineBorder`),
-  and whichever map layer consumes `bomb_risk`.
+- **Note:** the ADS-B `bomb_risk` flag in `flights/route.ts` was **dead data** — no
+  component ever consumed it. It is left in place as a documented *supplementary*
+  overlay; consider removing it if it stays unused. The Telegram layer is now the
+  primary KAB signal.
 
-### 3. Remaining lint / hygiene debt (pre-existing, out of review scope)
-- **6 `@typescript-eslint/no-explicit-any`** in RSS-item parsing (not touched by this
-  branch's feature work):
-  - `src/app/api/gdelt/route.ts:90`
-  - `src/app/api/news/route.ts:77, 78, 105, 106, 146`
-  Fix by typing the parsed RSS item shape (a small `RssItem` interface).
-- **CRLF across the repo:** 27 of ~87 API route files are still CRLF; only the 3 files
-  this branch touched were normalized. `.gitattributes` is now in place — run
-  `git add --renormalize . && git commit` once to convert the rest in a single,
-  reviewable pass.
-- **ESLint is not blocking the build** (`next build` exits 0 despite the 6 errors).
-  Consider enforcing lint in CI / removing any `eslint.ignoreDuringBuilds` so this
-  debt can't grow silently.
+### 4. ✅ DONE — shadow-fleet flag was being dropped (real bug, fixed)
+Root cause was not the watchlist but a **drop bug**: AIS carries IMO only in the
+infrequent `ShipStaticData` message; the `if (existing.lat && existing.lng)` store
+guard discarded that whole update (flag included) when it arrived before the first
+position fix. Fix (commit `eda5ca8`): a sticky global `shadowMmsi: Set<number>` records
+matched MMSIs, and the flag is re-attached on every update — surviving message ordering
+and persisting across the ship's lifetime. Expect a meaningfully higher count (still
+bounded by how many sanctioned tankers actually broadcast a valid IMO in the sampled
+boxes, but no longer artificially dropped).
 
-### 4. Investigate: only ~2 shadow-fleet ships render on the map
-The dynamic watchlist now holds ~1,940 IMOs, yet the map shows only ~2 vessels in the
-`shadow_fleet` layer. The watchlist size is almost certainly **not** the problem — the
-match path is.
+### 6. ✅ DONE — React #418 hydration warning hardened
+Audited every first-paint render path (clocks, `localStorage`/`window` reads,
+render-time `toLocaleTimeString()`, layout, splash) — all correctly deferred/gated, so
+app code is clean; the realistic cause is a browser extension mutating the DOM pre-
+hydration. Added `suppressHydrationWarning` to `<body>` and removed SharePanel's
+server/client `window` branch (which also carried a stale wrong fallback origin).
+Commit `eda5ca8`. To confirm an extension is the source: Incognito + extensions-off
+hard reload; if it vanishes, ignore.
 
-- **Most likely cause:** a ship is flagged only when AIS **static data** (type-5
-  message, the one carrying `ImoNumber`) arrives *and* its IMO is in the set. Position
-  reports (type 1/2/3) — the vast majority of the stream — carry MMSI but **no IMO**, so
-  most vessels are never cross-referenced. Static messages are broadcast infrequently
-  (minutes apart), so within a cache window only a handful of ships ever get an IMO
-  attached → only those can be flagged.
-- **Also check:**
-  - Whether the synthetic ghost ships (decision #1) dominate the payload — they have no
-    IMO and can never be flagged, diluting the visible fleet.
-  - The `ship-shadow-dots` layer filter in `OsirisMap.tsx`
-    (`['==', ['get','shadow_fleet'], true]`) vs the base `ship-dots` filter
-    (`['!=', ['get','shadow_fleet'], true]`) — confirm the split is consistent and the
-    flag is actually serialized into the GeoJSON feature properties.
-  - Whether `getShadowFleetImos().has(staticData.ImoNumber)` is comparing the same type
-    (number vs string) — IMOs parsed from OFAC are `number`; AIS `ImoNumber` should be
-    too, but verify no string leaks in.
-- **Touch points:** `src/app/api/maritime/route.ts` (shadow flagging on static-data
-  receipt), `src/lib/shadowFleet.ts`, `src/components/OsirisMap.tsx` (`ship-shadow-dots`).
-- **Likely conclusion:** this is expected behavior of MMSI-only position streams, not a
-  bug — but it should be confirmed and, if so, documented (consider persisting an
-  MMSI→IMO map across cache windows so a ship stays flagged after its one static
-  message, rather than re-losing the IMO each refresh).
+---
 
-### 5. Investigate: red oblast fills for active air-raid alarms render incorrectly
-The oblast/rayon polygon fills added in `1a0bec7` ("oblast/rayon polygon fills for air
-raids") paint the wrong regions / render incorrectly. **A screenshot will be provided**
-when this is picked up — do not start without it.
+## Still open
 
-- **Suspects to check (in priority order):**
-  1. **Name matching** between the alert feed (`alerts.com.ua` oblast names, in
-     Ukrainian/transliterated) and the polygon source's `properties.name` — a mismatch
-     would light up the wrong oblast or none.
-  2. **GeoJSON ring winding / coordinate order** — fills require `[lng, lat]` order and
-     correct outer-ring winding; an inverted ring fills the *complement* of the polygon
-     (everything except the oblast).
-  3. **Filter/feature-state wiring** on the `air-raid-alerts` layer in `OsirisMap.tsx` —
-     whether "active" is matched per-feature or applied to all polygons.
-  4. Disputed-border / Crimea polygons (hidden per `1a0bec7`) leaking into the active set.
-- **Touch points:** `src/app/api/air-raids/route.ts` (alert→oblast mapping),
-  `src/components/OsirisMap.tsx` (`air-raid-alerts` source + fill layer), and the oblast
-  polygon GeoJSON asset.
+### 3. ⚠️ PARTIAL — lint / CRLF hygiene
+- **CRLF: ✅ DONE.** All 27 remaining CRLF files renormalized to LF; the index is now
+  100% LF (commit `b4eb139`).
+- **The 6 RSS-parsing `any`s: ✅ DONE** — typed via `ParsedArticle` (news) and
+  `ConflictEvent` (gdelt).
+- **⚠️ BUT the lint debt is far bigger than first thought:** full-repo eslint is
+  **~304 errors / 40 warnings**, not 6 — overwhelmingly `@typescript-eslint/no-explicit-any`
+  spread across many components and `src/lib/sdk/PolybolosClient.ts` (none touched by
+  this branch). `OsirisMap.tsx` alone has ~83. Fixing all of it is a large, separate
+  effort; **do not enforce eslint in the build until it's cleared** or the build will
+  break. New code added this session (`kab-threats/route.ts`) is lint-clean; the `any`s
+  added in `OsirisMap.tsx` deliberately match the file's existing style.
 
-### 6. (This session) React #418 hydration warning — likely benign
-A `Minified React error #418` (React 19.2.4 hydration mismatch) was observed in the
-console. Audited every first-paint render path — clocks, `localStorage`/`window` reads,
-render-time `toLocaleTimeString()`, the root layout, and the splash — **all are correctly
-deferred or gated**, so the app code is clean on this front. The remaining realistic cause
-is a **browser extension** mutating the DOM before hydration (the error message lists this
-explicitly). Confirm via Incognito + extensions-off hard reload; if it vanishes it's an
-extension and can be ignored. Belt-and-suspenders fix if desired: `suppressHydrationWarning`
-on `<body>` in `layout.tsx` and harden the `typeof window` branch in `SharePanel.tsx:32`.
+### 5. ⏳ BLOCKED ON SCREENSHOT — red oblast fills render incorrectly
+The oblast/rayon polygon fills from `1a0bec7` paint the wrong regions. **A screenshot
+will be provided** when this is picked up — do not start without it.
+
+- **Suspects (priority order):**
+  1. **Name matching** between the feed and the polygon `properties.name_en`/`name_ua`.
+     NB the feed is `vadimklimenko` (Ukrainian state names like `Харківська область`),
+     and the fill filter normalizes apostrophes (`OsirisMap.tsx` ~L1376) — a mismatch
+     lights the wrong oblast or none.
+  2. **GeoJSON ring winding / coordinate order** — fills need `[lng,lat]` and correct
+     outer-ring winding; an inverted ring fills the *complement* (everything except the
+     oblast — a classic "whole map is red" symptom).
+  3. **Filter wiring** on `raid-oblast-fill`/`raid-district-fill` (`OsirisMap.tsx`
+     ~L1378-1388) — oblast vs district `setFilter` literals.
+  4. Crimea/disputed-border polygons leaking into the active set.
+- **Touch points:** `src/app/api/air-raids/route.ts` (alert→oblast mapping, uses
+  `OBLAST_INFO` Ukrainian keys), `src/components/OsirisMap.tsx` (`air-raid-alerts` source
+  + `raid-oblast-fill`/`raid-district-fill` layers), and the oblast polygon GeoJSON asset.
 
 ---
 
 ## Notes
 - Shadow-fleet source is overridable via `SHADOW_FLEET_SOURCE_URL` (JSON array,
   `{imos:[...]}`, objects with `imo`/`imoNumber`, or any text containing `IMO 1234567`).
-- The `/api/air-raids` route already uses the keyless `alerts.com.ua` endpoint
-  (api.alerts.in.ua now requires a token), so no key is needed for decision #2.
+- `/api/air-raids` uses the keyless `vadimklimenko.com/map/statuses.json` feed (binary
+  on/off per region, no threat type). `alerts.in.ua` would need a token and still has no
+  KAB category — hence #2 went the Telegram-text route.
+- `/api/kab-threats` knobs: `UA_THREAT_CHANNELS`, `KAB_PATTERNS`, `OBLAST_REFS`,
+  `WINDOW_HOURS` (3), `CACHE_TTL_MS` (60s). Add oblasts/cities by extending `OBLAST_REFS`.
