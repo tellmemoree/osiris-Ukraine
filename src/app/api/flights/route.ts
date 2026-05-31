@@ -54,18 +54,44 @@ const MILITARY_INDICATORS = new Set([
 
 const AIRLINE_CODE_RE = /^([A-Z]{3})\d/;
 
-// Russian military callsign/registration patterns for KAB bomb-risk detection
-function isRussianMilitary(flight: any): boolean {
+// Raw aircraft record as returned by adsb.lol's `ac` array (only the fields we read).
+// `alt_baro` is feet and can be the string "ground" for aircraft on the surface.
+interface AdsbAircraft {
+  hex?: string;
+  flight?: string;
+  t?: string;
+  r?: string;
+  lat?: number;
+  lon?: number;
+  alt_baro?: number | string;
+  gs?: number;
+  track?: number;
+  squawk?: string;
+  dbFlags?: number;
+  nac_p?: number;
+}
+
+// KAB/UMPK glide-bomb release envelope is roughly 6–14 km. adsb.lol reports
+// `alt_baro` in feet, so the metre thresholds are pre-converted here.
+const KAB_RELEASE_FLOOR_FT = 19685; // ~6,000 m
+const KAB_RELEASE_CEIL_FT = 45931;  // ~14,000 m
+
+// Best-effort Russian state/military signature for the KAB bomb-risk flag.
+// CAVEAT: this is inherently low-recall. Aircraft actually launching glide bombs
+// near the front fly with ADS-B transponders OFF, so adsb.lol almost never sees
+// them — a `true` here is the exception, not the rule. We therefore optimise for
+// precision: only the state-aircraft registration prefix RF- and unambiguous
+// military callsign prefixes. NOTE: RA- is the CIVILIAN Russian registry (Aeroflot
+// et al.) and is deliberately excluded to avoid flagging airliners.
+function isRussianMilitary(flight: AdsbAircraft): boolean {
   const callsign = (flight.flight || '').trim().toUpperCase();
   const reg = (flight.r || '').trim().toUpperCase();
   return (
     callsign.startsWith('RFF') ||
     callsign.startsWith('RRF') ||
-    callsign.startsWith('RU') ||
     callsign.startsWith('CRIMEA') ||
     callsign.startsWith('BARS') ||
-    reg.startsWith('RF-') ||
-    reg.startsWith('RA-')
+    reg.startsWith('RF-')
   );
 }
 
@@ -74,15 +100,15 @@ function nearUkraineBorder(lat: number, lng: number): boolean {
   return lat >= 44 && lat <= 52 && lng >= 22 && lng <= 42;
 }
 
-async function fetchRegion(region: typeof REGIONS[0]): Promise<any[]> {
+async function fetchRegion(region: typeof REGIONS[0]): Promise<AdsbAircraft[]> {
   try {
     const url = `https://api.adsb.lol/v2/lat/${region.lat}/lon/${region.lon}/dist/${region.dist}`;
     const res = await stealthFetch(url, {
       signal: AbortSignal.timeout(12000),
     });
     if (res.ok) {
-      const data = await res.json();
-      return data.ac || [];
+      const data = (await res.json()) as { ac?: AdsbAircraft[] };
+      return data.ac ?? [];
     }
   } catch (e) {
     console.warn(`Region fetch failed for lat=${region.lat}:`, e);
@@ -90,7 +116,7 @@ async function fetchRegion(region: typeof REGIONS[0]): Promise<any[]> {
   return [];
 }
 
-function classifyFlight(f: any) {
+function classifyFlight(f: AdsbAircraft) {
   const modelUpper = (f.t || '').toUpperCase();
   const flightStr = (f.flight || '').trim().toUpperCase();
   const dbFlags = (f.dbFlags || 0);
@@ -144,7 +170,12 @@ function classifyFlight(f: any) {
     grounded: isGrounded,
     nac_p: f.nac_p,
     type: 'flight',
-    bomb_risk: isRussianMilitary(f) && nearUkraineBorder(classifiedLat, classifiedLng) && typeof altRaw === 'number' && altRaw > 19685 && altRaw < 45931,
+    bomb_risk:
+      isRussianMilitary(f) &&
+      nearUkraineBorder(classifiedLat, classifiedLng) &&
+      typeof altRaw === 'number' &&
+      altRaw > KAB_RELEASE_FLOOR_FT &&
+      altRaw < KAB_RELEASE_CEIL_FT,
   };
 }
 
@@ -154,10 +185,23 @@ function classifyFlight(f: any) {
 // 1. It coalesces concurrent requests within the same isolate
 // 2. It prevents hammering adsb.lol which would cause rate-limit bans
 // For a globally shared cache, migrate to Vercel KV or similar persistent store.
-let cachedData: any = null;
+type ClassifiedFlight = NonNullable<ReturnType<typeof classifyFlight>>;
+type JammingPoint = { lat: number; lng: number; nac_p: number; callsign: string };
+
+interface FlightResponse {
+  commercial_flights: ClassifiedFlight[];
+  private_flights: ClassifiedFlight[];
+  private_jets: ClassifiedFlight[];
+  military_flights: ClassifiedFlight[];
+  gps_jamming: ReturnType<typeof aggregateJamming>;
+  total: number;
+  timestamp: string;
+}
+
+let cachedData: FlightResponse | null = null;
 let lastFetchTime = 0;
 const CACHE_TTL = 45000; // 45 seconds cache window
-let fetchPromise: Promise<any> | null = null;
+let fetchPromise: Promise<FlightResponse> | null = null;
 
 export async function GET() {
   const now = Date.now();
@@ -191,7 +235,7 @@ export async function GET() {
       REGIONS.map(r => fetchRegion(r))
     );
 
-    const allRaw: any[] = [];
+    const allRaw: AdsbAircraft[] = [];
     const seenHex = new Set<string>();
 
     for (const result of regionResults) {
@@ -207,11 +251,11 @@ export async function GET() {
     }
 
     // Classify all flights
-    const commercial: any[] = [];
-    const privateFl: any[] = [];
-    const jets: any[] = [];
-    const military: any[] = [];
-    const gpsJamming: any[] = [];
+    const commercial: ClassifiedFlight[] = [];
+    const privateFl: ClassifiedFlight[] = [];
+    const jets: ClassifiedFlight[] = [];
+    const military: ClassifiedFlight[] = [];
+    const gpsJamming: JammingPoint[] = [];
 
     for (const raw of allRaw) {
       const flight = classifyFlight(raw);
@@ -270,7 +314,7 @@ export async function GET() {
   }
 }
 
-function aggregateJamming(points: any[], threshold: number) {
+function aggregateJamming(points: JammingPoint[], threshold: number) {
   if (points.length === 0) return [];
   const grid = new Map<string, { lat: number; lng: number; count: number; total_nac_p: number }>();
   const GRID_SIZE = 2; // degrees

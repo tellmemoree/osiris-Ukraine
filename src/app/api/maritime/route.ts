@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import WebSocket from 'ws';
 import { flagFromMmsi } from '@/lib/mmsi-flags';
+import { getShadowFleetImos } from '@/lib/shadowFleet';
 
 /**
  * OSIRIS — Maritime Intelligence
@@ -90,21 +91,32 @@ const CHOKEPOINTS = [
   // Note: Bosphorus (Istanbul) skipped — already covered by 'Turkish Straits' entry above (same coordinates).
 ];
 
-// --- Shadow Fleet IMO Watchlist (KSI/CREA public lists) ---
-// IMO numbers of known sanctioned / dark-fleet vessels.
-const SHADOW_FLEET_IMOS = new Set([
-  9246234, 9274848, 9167667, 9251899, 9389650, 9374910, 9256887, 9246258,
-  9178523, 9210220, 9381867, 9193215, 9230670, 9285449, 9285451, 9302872,
-  9344720, 9368292, 9400801, 9412205, 9436222, 9469688, 9502518, 9543009,
-  9596068, 9629948, 9648701, 9668519, 9699030, 9704043, 9727785, 9747416,
-]);
+// Shadow-fleet IMO watchlist is sourced dynamically — see src/lib/shadowFleet.ts.
+// getShadowFleetImos() returns the current set synchronously and refreshes in the
+// background on a TTL, so the hot AIS message handler below never blocks.
 
 // --- Global AIS Stream Client (In-Memory Cache) ---
 // Note: In a true serverless environment, this state would reset per invocation.
 // For Next.js dev server or Node.js Docker container, this will persist.
 
+interface Ship {
+  id: number;
+  mmsi: number;
+  timestamp: number;
+  lat: number;
+  lng: number;
+  speed: number;
+  heading?: number;
+  name?: string;
+  destination?: string;
+  type?: string;
+  flag?: string | null;
+  flag_emoji?: string | null;
+  shadow_fleet?: boolean;
+}
+
 const globalForAis = globalThis as unknown as {
-  shipsCache: Map<number, any>;
+  shipsCache: Map<number, Ship>;
   isAisConnecting: boolean;
 };
 
@@ -125,7 +137,7 @@ function connectAisStream() {
 
   try {
     ws = new WebSocket("wss://stream.aisstream.io/v0/stream");
-  } catch (e) {
+  } catch {
     globalForAis.isAisConnecting = false;
     return;
   }
@@ -180,8 +192,8 @@ function connectAisStream() {
       const mmsi = parsed.MetaData?.MMSI;
       if (!mmsi) return;
 
-      let existing = shipsCache.get(mmsi) || {
-        id: mmsi, mmsi: mmsi, timestamp: Date.now()
+      const existing: Ship = shipsCache.get(mmsi) ?? {
+        id: mmsi, mmsi, timestamp: Date.now(), lat: 0, lng: 0, speed: 0,
       };
 
       // Extract Name from MetaData if available (present in most messages)
@@ -202,8 +214,8 @@ function connectAisStream() {
         existing.name = staticData.Name ? staticData.Name.trim() : existing.name;
         existing.destination = staticData.Destination ? staticData.Destination.trim() : existing.destination;
         existing.type = getOsirisShipType(staticData.Type);
-        // Cross-reference against shadow fleet watchlist (IMO available in ShipStaticData)
-        if (staticData.ImoNumber && SHADOW_FLEET_IMOS.has(staticData.ImoNumber)) {
+        // Cross-reference against the dynamic shadow-fleet watchlist (IMO available in ShipStaticData)
+        if (staticData.ImoNumber && getShadowFleetImos().has(staticData.ImoNumber)) {
           existing.shadow_fleet = true;
         }
       }
@@ -218,7 +230,7 @@ function connectAisStream() {
         const firstKey = shipsCache.keys().next().value;
         if (firstKey) shipsCache.delete(firstKey);
       }
-    } catch (e) {
+    } catch {
       // ignore parse errors
     }
   });
@@ -287,7 +299,7 @@ async function fetchVesselApiFallback() {
     }
 
     // Merge into global cache
-    // TODO: cross-reference AIS vessel.mmsi against SHADOW_FLEET_IMOS once satellite feed provides IMO numbers
+    // TODO: cross-reference against getShadowFleetImos() once the satellite feed provides IMO numbers
     for (const ship of ghostShips) {
       shipsCache.set(ship.mmsi, {
         id: ship.mmsi, mmsi: ship.mmsi, lat: ship.lat, lng: ship.lng, speed: ship.speed,
@@ -381,16 +393,16 @@ export async function GET() {
   const SHIP_RESPONSE_CAP = 6000;
   let responseShips = ships;
   if (ships.length > SHIP_RESPONSE_CAP) {
-    const flagged = ships.filter((s: any) => s.shadow_fleet);
+    const flagged = ships.filter((s) => s.shadow_fleet);
     const rest = ships
-      .filter((s: any) => !s.shadow_fleet)
-      .sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0))
+      .filter((s) => !s.shadow_fleet)
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
       .slice(0, Math.max(0, SHIP_RESPONSE_CAP - flagged.length));
     responseShips = [...flagged, ...rest];
   }
 
   // Enrich with flag state derived from the MMSI (ITU MID → ISO country).
-  responseShips = responseShips.map((s: any) => {
+  responseShips = responseShips.map((s) => {
     const f = flagFromMmsi(s.mmsi);
     return { ...s, flag: f ? f.iso : null, flag_emoji: f ? f.emoji : null };
   });

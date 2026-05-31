@@ -23,6 +23,7 @@ const FALLBACK_FEEDS = {
 
 const RISK_KEYWORDS = ['war','missile','strike','attack','crisis','tension','military','conflict','defense','clash','nuclear','invasion','bomb','drone','weapon','sanctions','ceasefire','escalation', 'killed', 'destroyed', 'operation', 'casualty', 'frontline', 'threat','mobilization','counterattack','offensive','shelling','artillery','occupied','liberated','breakthrough','bridgehead','incursion','shahed','himars','kab','glide bomb'];
 
+// NOTE: tuples are [lat, lng] here — the OPPOSITE of gdelt/route.ts's GEO_DICT.
 const KEYWORD_COORDS: Record<string, [number, number]> = {
   'ukraine': [49.487, 31.272], 'kyiv': [50.450, 30.523], 'russia': [61.524, 105.318],
   'moscow': [55.755, 37.617], 'israel': [31.046, 34.851], 'gaza': [31.416, 34.333],
@@ -113,8 +114,8 @@ function parseRSSItems(xml: string, sourceName: string): any[] {
       return (m?.[1] || m?.[2] || '').trim();
     };
 
-    let title = getTag('title').replace(/<[^>]+>/g, '');
-    let desc = getTag('description').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"');
+    const title = getTag('title').replace(/<[^>]+>/g, '');
+    const desc = getTag('description').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"');
     
     items.push({
       title: title.length > 100 ? title.substring(0, 100) + '...' : title,
@@ -194,7 +195,7 @@ export async function GET() {
         'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
       },
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ news: [], error: 'Failed to fetch intel' }, { status: 500 });
   }
 }

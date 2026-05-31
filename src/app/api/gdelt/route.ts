@@ -24,7 +24,8 @@ const RSS_FEEDS = [
   { url: 'https://www.rferl.org/api/z_yqpiiyu-qxq', source: 'RFE/RL' },
 ];
 
-// Lightweight geo-dictionary for mapping news keywords to coordinates
+// Lightweight geo-dictionary for mapping news keywords to coordinates.
+// NOTE: tuples are [lng, lat] here (GeoJSON order) — the OPPOSITE of news/route.ts.
 const GEO_DICT: Record<string, [number, number]> = {
   'ukraine': [31.1656, 48.3794],
   'kyiv': [30.5234, 50.4501],
@@ -150,7 +151,7 @@ export async function GET() {
             });
           }
         }
-      } catch (e) {
+      } catch {
         console.warn(`Failed to fetch ${feed.source}`);
       }
     }
