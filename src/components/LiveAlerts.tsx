@@ -145,7 +145,7 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: 0.5, duration: 0.6 }}
-      className={`glass-panel flex flex-col overflow-hidden pointer-events-auto shrink-0 resize-y min-h-[200px] transition-all duration-300 ${maximized ? 'fixed inset-4 z-[9999] bg-[#0a0a09]/95 backdrop-blur-3xl' : ''}`}
+      className={`glass-panel flex flex-col overflow-hidden pointer-events-auto shrink-0 transition-all duration-300 ${expanded && !maximized ? 'resize-y min-h-[200px]' : ''} ${maximized ? 'fixed inset-4 z-[9999] bg-[#0a0a09]/95 backdrop-blur-3xl' : ''}`}
     >
       <button
         onClick={() => setExpanded(!expanded)}

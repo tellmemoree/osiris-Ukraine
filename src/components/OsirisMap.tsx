@@ -172,13 +172,19 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // Air Raid Alerts — pulsing red (Ukraine-specific alerts).
       // Oblast-wide alerts render larger; raion (district) alerts render tighter.
       map.addLayer({ id: 'raid-glow', type: 'circle', source: 'air-raid-alerts', paint: {
-        'circle-radius': ['*', ['case', ['==', ['get','level'], 'district'], 0.55, 1],
-          ['interpolate',['linear'],['zoom'], 1,12, 5,20, 10,30]],
+        // Zoom interpolate must be top-level; district (0.55x) sizing goes in each stop.
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          1,  ['case', ['==', ['get','level'], 'district'], 6.6, 12],
+          5,  ['case', ['==', ['get','level'], 'district'], 11, 20],
+          10, ['case', ['==', ['get','level'], 'district'], 16.5, 30]],
         'circle-color': '#FF1744', 'circle-opacity': 0.12, 'circle-blur': 1,
       }});
       map.addLayer({ id: 'raid-dots', type: 'circle', source: 'air-raid-alerts', paint: {
-        'circle-radius': ['*', ['case', ['==', ['get','level'], 'district'], 0.7, 1],
-          ['interpolate',['linear'],['zoom'], 1,5, 5,8, 10,12]],
+        // District alerts (0.7x) render tighter than oblast-wide.
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          1,  ['case', ['==', ['get','level'], 'district'], 3.5, 5],
+          5,  ['case', ['==', ['get','level'], 'district'], 5.6, 8],
+          10, ['case', ['==', ['get','level'], 'district'], 8.4, 12]],
         'circle-color': '#FF1744', 'circle-opacity': 0.9,
         'circle-stroke-width': 2, 'circle-stroke-color': '#FF1744', 'circle-stroke-opacity': 0.5,
       }});
@@ -471,10 +477,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // Maritime Ships (moving entities)
       map.addLayer({ id: 'ship-dots', type: 'circle', source: 'maritime-ships', paint: {
         // Shadow-fleet (sanctioned) vessels render larger so they stand out.
-        // Base radius enlarged so vessels are an easy click/tap target.
-        'circle-radius': ['case', ['==', ['get','shadow_fleet'], true],
-          ['interpolate',['linear'],['zoom'], 1,5, 5,7, 10,10],
-          ['interpolate',['linear'],['zoom'], 1,3, 5,5, 10,8]],
+        // Zoom interpolate must be top-level; shadow-fleet sizing goes in each stop.
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          1,  ['case', ['==', ['get','shadow_fleet'], true], 5, 3],
+          5,  ['case', ['==', ['get','shadow_fleet'], true], 7, 5],
+          10, ['case', ['==', ['get','shadow_fleet'], true], 10, 8]],
         // Shadow-fleet = magenta, overriding the type color
         'circle-color': ['case', ['==', ['get','shadow_fleet'], true], '#E040FB',
           ['match', ['get','type'], 'military','#FF1744', 'tanker','#FF9500', 'cargo','#00BCD4', '#fff']],

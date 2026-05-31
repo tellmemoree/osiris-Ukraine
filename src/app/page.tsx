@@ -290,7 +290,14 @@ export default function Dashboard() {
       if (res.ok) {
         const json = await res.json();
         const d = transform ? transform(json) : json;
-        dataRef.current = { ...dataRef.current, ...d };
+        // Don't clobber a previously-good non-empty array with a transient
+        // empty one (e.g. Telegram rate-limit returns empty news). Keep last good.
+        const merged: Record<string, any> = { ...dataRef.current };
+        for (const [k, v] of Object.entries(d)) {
+          if (Array.isArray(v) && v.length === 0 && Array.isArray(merged[k]) && merged[k].length > 0) continue;
+          merged[k] = v;
+        }
+        dataRef.current = merged;
         setDataVersion(v => v + 1);
         setBackendStatus('connected');
       }
@@ -318,7 +325,7 @@ export default function Dashboard() {
     // Polling — OPTIMIZED intervals to minimize edge requests
     const intervals = [
       setInterval(() => fetchEndpoint('/api/earthquakes'), 900000),  // 15 min (was 5)
-      setInterval(() => fetchEndpoint('/api/news'), 1800000),        // 30 min (was 10)
+      setInterval(() => fetchEndpoint('/api/news'), 180000),         // 3 min (recover fast from transient empty)
       setInterval(() => fetchEndpoint('/api/markets', d => ({ markets: d })), 900000), // 15 min (was 5)
     ];
     return () => {
@@ -1114,7 +1121,7 @@ export default function Dashboard() {
         <button
           onClick={toggleHud}
           title={hudVisible ? 'Hide HUD' : 'Show HUD'}
-          className="desktop-only absolute bottom-1 left-1/2 -translate-x-1/2 z-[210] pointer-events-auto glass-panel px-2 py-0.5 flex items-center gap-1 text-[8px] font-mono tracking-wider text-[var(--text-muted)] hover:text-[var(--gold-primary)] transition-colors"
+          className="desktop-only absolute bottom-7 left-1/2 -translate-x-1/2 z-[210] pointer-events-auto glass-panel px-2 py-0.5 flex items-center gap-1 text-[8px] font-mono tracking-wider text-[var(--text-muted)] hover:text-[var(--gold-primary)] transition-colors"
         >
           {hudVisible ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronUp className="w-2.5 h-2.5" />}
           {hudVisible ? 'HIDE HUD' : 'SHOW HUD'}
