@@ -6,7 +6,7 @@ import {
   Plane, Satellite, Activity, Globe, Radio, Eye,
   Shield, Sun, AlertTriangle, Camera, Flame, Target,
   CloudLightning, Radiation, Tv, Anchor, Ship, Newspaper,
-  ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Network, Zap, Siren,
+  ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Network, Zap, Siren, Bomb,
 } from 'lucide-react';
 
 interface LayerPanelProps {
@@ -81,6 +81,7 @@ const LAYER_GROUPS = [
     color: '#FF1744',
     layers: [
       { key: 'air_raids', label: 'Air Raid Alerts', icon: Siren, color: '#FF1744', dataKey: 'air_raids' },
+      { key: 'kab_threats', label: 'KAB / Glide-Bomb', icon: Bomb, color: '#FF6B00', dataKey: 'kab_threats' },
       { key: 'power_outages', label: 'Power Outages', icon: Zap, color: '#FFD500', dataKey: 'power_outages' },
     ],
   },

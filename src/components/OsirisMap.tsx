@@ -109,7 +109,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-cctv', '#39FF14', 10);
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -216,6 +216,22 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-field': ['get','regionName'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 1.8], 'text-allow-overlap': false,
       }, paint: { 'text-color': '#FF1744', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // KAB / glide-bomb threats — deep-orange (Telegram-derived, oblast-level).
+      // Distinct from air-raid red so the two signals don't read as the same thing.
+      map.addLayer({ id: 'kab-glow', type: 'circle', source: 'kab-threats', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 13, 5, 22, 10, 34],
+        'circle-color': '#FF6B00', 'circle-opacity': 0.12, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'kab-dots', type: 'circle', source: 'kab-threats', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 5.5, 5, 9, 10, 13],
+        'circle-color': '#FF6B00', 'circle-opacity': 0.9,
+        'circle-stroke-width': 2, 'circle-stroke-color': '#FFB000', 'circle-stroke-opacity': 0.6,
+      }});
+      map.addLayer({ id: 'kab-label', type: 'symbol', source: 'kab-threats', minzoom: 4, layout: {
+        'text-field': ['concat', 'KAB ', ['get','regionName']], 'text-size': 9, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.9], 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#FF8C00', 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
       // Power Outages — amber/yellow grid-down indicators
       map.addLayer({ id: 'outage-glow', type: 'circle', source: 'power-outages', paint: {
@@ -678,6 +694,27 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
+    // ── KAB / Glide-Bomb Threats (Telegram-derived) ──
+    map.on('click', 'kab-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      let sources: string[] = [];
+      try { sources = p.sources ? JSON.parse(p.sources) : []; } catch { sources = []; }
+      const srcLabel = sources.length ? sources.join(', ') : '—';
+      popup(coords, `<div style="${pStyle}border:1px solid rgba(255,107,0,0.45);max-width:300px;">
+        <div style="color:#FF6B00;font-size:13px;font-weight:700;margin-bottom:6px;">💣 KAB THREAT</div>
+        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${p.regionName||'Unknown region'}</div>
+        <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">${p.count||1} mention(s) · last 3h · OSINT Telegram</div>
+        <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid rgba(255,107,0,0.4);padding-left:6px;">${(p.text||'').replace(/</g,'&lt;')}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
+          <div><span style="color:#5C5A54;">LAST SEEN</span><br/><span style="color:#E8E6E0;">${p.startedAt ? new Date(p.startedAt).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
+          <div><span style="color:#5C5A54;">SOURCES</span><br/><span style="color:#E8E6E0;font-size:8px;">${srcLabel}</span></div>
+        </div>
+        <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Heuristic text signal — verify before acting.</div>
+      </div>`);
+    });
+
     // ── Power Outages ──
     map.on('click', 'outage-dots', e => {
       if (!e.features?.length) return;
@@ -768,7 +805,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Generic hover for clickables ──
-    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-air','sdk-air-glow','sdk-intel','sdk-intel-glow','raid-dots','outage-dots'].forEach(layer => {
+    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-air','sdk-air-glow','sdk-intel','sdk-intel-glow','raid-dots','outage-dots','kab-dots'].forEach(layer => {
       map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
     });
@@ -1389,6 +1426,19 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     }
   }, [mapReady, data.air_raids, activeLayers.air_raids, setGeo]);
 
+  // KAB / glide-bomb threats (Telegram-derived, oblast-level point markers).
+  useEffect(() => {
+    if (!mapReady) return;
+    const threats = activeLayers.kab_threats && data.kab_threats ? data.kab_threats : [];
+    setGeo('kab-threats', threats.filter((t: any) => t.lat && t.lng).map((t: any) => ({
+      type: 'Feature', geometry: { type: 'Point', coordinates: [t.lng, t.lat] },
+      properties: {
+        regionName: t.regionName, oblast: t.oblast, count: t.count,
+        startedAt: t.startedAt, text: t.text, sources: t.sources, alertType: t.alertType,
+      },
+    })));
+  }, [mapReady, data.kab_threats, activeLayers.kab_threats, setGeo]);
+
   useEffect(() => {
     if (!mapReady) return;
     setGeo('power-outages', activeLayers.power_outages && data.power_outages
@@ -1474,6 +1524,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['sweep-connections','sweep-pulse-ring','sweep-device-glow','sweep-device-dots','sweep-device-labels'], true);
     setVis(['raid-oblast-fill','raid-oblast-outline','raid-district-fill','raid-district-outline','raid-glow','raid-dots','raid-label'], activeLayers.air_raids);
     setVis(['outage-glow','outage-dots','outage-label'], activeLayers.power_outages);
+    setVis(['kab-glow','kab-dots','kab-label'], activeLayers.kab_threats);
   }, [mapReady, activeLayers, setVis]);
 
   // IP Sweep visualization

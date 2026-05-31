@@ -141,6 +141,7 @@ export default function Dashboard() {
     sdk_stream: true,
     air_raids: false,
     power_outages: false,
+    kab_threats: false,
   });
   const [liveFeedUrl, setLiveFeedUrl] = useState<string | null>(null);
   const [liveFeedName, setLiveFeedName] = useState('');
@@ -407,6 +408,11 @@ export default function Dashboard() {
       fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages }));
       layerFetchedRef.current.add('power_outages');
     }
+    // KAB / Glide-Bomb Threats (Telegram-derived)
+    if (activeLayers.kab_threats && !layerFetchedRef.current.has('kab_threats')) {
+      fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats }));
+      layerFetchedRef.current.add('kab_threats');
+    }
 
   }, [activeLayers]);
 
@@ -428,6 +434,9 @@ export default function Dashboard() {
     }
     if (activeLayers.air_raids) {
       intervals.push(setInterval(() => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })), 60000)); // 1 min
+    }
+    if (activeLayers.kab_threats) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })), 60000)); // 1 min
     }
     if (activeLayers.power_outages) {
       intervals.push(setInterval(() => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })), 300000)); // 5 min
