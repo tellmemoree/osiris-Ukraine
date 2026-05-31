@@ -74,6 +74,63 @@ documented as a best-effort heuristic only.
   Consider enforcing lint in CI / removing any `eslint.ignoreDuringBuilds` so this
   debt can't grow silently.
 
+### 4. Investigate: only ~2 shadow-fleet ships render on the map
+The dynamic watchlist now holds ~1,940 IMOs, yet the map shows only ~2 vessels in the
+`shadow_fleet` layer. The watchlist size is almost certainly **not** the problem — the
+match path is.
+
+- **Most likely cause:** a ship is flagged only when AIS **static data** (type-5
+  message, the one carrying `ImoNumber`) arrives *and* its IMO is in the set. Position
+  reports (type 1/2/3) — the vast majority of the stream — carry MMSI but **no IMO**, so
+  most vessels are never cross-referenced. Static messages are broadcast infrequently
+  (minutes apart), so within a cache window only a handful of ships ever get an IMO
+  attached → only those can be flagged.
+- **Also check:**
+  - Whether the synthetic ghost ships (decision #1) dominate the payload — they have no
+    IMO and can never be flagged, diluting the visible fleet.
+  - The `ship-shadow-dots` layer filter in `OsirisMap.tsx`
+    (`['==', ['get','shadow_fleet'], true]`) vs the base `ship-dots` filter
+    (`['!=', ['get','shadow_fleet'], true]`) — confirm the split is consistent and the
+    flag is actually serialized into the GeoJSON feature properties.
+  - Whether `getShadowFleetImos().has(staticData.ImoNumber)` is comparing the same type
+    (number vs string) — IMOs parsed from OFAC are `number`; AIS `ImoNumber` should be
+    too, but verify no string leaks in.
+- **Touch points:** `src/app/api/maritime/route.ts` (shadow flagging on static-data
+  receipt), `src/lib/shadowFleet.ts`, `src/components/OsirisMap.tsx` (`ship-shadow-dots`).
+- **Likely conclusion:** this is expected behavior of MMSI-only position streams, not a
+  bug — but it should be confirmed and, if so, documented (consider persisting an
+  MMSI→IMO map across cache windows so a ship stays flagged after its one static
+  message, rather than re-losing the IMO each refresh).
+
+### 5. Investigate: red oblast fills for active air-raid alarms render incorrectly
+The oblast/rayon polygon fills added in `1a0bec7` ("oblast/rayon polygon fills for air
+raids") paint the wrong regions / render incorrectly. **A screenshot will be provided**
+when this is picked up — do not start without it.
+
+- **Suspects to check (in priority order):**
+  1. **Name matching** between the alert feed (`alerts.com.ua` oblast names, in
+     Ukrainian/transliterated) and the polygon source's `properties.name` — a mismatch
+     would light up the wrong oblast or none.
+  2. **GeoJSON ring winding / coordinate order** — fills require `[lng, lat]` order and
+     correct outer-ring winding; an inverted ring fills the *complement* of the polygon
+     (everything except the oblast).
+  3. **Filter/feature-state wiring** on the `air-raid-alerts` layer in `OsirisMap.tsx` —
+     whether "active" is matched per-feature or applied to all polygons.
+  4. Disputed-border / Crimea polygons (hidden per `1a0bec7`) leaking into the active set.
+- **Touch points:** `src/app/api/air-raids/route.ts` (alert→oblast mapping),
+  `src/components/OsirisMap.tsx` (`air-raid-alerts` source + fill layer), and the oblast
+  polygon GeoJSON asset.
+
+### 6. (This session) React #418 hydration warning — likely benign
+A `Minified React error #418` (React 19.2.4 hydration mismatch) was observed in the
+console. Audited every first-paint render path — clocks, `localStorage`/`window` reads,
+render-time `toLocaleTimeString()`, the root layout, and the splash — **all are correctly
+deferred or gated**, so the app code is clean on this front. The remaining realistic cause
+is a **browser extension** mutating the DOM before hydration (the error message lists this
+explicitly). Confirm via Incognito + extensions-off hard reload; if it vanishes it's an
+extension and can be ignored. Belt-and-suspenders fix if desired: `suppressHydrationWarning`
+on `<body>` in `layout.tsx` and harden the `typeof window` branch in `SharePanel.tsx:32`.
+
 ---
 
 ## Notes
