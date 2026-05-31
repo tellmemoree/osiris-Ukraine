@@ -87,24 +87,32 @@ hard reload; if it vanishes, ignore.
   break. New code added this session (`kab-threats/route.ts`) is lint-clean; the `any`s
   added in `OsirisMap.tsx` deliberately match the file's existing style.
 
-### 5. ⏳ BLOCKED ON SCREENSHOT — red oblast fills render incorrectly
-The oblast/rayon polygon fills from `1a0bec7` paint the wrong regions. **A screenshot
-will be provided** when this is picked up — do not start without it.
+### 5. ✅ DONE — red oblast/rayon fills rendered with spikes & black holes
+**Root cause (from the screenshots): corrupted polygon geometry, not the alert→region
+matching.** The red dots sat on the correct rayons, but the fills showed triangular red
+spikes shooting across the map and black inverted triangles inside the fills. Geometry
+audit of `public/ukraine-districts.geojson` found the smoking gun: rings containing
+spurious **long connecting chords** (e.g. Bakhmut had a single ~23 km segment from
+`37.97`→`38.28` at constant latitude while every neighbor stepped ~0.01°). That is the
+signature of a **MultiPolygon flattened into a single Polygon ring** — the connecting
+chords self-intersect, and MapLibre's earcut tessellation renders the crossings as
+spikes + black (inverted-winding) triangles. 76/155 districts were self-intersecting,
+and winding was mixed (non-RFC-7946).
 
-- **Suspects (priority order):**
-  1. **Name matching** between the feed and the polygon `properties.name_en`/`name_ua`.
-     NB the feed is `vadimklimenko` (Ukrainian state names like `Харківська область`),
-     and the fill filter normalizes apostrophes (`OsirisMap.tsx` ~L1376) — a mismatch
-     lights the wrong oblast or none.
-  2. **GeoJSON ring winding / coordinate order** — fills need `[lng,lat]` and correct
-     outer-ring winding; an inverted ring fills the *complement* (everything except the
-     oblast — a classic "whole map is red" symptom).
-  3. **Filter wiring** on `raid-oblast-fill`/`raid-district-fill` (`OsirisMap.tsx`
-     ~L1378-1388) — oblast vs district `setFilter` literals.
-  4. Crimea/disputed-border polygons leaking into the active set.
-- **Touch points:** `src/app/api/air-raids/route.ts` (alert→oblast mapping, uses
-  `OBLAST_INFO` Ukrainian keys), `src/components/OsirisMap.tsx` (`air-raid-alerts` source
-  + `raid-oblast-fill`/`raid-district-fill` layers), and the oblast polygon GeoJSON asset.
+**Fix (commit below):** re-processed both `public/ukraine-oblasts.geojson` and
+`public/ukraine-districts.geojson` with `mapshaper -clean`, which dissolved the slivers,
+restored proper **MultiPolygons** (80 districts / 21 oblasts re-exploded), and made
+winding uniformly CCW. Verified afterwards: **0 self-intersecting rings**, names
+(`name_en`/`name_ua`) preserved so the existing filters keep matching, frontline rayons
+retain full area (Bakhmut/Pokrovsk/Kramatorsk/Mariupol ratios 1.00–1.05). `-clean`
+dropped 3 features — all **Crimea urban okrugs** (Dzhankoi, Yany Kapu, Simferopol) that
+are not in the air-raid feed mapping, so no live alert region was lost.
+
+- **Reproduce the regeneration if the assets are ever re-sourced:**
+  `mapshaper <in>.geojson -clean -o <out>.geojson` (mapshaper 0.7.x). Always re-audit for
+  self-intersections + CCW winding afterward.
+- **Note:** the other suspects (name-matching, filter wiring) were *not* the problem and
+  were left as-is.
 
 ### 7. 🔧 TODO — set up the recon (active-scan) tools
 The OsintPanel recon tools split into two tiers:
