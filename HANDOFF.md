@@ -57,9 +57,24 @@ infrequent `ShipStaticData` message; the `if (existing.lat && existing.lng)` sto
 guard discarded that whole update (flag included) when it arrived before the first
 position fix. Fix (commit `eda5ca8`): a sticky global `shadowMmsi: Set<number>` records
 matched MMSIs, and the flag is re-attached on every update — surviving message ordering
-and persisting across the ship's lifetime. Expect a meaningfully higher count (still
-bounded by how many sanctioned tankers actually broadcast a valid IMO in the sampled
-boxes, but no longer artificially dropped).
+and persisting across the ship's lifetime.
+
+**Follow-up (commit `02f0e04`) — the real recall lever was MMSI matching.** The sticky
+fix alone could not raise the count, because IMO is only broadcast in the infrequent
+`ShipStaticData` message — a vessel could be flagged only if it sent a matching static
+message in-window, which dark-fleet tankers often don't. The OFAC SDN source also
+carries **MMSIs** (761 unique, `MMSI 123456789`), and MMSI rides on **every** position
+report. `shadowFleet.ts` now parses + exposes `getShadowFleetMmsis()`, and the maritime
+handler flags a vessel the instant a sanctioned MMSI appears in any message. IMO match
+stays as the complementary path. This is the change that should actually raise the
+on-map count (still bounded by which sanctioned vessels are in the AIS bounding boxes
+and not AIS-dark).
+
+> ⚠️ **Deployment note:** the live app is served by a separate `next-server` process
+> (different user) from its own checkout — pushing to `origin/osiris-Ukraine` does NOT
+> update it. To see #4 (or any fix here), that deployment must `git pull` + rebuild
+> (`next build`) + restart, and the browser must hard-refresh (the `.geojson` and API
+> responses are cached).
 
 ### 6. ✅ DONE — React #418 hydration warning hardened
 Audited every first-paint render path (clocks, `localStorage`/`window` reads,
