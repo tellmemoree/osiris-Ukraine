@@ -29,8 +29,10 @@ export default function SharePanel({ mapView, activeLayers, mouseCoords }: Share
       .join(',');
     if (layerKeys) params.set('layers', layerKeys);
 
-    const base = typeof window !== 'undefined' ? window.location.origin : 'https://osiris.vercel.app';
-    return `${base}/?${params.toString()}`;
+    // Runs only from user interactions (copy / share links in the opened panel),
+    // i.e. always client-side, so window.location.origin is safe and we avoid a
+    // server/client branch that could diverge in the rendered share URL.
+    return `${window.location.origin}/?${params.toString()}`;
   }, [mapView, activeLayers, mouseCoords]);
 
   const copyToClipboard = useCallback(async () => {

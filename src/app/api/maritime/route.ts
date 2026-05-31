@@ -118,14 +118,23 @@ interface Ship {
 const globalForAis = globalThis as unknown as {
   shipsCache: Map<number, Ship>;
   isAisConnecting: boolean;
+  // MMSI→shadow-fleet sticky set. AIS broadcasts IMO only in the infrequent
+  // ShipStaticData (type-5) message, while position is in the frequent type-1/2/3
+  // reports. Recording the MMSI here the moment we see a sanctioned IMO means the
+  // flag survives even if that static message arrives before any position fix
+  // (and is therefore dropped by the lat/lng store guard), and stays attached
+  // across the ship's subsequent position-only updates.
+  shadowMmsi: Set<number>;
 };
 
 if (!globalForAis.shipsCache) {
   globalForAis.shipsCache = new Map();
   globalForAis.isAisConnecting = false;
+  globalForAis.shadowMmsi = new Set();
 }
 
 const shipsCache = globalForAis.shipsCache;
+const shadowMmsi = globalForAis.shadowMmsi;
 
 function connectAisStream() {
   if (globalForAis.isAisConnecting) return;
@@ -214,11 +223,17 @@ function connectAisStream() {
         existing.name = staticData.Name ? staticData.Name.trim() : existing.name;
         existing.destination = staticData.Destination ? staticData.Destination.trim() : existing.destination;
         existing.type = getOsirisShipType(staticData.Type);
-        // Cross-reference against the dynamic shadow-fleet watchlist (IMO available in ShipStaticData)
+        // Cross-reference against the dynamic shadow-fleet watchlist (IMO is only
+        // available in ShipStaticData). Record the MMSI in the sticky set so the
+        // flag is not lost if this message precedes the first position fix.
         if (staticData.ImoNumber && getShadowFleetImos().has(staticData.ImoNumber)) {
-          existing.shadow_fleet = true;
+          shadowMmsi.add(mmsi);
         }
       }
+
+      // Re-attach the sticky shadow-fleet flag on every update (covers the case
+      // where the static/IMO message was received in an earlier update).
+      existing.shadow_fleet = shadowMmsi.has(mmsi);
 
       // Only store if we have coordinates
       if (existing.lat && existing.lng) {
@@ -248,74 +263,7 @@ function connectAisStream() {
 // Start connection process asynchronously
 connectAisStream();
 
-// --- SCM Integration: VesselAPI Hybrid Fallback (Satellite AIS) ---
-let lastVesselApiFetch = 0;
-async function fetchVesselApiFallback() {
-  const apiKey = process.env.VESSEL_API_KEY;
-  if (!apiKey) return;
-  const now = Date.now();
-  if (now - lastVesselApiFetch < 60000) return; // Poll every 60s max
-  lastVesselApiFetch = now;
-
-  try {
-    // In a real production scenario, this makes a REST request to VesselAPI bounding box endpoint:
-    // const res = await fetch(`https://api.vesselapi.com/v1/tracking?bbox=...`, { headers: { Authorization: `Bearer ${apiKey}` } });
-    
-    // For this simulation, since we are authenticating successfully, we inject realistic satellite AIS data
-    // into the known blind spots (Hormuz and Suez) that aisstream.io cannot cover.
-    
-    const ghostShips = [];
-    const numHormuz = Math.floor(Math.random() * 20) + 45; // 45-65 ships (Trigger CRITICAL)
-    const numSuez = Math.floor(Math.random() * 15) + 30; // 30-45 ships (Trigger HIGH/CRITICAL)
-    
-    // Generate Hormuz
-    for (let i=0; i<numHormuz; i++) {
-      ghostShips.push({
-        mmsi: 900000000 + i,
-        lat: 25.5 + Math.random() * 1.5,
-        lng: 54.5 + Math.random() * 2.5,
-        speed: Math.random() * 14,
-        heading: Math.random() * 360,
-        type: Math.random() > 0.5 ? 'tanker' : 'cargo',
-        name: `V-SAT ${Math.floor(Math.random()*9000)+1000}`,
-        destination: 'UNKNOWN',
-        flag: 'S-AIS'
-      });
-    }
-
-    // Generate Suez
-    for (let i=0; i<numSuez; i++) {
-      ghostShips.push({
-        mmsi: 910000000 + i,
-        lat: 28.0 + Math.random() * 3.5,
-        lng: 32.5 + Math.random() * 1.0,
-        speed: Math.random() * 12,
-        heading: Math.random() * 360,
-        type: Math.random() > 0.7 ? 'tanker' : 'cargo',
-        name: `V-SAT ${Math.floor(Math.random()*9000)+1000}`,
-        destination: 'EUROPE',
-        flag: 'S-AIS'
-      });
-    }
-
-    // Merge into global cache
-    // TODO: cross-reference against getShadowFleetImos() once the satellite feed provides IMO numbers
-    for (const ship of ghostShips) {
-      shipsCache.set(ship.mmsi, {
-        id: ship.mmsi, mmsi: ship.mmsi, lat: ship.lat, lng: ship.lng, speed: ship.speed,
-        heading: ship.heading, timestamp: Date.now(), type: ship.type,
-        name: ship.name, destination: ship.destination, flag: ship.flag
-      });
-    }
-  } catch (e) {
-    console.warn("VesselAPI Fallback Error:", e);
-  }
-}
-
 export async function GET() {
-  // Trigger Hybrid Fallback
-  await fetchVesselApiFallback();
-
   // Clean up stale ships (older than 10 minutes)
   const now = Date.now();
   for (const [mmsi, ship] of shipsCache.entries()) {

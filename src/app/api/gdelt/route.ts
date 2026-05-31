@@ -85,9 +85,21 @@ const GEO_DICT: Record<string, [number, number]> = {
 
 const CONFLICT_KEYWORDS = ['attack', 'strike', 'missile', 'drone', 'war', 'troops', 'military', 'protest', 'riot', 'police', 'clash', 'bomb', 'killed', 'forces', 'mobilization', 'counterattack', 'offensive', 'ceasefire', 'shelling', 'artillery', 'occupied', 'liberated', 'incursion', 'bridgehead', 'shahed', 'himars', 'kab', 'glide bomb'];
 
+// A geo-mapped conflict event emitted to the map layer.
+interface ConflictEvent {
+  id: string;
+  lat: number;
+  lng: number;
+  name: string;
+  url: string;
+  html: string;
+  type: 'conflict';
+  published: string;
+}
+
 export async function GET() {
   try {
-    const allEvents: any[] = [];
+    const allEvents: ConflictEvent[] = [];
     let eventId = 0;
 
     for (const feed of RSS_FEEDS) {

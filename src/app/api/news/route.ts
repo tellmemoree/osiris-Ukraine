@@ -74,8 +74,17 @@ function findCoords(text: string): [number, number] | null {
   return null;
 }
 
-function parseTelegramHTML(html: string, channel: string): any[] {
-  const items: any[] = [];
+// A parsed feed item, before risk-scoring/geo-mapping in GET().
+interface ParsedArticle {
+  title: string;
+  description: string;
+  link: string;
+  pubDate: string;
+  source: string;
+}
+
+function parseTelegramHTML(html: string, channel: string): ParsedArticle[] {
+  const items: ParsedArticle[] = [];
   // Split on the per-message wrapper so each chunk contains the message body
   // AND its footer (where the <time datetime> date link lives). The previous
   // block regex stopped before the footer, so every item fell back to now().
@@ -102,8 +111,8 @@ function parseTelegramHTML(html: string, channel: string): any[] {
   return items;
 }
 
-function parseRSSItems(xml: string, sourceName: string): any[] {
-  const items: any[] = [];
+function parseRSSItems(xml: string, sourceName: string): ParsedArticle[] {
+  const items: ParsedArticle[] = [];
   const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
   let match;
 
@@ -143,7 +152,7 @@ export async function GET() {
     });
 
     const feedResults = await Promise.allSettled(feedPromises);
-    const allArticles: any[] = [];
+    const allArticles: ParsedArticle[] = [];
 
     for (const result of feedResults) {
       if (result.status === 'fulfilled') allArticles.push(...result.value);

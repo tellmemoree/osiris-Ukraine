@@ -198,7 +198,11 @@ export default function RootLayout({
         />
 
       </head>
-      <body className="antialiased">
+      {/* suppressHydrationWarning: browser extensions (password managers,
+          translators, etc.) commonly inject attributes onto <body> before React
+          hydrates, which otherwise surfaces as a React #418 hydration warning.
+          This suppresses that one-level attribute diff only. */}
+      <body className="antialiased" suppressHydrationWarning>
         <ErrorBoundary name="OSIRIS Core">
           {children}
         </ErrorBoundary>
