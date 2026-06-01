@@ -281,9 +281,43 @@ async function fetchAsiaCameras(): Promise<any[]> {
   return cams;
 }
 
+// Russia / Ukraine public webcams.
+//
+// Unlike the TfL/WSDOT/Caltrans gov APIs above, there is no keyless public RU/UA
+// traffic-cam JSON API that resolves reliably (regional portals are auth-gated or
+// geo-blocked). So these are curated pins to intentionally-public webcam
+// DIRECTORIES whose URLs are verified-reachable (HTTP 200) — each marker opens the
+// public cams for that city/country. To add direct image/MJPEG feeds or
+// exposed-camera discovery, see docs/CAMERA_SOURCES.md.
+async function fetchRussiaCameras(): Promise<any[]> {
+  const RU_DIR = 'https://www.skylinewebcams.com/en/webcam/russia.html';
+  return [
+    { id: 'ru-cam-moscow', lat: 55.7558, lng: 37.6173, name: 'Moscow — live public cams', city: 'Moscow', country: 'Russia', feed_url: 'https://www.earthcam.com/world/russia/moscow/', source: 'EarthCam' },
+    { id: 'ru-cam-spb', lat: 59.9311, lng: 30.3609, name: 'St. Petersburg — public webcam directory', city: 'St. Petersburg', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+    { id: 'ru-cam-sochi', lat: 43.5855, lng: 39.7231, name: 'Sochi — public webcam directory', city: 'Sochi', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+    { id: 'ru-cam-kazan', lat: 55.7963, lng: 49.1088, name: 'Kazan — public webcam directory', city: 'Kazan', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+    { id: 'ru-cam-ekb', lat: 56.8389, lng: 60.6057, name: 'Yekaterinburg — public webcam directory', city: 'Yekaterinburg', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+    { id: 'ru-cam-rostov', lat: 47.2357, lng: 39.7015, name: 'Rostov-on-Don — public webcam directory', city: 'Rostov-on-Don', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+    { id: 'ru-cam-vladivostok', lat: 43.1155, lng: 131.8855, name: 'Vladivostok — public webcam directory', city: 'Vladivostok', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+  ];
+}
+
+async function fetchUkraineCameras(): Promise<any[]> {
+  const UA_DIR = 'https://www.skylinewebcams.com/en/webcam/ukraine.html';
+  return [
+    { id: 'ua-cam-kyiv', lat: 50.4501, lng: 30.5234, name: 'Kyiv — live public cams', city: 'Kyiv', country: 'Ukraine', feed_url: 'https://www.earthcam.com/world/ukraine/kiev/', source: 'EarthCam' },
+    { id: 'ua-cam-lviv', lat: 49.8397, lng: 24.0297, name: 'Lviv — public webcam directory', city: 'Lviv', country: 'Ukraine', feed_url: UA_DIR, source: 'Skyline (UA)' },
+    { id: 'ua-cam-odesa', lat: 46.4825, lng: 30.7233, name: 'Odesa — public webcam directory', city: 'Odesa', country: 'Ukraine', feed_url: UA_DIR, source: 'Skyline (UA)' },
+    { id: 'ua-cam-kharkiv', lat: 49.9935, lng: 36.2304, name: 'Kharkiv — public webcam directory', city: 'Kharkiv', country: 'Ukraine', feed_url: UA_DIR, source: 'Skyline (UA)' },
+    { id: 'ua-cam-dnipro', lat: 48.4647, lng: 35.0462, name: 'Dnipro — public webcam directory', city: 'Dnipro', country: 'Ukraine', feed_url: UA_DIR, source: 'Skyline (UA)' },
+  ];
+}
+
 
 // ═══ REGION MAPPING ═══
 const REGION_FETCHERS: Record<string, () => Promise<any[]>> = {
+  'russia': fetchRussiaCameras,
+  'ukraine': fetchUkraineCameras,
   'uk': fetchTfLCameras,
   'us-west': async () => [...await fetchWSDOTCameras(), ...await fetchCaltransCameras()],
   'us-east': fetchUSEastCameras,
@@ -321,6 +355,10 @@ function getRegionsForBounds(lat: number, lng: number, radius: number): string[]
   if (lat > 24 && lat < 49 && lng > -105 && lng < -80) regions.push('us-central');
   // Canada
   if (lat > 42 && lat < 70 && lng > -141 && lng < -52) regions.push('canada');
+  // Ukraine
+  if (lat > 44 && lat < 53 && lng > 21.5 && lng < 41) regions.push('ukraine');
+  // Russia (western RU + occupied territories through to the Far East)
+  if (lat > 41 && lat < 78 && lng > 19 && lng < 180) regions.push('russia');
   // Europe
   const inBulgaria = lat > 41 && lat < 44.5 && lng > 22 && lng < 29.5;
   const inGreece = lat > 34.5 && lat < 41.8 && lng > 19 && lng < 30;

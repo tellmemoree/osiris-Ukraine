@@ -147,36 +147,43 @@ The OsintPanel recon tools split into two tiers:
   authorized to scan. Gate the scanner backend (allow-list / auth) before exposing it;
   do not ship an open relay.
 
-### 8. 🔧 TODO — more OSINT coverage on Russia
-Russia currently appears only incidentally: news/gdelt keyword hits, maritime Russian
-ports + Black Sea Fleet, and `isRussianMilitary()` in flights. Add dedicated RU OSINT:
-- **Sources:** RU milblogger / regional-emergency Telegram channels (only `rybar` is in
-  the news list today — extend `TELEGRAM_CHANNELS`), RU rail/logistics and airfield
-  activity, thermal anomalies over RU military sites (NASA FIRMS is already wired in
-  `fires/route.ts` — add RU areas of interest).
-- **Geo precision:** the news `KEYWORD_COORDS` and gdelt `GEO_DICT` only carry RU border
-  oblasts (Belgorod/Kursk/Bryansk/Voronezh/Rostov) — extend to interior oblasts/cities
-  for finer placement.
-- **Touch points:** `src/app/api/news/route.ts` (`TELEGRAM_CHANNELS`, `KEYWORD_COORDS`),
-  `src/app/api/gdelt/route.ts` (`GEO_DICT`), `src/app/api/fires/route.ts` (AOIs), and
-  possibly a dedicated `/api/russia-*` route if the signals warrant their own layer.
+### 8. ✅ DONE — more OSINT coverage on Russia (commit `e431f67`)
+- **RU Telegram channels:** added 9 milblogger/MoD channels (`milinfolive`, `wargonzo`,
+  `epoddubny`, `sashakots`, `dva_majora`, `voenkorKotenok`, `rvvoenkor`, `grey_zone`,
+  `mod_russia`), all verified scrapeable via `t.me/s/`. Dropped `rybar` from the scrape
+  list (its `/s/` preview is disabled) but kept as a source link. ~72 RU items live.
+- **Side tagging + RU tab:** every `/api/news` item now carries `side = ua | ru | world`
+  (by source channel); `LiveAlerts.tsx` gained a separate **🇷🇺 RU MILBLOG** tab + count
+  badge alongside UA.
+- **Cyrillic geo:** added a bilingual gazetteer (RU cities, border oblasts, bomber/strike
+  airfields — Engels, Morozovsk, Millerovo, Yeysk, Dyagilevo, Olenya, Saky/Dzhankoi — plus
+  UA/RU spellings of frontline cities) to news `KEYWORD_COORDS`, and Latin RU interior
+  cities/airfields to gdelt `GEO_DICT`. `findCoords` now tolerates Russian/Ukrainian case
+  suffixes for Cyrillic keys (Покровск→под Покровском) while keeping Latin strict
+  (Iranian≠Iran); guarded Белоруссия≠Россия. RU geo recall ~15→27 of 72 live.
+- **Still open (smaller follow-ups):** RU rail/logistics + FIRMS thermal AOIs over RU
+  military sites were *not* done (FIRMS already loads a global feed, so RU fires appear
+  already; a dedicated AOI overlay is optional). No separate `/api/russia-*` layer added —
+  the signals ride the existing news/gdelt layers.
 
-### 9. 🔧 TODO — Russia cameras
-The CCTV layer (`/api/cctv`) covers only US / UK / Canada traffic cams (TfL, WSDOT,
-Caltrans, 511 Ontario/Alberta, Ville MTL, …) — **zero RU/UA coverage**. Add Russian
-public camera feeds:
-- **Public RU traffic-cam portals:** many RU cities/regions publish open JSON/MJPEG
-  camera feeds (regional traffic / ЦОДД portals). Add them as new source functions in
-  `cctv/route.ts` mirroring the existing pattern — each emits
-  `{ id, lat, lng, name, city, country, feed_url, source }` pushed into `allCams`. They
-  render through the existing `cctv` map layer with no frontend changes.
-- **Exposed-camera discovery (optional, depends on #7 Shodan key):** Shodan host search
-  can surface RTSP/webcam banners by RU geo.
-- **⚠️ Legal/ethical caveat:** index only cameras that are *intentionally public*
-  (official traffic/city feeds). Do **not** access or expose private/credentialed
-  cameras. Document the source provenance per feed.
-- **Touch points:** `src/app/api/cctv/route.ts` (add RU source fns + merge into
-  `allCams`); markers already render via the `cctv` layer in `OsirisMap.tsx`.
+### 9. ✅ DONE (public feeds) — Russia/Ukraine cameras (commit below)
+Added `fetchRussiaCameras()` + `fetchUkraineCameras()` to `cctv/route.ts`, registered as
+`russia`/`ukraine` regions and wired into `getRegionsForBounds` (RU: lat 41–78/lng 19–180;
+UA: lat 44–53/lng 21.5–41). 12 pins total (7 RU + 5 UA).
+- **Why curated, not scraped:** there is **no keyless public RU/UA traffic-cam JSON API
+  that resolves reliably** — regional portals (`is74.ru`, `webcamera.ru`, RU ЦОДД) return
+  `000`/auth-gated from non-RU IPs, and `skylinewebcams` country pages aren't cleanly
+  scrapeable into coords. Rather than ship a fetcher that returns empty in prod (the
+  ghost-ship anti-pattern), pins point to **verified-200 intentionally-public webcam
+  directories** (EarthCam Moscow/Kyiv per-city pages; Skyline RU/UA directories), with
+  real city coordinates and labelled provenance. **Re-test the URLs from the deploy host**
+  — they may behave differently than from this box.
+- **Expansion + private/unsecured cams:** see **`docs/CAMERA_SOURCES.md`** — documents the
+  fetcher pattern for direct image/MJPEG/Windy feeds, plus Shodan host-search and Insecam
+  for exposed cameras (RTSP→HLS relay via go2rtc/MediaMTX, read-only discovery, gate the
+  layer behind auth). Shodan host search needs a paid `SHODAN_API_KEY` (ties into #7).
+- **Touch points:** `src/app/api/cctv/route.ts`; markers render via the existing `cctv`
+  layer in `OsirisMap.tsx` (no frontend change).
 
 ---
 
