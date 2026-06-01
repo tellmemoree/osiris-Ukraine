@@ -23,7 +23,7 @@ export async function GET(request: Request) {
 
     let countryName = '';
     let countryCode = '';
-    let locationInfo: any = {};
+    let locationInfo: { city?: string; [key: string]: unknown } = {};
 
     if (geoRes.ok) {
       const geoData = await geoRes.json();
@@ -128,7 +128,7 @@ export async function GET(request: Request) {
         subregion: countryData.subregion,
         languages: countryData.languages ? Object.values(countryData.languages) : [],
         currencies: countryData.currencies
-          ? Object.entries(countryData.currencies).map(([code, info]: [string, any]) => `${info.name} (${info.symbol || code})`)
+          ? Object.entries(countryData.currencies as Record<string, { name?: string; symbol?: string }>).map(([code, info]) => `${info.name} (${info.symbol || code})`)
           : [],
         flag: countryData.flag,
         flag_url: countryData.flags?.svg,

@@ -64,7 +64,7 @@ export async function GET() {
     }));
 
     // Enrich risk with live earthquake proximity
-    let quakeRisks: Record<string, number> = {};
+    const quakeRisks: Record<string, number> = {};
     try {
       const res = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson', {  });
       if (res.ok) {
@@ -74,7 +74,7 @@ export async function GET() {
           const place = f.properties?.place || '';
           const mag = f.properties?.mag || 0;
           // Extract country-ish context from place name
-          for (const [code, _] of Object.entries(RISK_FACTORS)) {
+          for (const code of Object.keys(RISK_FACTORS)) {
             if (place.toLowerCase().includes(code.toLowerCase())) {
               quakeRisks[code] = (quakeRisks[code] || 0) + mag;
             }
@@ -97,7 +97,7 @@ export async function GET() {
       total_exchanges: exchangeStatus.length,
       timestamp: new Date().toISOString(),
     });
-  } catch (err) {
+  } catch {
     return NextResponse.json({ countries: [], exchanges: [], error: 'Failed' }, { status: 500 });
   }
 }

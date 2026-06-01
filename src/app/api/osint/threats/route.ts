@@ -12,7 +12,8 @@ export async function GET(req: Request) {
   }
   
   try {
-    const results: any = { timestamp: new Date().toISOString() };
+    const results: { timestamp: string; otx?: { pulse_count?: number; [k: string]: unknown }; [key: string]: unknown } =
+      { timestamp: new Date().toISOString() };
 
     // 1. AlienVault OTX — public pulse feed (no key needed for public data)
     try {
@@ -27,7 +28,7 @@ export async function GET(req: Request) {
         });
         if (actRes.ok) {
           const data = await actRes.json();
-          results.pulses = (data.results || []).slice(0, 10).map((p: any) => ({
+          results.pulses = (data.results || []).slice(0, 10).map((p: { name?: string; description?: string; created?: string; modified?: string; tags?: string[]; adversary?: string; targeted_countries?: string[]; indicator_count?: number }) => ({
             name: p.name,
             description: p.description?.slice(0, 200),
             created: p.created,
