@@ -29,7 +29,7 @@ const SUPPLIERS = [
 ];
 
 export async function GET() {
-  let dynamicSuppliers = [...SUPPLIERS].map(s => ({ ...s, risk_level: 'NORMAL', active_threats: [] as string[] }));
+  const dynamicSuppliers = [...SUPPLIERS].map(s => ({ ...s, risk_level: 'NORMAL', active_threats: [] as string[] }));
 
   // Fast distance approximation (km)
   const getDistanceKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
@@ -45,13 +45,13 @@ export async function GET() {
       const eqData = await eqRes.json();
       const earthquakes = eqData.features || [];
       dynamicSuppliers.forEach(sup => {
-        const nearbyEq = earthquakes.filter((eq: any) => {
+        const nearbyEq = earthquakes.filter((eq: { geometry: { coordinates: number[] } }) => {
           const [lng, lat] = eq.geometry.coordinates;
           return getDistanceKm(sup.lat, sup.lng, lat, lng) < 150; // 150km impact zone
         });
         if (nearbyEq.length > 0) {
           sup.risk_level = 'CRITICAL';
-          sup.active_threats.push(`SEISMIC SHOCK (M${Math.max(...nearbyEq.map((eq: any) => eq.properties.mag)).toFixed(1)})`);
+          sup.active_threats.push(`SEISMIC SHOCK (M${Math.max(...nearbyEq.map((eq: { properties: { mag: number } }) => eq.properties.mag)).toFixed(1)})`);
         }
       });
     }
@@ -63,7 +63,7 @@ export async function GET() {
       const fireData = await fireRes.json();
       const fires = fireData.data || [];
       dynamicSuppliers.forEach(sup => {
-        const nearbyFires = fires.filter((f: any) => getDistanceKm(sup.lat, sup.lng, f.lat, f.lng) < 50); // 50km fire zone
+        const nearbyFires = fires.filter((f: { lat: number; lng: number }) => getDistanceKm(sup.lat, sup.lng, f.lat, f.lng) < 50); // 50km fire zone
         if (nearbyFires.length > 0) {
           if (sup.risk_level === 'NORMAL') sup.risk_level = 'HIGH';
           sup.active_threats.push(`WILDFIRE PROXIMITY (${nearbyFires.length} hotspots)`);
@@ -77,7 +77,7 @@ export async function GET() {
       const gdeltData = await gdeltRes.json();
       const conflicts = gdeltData.events || [];
       dynamicSuppliers.forEach(sup => {
-        const nearbyConflicts = conflicts.filter((c: any) => getDistanceKm(sup.lat, sup.lng, c.lat, c.lng) < 100);
+        const nearbyConflicts = conflicts.filter((c: { lat: number; lng: number }) => getDistanceKm(sup.lat, sup.lng, c.lat, c.lng) < 100);
         if (nearbyConflicts.length > 0) {
           sup.risk_level = 'CRITICAL';
           sup.active_threats.push(`ARMED CONFLICT / RIOT`);

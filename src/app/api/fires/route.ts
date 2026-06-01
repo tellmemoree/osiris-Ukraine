@@ -8,9 +8,21 @@ export const dynamic = 'force-dynamic';
  * Multi-source: NASA FIRMS Open Data (primary for global fires), NASA EONET (volcanoes)
  */
 
+interface FirePoint {
+  lat: number;
+  lng: number;
+  brightness: number;
+  confidence: string | number;
+  date: string;
+  time: string;
+  frp: number;
+  title?: string;
+  type: string;
+}
+
 export async function GET() {
   try {
-    let fires: any[] = [];
+    let fires: FirePoint[] = [];
     let source = '';
 
     // Source 1: NASA FIRMS Open Data (Global 24h CSV) - no API key needed
@@ -46,7 +58,7 @@ export async function GET() {
       });
       if (volcRes.ok) {
         const volcData = await volcRes.json();
-        const volcanoes = (volcData.events || []).map((e: any) => {
+        const volcanoes = (volcData.events || []).map((e: { geometry?: { coordinates?: number[]; date?: string }[]; title?: string }) => {
           const geo = e.geometry?.[e.geometry.length - 1];
           if (!geo?.coordinates) return null;
           return {
@@ -82,7 +94,7 @@ export async function GET() {
   }
 }
 
-function parseCSV(csv: string): any[] {
+function parseCSV(csv: string): FirePoint[] {
   const lines = csv.trim().split('\n');
   if (lines.length < 2) return [];
 
@@ -95,7 +107,7 @@ function parseCSV(csv: string): any[] {
   const timeIdx = header.indexOf('acq_time');
   const frpIdx = header.indexOf('frp');
 
-  const fires: any[] = [];
+  const fires: FirePoint[] = [];
   // Sample the data if there are too many rows to avoid browser lag. Limit to ~2000 points globally.
   const maxPoints = 2000;
   const step = lines.length > maxPoints ? Math.ceil(lines.length / maxPoints) : 1;

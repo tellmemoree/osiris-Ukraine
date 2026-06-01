@@ -5,7 +5,8 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {
-    const results: any = { threats: [], stats: {}, timestamp: new Date().toISOString() };
+    const results: { threats: Record<string, unknown>[]; stats: Record<string, unknown>; timestamp: string } =
+      { threats: [], stats: {}, timestamp: new Date().toISOString() };
 
     // 1. CISA Known Exploited Vulnerabilities (authoritative US govt source)
     try {
@@ -15,13 +16,13 @@ export async function GET() {
       if (res.ok) {
         const data = await res.json();
         const recent = (data.vulnerabilities || [])
-          .filter((v: any) => {
-            const added = new Date(v.dateAdded);
+          .filter((v: { dateAdded?: string }) => {
+            const added = new Date(v.dateAdded ?? 0);
             const daysAgo = (Date.now() - added.getTime()) / (1000 * 60 * 60 * 24);
             return daysAgo <= 30;
           })
           .slice(0, 10)
-          .map((v: any) => ({
+          .map((v: { cveID?: string; vulnerabilityName?: string; vendorProject?: string; product?: string; dateAdded?: string; dueDate?: string }) => ({
             id: v.cveID,
             name: v.vulnerabilityName,
             vendor: v.vendorProject,
