@@ -24,7 +24,7 @@ const RISK_COLORS: Record<string, string> = {
 export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsProps) {
   const [expanded, setExpanded] = useState(true);
   const [maximized, setMaximized] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'ukraine' | 'news' | 'quakes' | 'feeds'>('all');
+  const [filter, setFilter] = useState<'all' | 'ukraine' | 'russia' | 'news' | 'quakes' | 'feeds'>('all');
 
   // Built-in live feeds — verified video IDs (synced with /api/live-news)
   const BUILTIN_FEEDS = [
@@ -65,17 +65,25 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
   // Ukrainian / Russia-Ukraine war OSINT Telegram channels (monitored by /api/news).
   // Always listed as intel sources; SOURCE link opens the channel web preview.
   const TELEGRAM_SOURCES = [
-    { name: 'DeepState UA', channel: 'DeepStateUA' },
-    { name: 'WarTranslated', channel: 'wartranslated' },
-    { name: 'Liveuamap', channel: 'Liveuamap' },
-    { name: 'Militaryland', channel: 'Militaryland' },
-    { name: 'UA Insider', channel: 'UA_Insider' },
-    { name: 'UA General Staff', channel: 'GeneralStaffUA' },
-    { name: 'UA Forces', channel: 'ua_forces' },
-    { name: 'Ukraine War Report', channel: 'UkraineWarReport' },
-    { name: 'OSINTtechnical', channel: 'OSINTtechnical' },
-    { name: 'Faytuks', channel: 'Faytuks' },
-    { name: 'Rybar', channel: 'rybar' },
+    { name: 'DeepState UA', channel: 'DeepStateUA', side: 'ua' },
+    { name: 'WarTranslated', channel: 'wartranslated', side: 'ua' },
+    { name: 'Liveuamap', channel: 'Liveuamap', side: 'ua' },
+    { name: 'Militaryland', channel: 'Militaryland', side: 'ua' },
+    { name: 'UA Insider', channel: 'UA_Insider', side: 'ua' },
+    { name: 'UA General Staff', channel: 'GeneralStaffUA', side: 'ua' },
+    { name: 'UA Forces', channel: 'ua_forces', side: 'ua' },
+    { name: 'Ukraine War Report', channel: 'UkraineWarReport', side: 'ua' },
+    { name: 'OSINTtechnical', channel: 'OSINTtechnical', side: 'ua' },
+    { name: 'Faytuks', channel: 'Faytuks', side: 'ua' },
+    // Russian milblogger / MoD channels (adversary picture).
+    { name: 'Военный осведомитель', channel: 'milinfolive', side: 'ru' },
+    { name: 'WarGonzo', channel: 'wargonzo', side: 'ru' },
+    { name: 'Поддубный', channel: 'epoddubny', side: 'ru' },
+    { name: 'Сладков+', channel: 'sashakots', side: 'ru' },
+    { name: 'Два майора', channel: 'dva_majora', side: 'ru' },
+    { name: 'Военкор Котенок', channel: 'voenkorKotenok', side: 'ru' },
+    { name: 'Рыбарь', channel: 'rybar', side: 'ru' },
+    { name: 'МО России', channel: 'mod_russia', side: 'ru' },
   ];
 
   // Build unified alert feed
@@ -86,6 +94,7 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     data.news.forEach((a: any) => {
       alerts.push({
         type: 'news', title: a.title, description: a.description, source: a.source,
+        side: a.side || 'world',
         lat: a.coords?.[0], lng: a.coords?.[1], time: a.published,
         severity: (a.risk_score ?? 1) >= 8 ? 'CRITICAL' : (a.risk_score ?? 1) >= 6 ? 'HIGH' : (a.risk_score ?? 1) >= 4 ? 'ELEVATED' : 'LOW',
         url: a.link,
@@ -119,13 +128,15 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     alerts.push({
       type: 'feed', title: t.name,
       source: `t.me/${t.channel}`,
+      side: t.side,
       severity: 'LOW', category: 'conflict',
       url: `https://t.me/s/${t.channel}`,
     });
   });
 
   const filtered = filter === 'all'     ? alerts :
-    filter === 'ukraine' ? alerts.filter(a => a.type === 'news' && (a.source || '').startsWith('t.me/')) :
+    filter === 'ukraine' ? alerts.filter(a => a.type === 'news' && a.side === 'ua') :
+    filter === 'russia'  ? alerts.filter(a => a.type === 'news' && a.side === 'ru') :
     filter === 'news'    ? alerts.filter(a => a.type === 'news') :
     filter === 'quakes'  ? alerts.filter(a => a.type === 'quake') :
     alerts.filter(a => a.type === 'feed');
@@ -153,8 +164,9 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
         <div className="flex items-center gap-2">
           <Radio className="w-3.5 h-3.5 text-[#FF4081]" />
           <span className="hud-text text-[10px] text-[var(--text-primary)]">LIVE ALERTS</span>
-          <span className="gotham-tag gotham-tag--critical" style={{ fontSize: '7px', padding: '1px 5px' }}>{alerts.filter(a => a.type === 'news' && (a.source || '').startsWith('t.me/')).length} UA</span>
-          <span className="gotham-tag gotham-tag--info" style={{ fontSize: '7px', padding: '1px 4px' }}>{alerts.filter(a => a.type === 'news' && !(a.source || '').startsWith('t.me/')).length} WORLD</span>
+          <span className="gotham-tag gotham-tag--critical" style={{ fontSize: '7px', padding: '1px 5px' }}>{alerts.filter(a => a.type === 'news' && a.side === 'ua').length} UA</span>
+          <span className="gotham-tag" style={{ fontSize: '7px', padding: '1px 5px', color: '#5B8FF9', borderColor: 'rgba(91,143,249,0.5)' }}>{alerts.filter(a => a.type === 'news' && a.side === 'ru').length} RU</span>
+          <span className="gotham-tag gotham-tag--info" style={{ fontSize: '7px', padding: '1px 4px' }}>{alerts.filter(a => a.type === 'news' && a.side === 'world').length} WORLD</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-[#FF4081] animate-osiris-pulse" />
@@ -176,14 +188,17 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
           >
             {/* Filters */}
             <div className="flex gap-1 mb-2">
-              {(['all', 'ukraine', 'news', 'quakes', 'feeds'] as const).map(f => (
+              {(['all', 'ukraine', 'russia', 'news', 'quakes', 'feeds'] as const).map(f => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
                   className={`px-2 py-1 rounded text-[9px] font-mono tracking-wider transition-all ${filter === f ? 'bg-[var(--hover-accent)] text-[var(--text-primary)] border border-[var(--border-primary)]' : 'text-[var(--text-muted)] border border-transparent hover:text-[var(--text-secondary)]'}`}
-                  style={f === 'ukraine' && filter === f ? { color: '#FF1744', borderColor: 'rgba(255,23,68,0.5)' } : undefined}
+                  style={
+                    filter === f && f === 'ukraine' ? { color: '#FF1744', borderColor: 'rgba(255,23,68,0.5)' } :
+                    filter === f && f === 'russia'  ? { color: '#5B8FF9', borderColor: 'rgba(91,143,249,0.5)' } : undefined
+                  }
                 >
-                  {f === 'ukraine' ? '🇺🇦 UA WAR' : f.toUpperCase()}
+                  {f === 'ukraine' ? '🇺🇦 UA WAR' : f === 'russia' ? '🇷🇺 RU MILBLOG' : f.toUpperCase()}
                 </button>
               ))}
             </div>

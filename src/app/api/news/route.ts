@@ -7,13 +7,34 @@ import crypto from 'crypto';
  * to traditional intelligence sources if Telegram blocks the IP.
  */
 
-const TELEGRAM_CHANNELS = [
+// Ukrainian / neutral war-OSINT channels.
+const UA_CHANNELS = [
   'OSINTtechnical', 'Faytuks', 'Liveuamap', 'CyberKnow',
   'GeneralStaffUA', 'ukraine_now', 'ua_forces',
   'UA_Insider', 'wartranslated', 'DefMonitor', 'UkraineWarReport',
   'Militaryland', 'DeepStateUA',
-  'rybar',
 ];
+
+// Russian milblogger / MoD channels — monitored for the adversary picture.
+// All verified scrapeable via t.me/s/ (rybar's /s/ preview is now disabled, so
+// it is dropped from the scrape list and kept only as a source link elsewhere).
+const RU_CHANNELS = [
+  'milinfolive', 'wargonzo', 'epoddubny', 'sashakots', 'dva_majora',
+  'voenkorKotenok', 'rvvoenkor', 'grey_zone', 'mod_russia',
+];
+
+const TELEGRAM_CHANNELS = [...UA_CHANNELS, ...RU_CHANNELS];
+
+const RU_CHANNEL_SET = new Set(RU_CHANNELS.map((c) => c.toLowerCase()));
+
+// Which side of the war a story comes from: 'ua' = Ukrainian/neutral war OSINT,
+// 'ru' = Russian milblogger/MoD, 'world' = non-Telegram RSS fallback. Drives the
+// Live-Alerts tab split so the RU feed reads separately from the UA one.
+function sideForSource(source: string): 'ua' | 'ru' | 'world' {
+  const m = source.match(/^t\.me\/(.+)$/i);
+  if (!m) return 'world';
+  return RU_CHANNEL_SET.has(m[1].toLowerCase()) ? 'ru' : 'ua';
+}
 
 const FALLBACK_FEEDS = {
   BBC: 'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -67,6 +88,39 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'tel aviv': [32.085, 34.781], 'jerusalem': [31.769, 35.214], 'beirut': [33.888, 35.495],
   'damascus': [33.513, 36.292], 'tehran': [35.689, 51.389], 'sanaa': [15.369, 44.191],
   'red sea': [20.284, 38.512], 'saint petersburg': [59.931, 30.361], 'novorossiysk': [44.724, 37.768],
+  // Russian cities, border oblasts and military airfields (high OSINT value —
+  // frequent drone-strike targets). Both Latin and Cyrillic so RU-language
+  // Telegram posts geolocate as well as English RSS.
+  'krasnodar': [45.035, 38.975], 'taganrog': [47.236, 38.897], 'volgograd': [48.708, 44.513],
+  'saratov': [51.533, 46.034], 'engels': [51.484, 46.209], 'morozovsk': [48.315, 41.791],
+  'millerovo': [48.922, 40.396], 'yeysk': [46.710, 38.277], 'ryazan': [54.627, 39.692],
+  'tula': [54.193, 37.617], 'smolensk': [54.782, 32.040], 'lipetsk': [52.603, 39.571],
+  'murmansk': [68.958, 33.083], 'kazan': [55.796, 49.109], 'samara': [53.196, 50.100],
+  'dzhankoi': [45.709, 34.393], 'saky': [45.134, 33.599],
+  // Cyrillic — broad (country/peninsula; only used when no city is named)
+  'россия': [61.524, 105.318], 'украина': [49.487, 31.272], 'крым': [44.952, 34.102],
+  // Cyrillic — Russia
+  'москва': [55.756, 37.617], 'петербург': [59.931, 30.361], 'белгород': [50.596, 36.587],
+  'курск': [51.730, 36.193], 'брянск': [53.244, 34.364], 'воронеж': [51.672, 39.184],
+  'ростов': [47.236, 39.702], 'краснодар': [45.035, 38.975], 'новороссийск': [44.724, 37.768],
+  'таганрог': [47.236, 38.897], 'волгоград': [48.708, 44.513], 'саратов': [51.533, 46.034],
+  'энгельс': [51.484, 46.209], 'морозовск': [48.315, 41.791], 'миллерово': [48.922, 40.396],
+  'ейск': [46.710, 38.277], 'рязань': [54.627, 39.692], 'дягилево': [54.643, 39.570],
+  'тула': [54.193, 37.617], 'смоленск': [54.782, 32.040], 'липецк': [52.603, 39.571],
+  'мурманск': [68.958, 33.083], 'оленегорск': [68.152, 33.464], 'казань': [55.796, 49.109],
+  'севастополь': [44.587, 33.522], 'джанкой': [45.709, 34.393], 'саки': [45.134, 33.599],
+  // Cyrillic — Ukraine / occupied (UA and RU spellings of the same place)
+  'київ': [50.450, 30.523], 'киев': [50.450, 30.523], 'харків': [49.990, 36.230],
+  'харьков': [49.990, 36.230], 'покровськ': [48.279, 37.176], 'покровск': [48.279, 37.176],
+  'красноармейск': [48.279, 37.176], 'бахмут': [48.596, 38.000], 'артёмовск': [48.596, 38.000],
+  'артемовск': [48.596, 38.000], 'авдіївка': [47.967, 37.750], 'авдеевка': [47.967, 37.750],
+  'торецьк': [48.415, 37.820], 'торецк': [48.415, 37.820], 'купянск': [49.709, 37.617],
+  'вовчанськ': [50.291, 36.940], 'вовчанск': [50.291, 36.940], 'запоріжжя': [47.838, 35.139],
+  'запорожье': [47.838, 35.139], 'херсон': [46.635, 32.601], 'миколаїв': [46.975, 31.994],
+  'николаев': [46.975, 31.994], 'одеса': [46.482, 30.723], 'одесса': [46.482, 30.723],
+  'дніпро': [48.465, 35.046], 'днепр': [48.465, 35.046], 'суми': [50.910, 34.800],
+  'сумы': [50.910, 34.800], 'маріуполь': [47.097, 37.549], 'мариуполь': [47.097, 37.549],
+  'вугледар': [47.779, 37.250], 'угледар': [47.779, 37.250],
 };
 
 function scoreRisk(text: string): number {
@@ -84,6 +138,7 @@ function scoreRisk(text: string): number {
 const BROAD_KEYS = new Set<string>([
   'ukraine', 'russia', 'israel', 'iran', 'lebanon', 'syria', 'yemen', 'china',
   'taiwan', 'united states', 'europe', 'middle east', 'crimea', 'transnistria',
+  'россия', 'украина', 'крым',
 ]);
 
 // Index of the first whole-word occurrence of `keyword` in `haystack`, or -1.
@@ -91,7 +146,12 @@ const BROAD_KEYS = new Set<string>([
 // multi-word keys ("nova kakhovka", "red sea") are matched verbatim.
 function wordIndex(haystack: string, keyword: string): number {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu');
+  // Russian/Ukrainian place names inflect by case (Белгород→Белгороду→
+  // Белгородской), so for Cyrillic keys allow a short trailing case-suffix.
+  // Latin keys stay strict, so "Iranian" still doesn't match "Iran".
+  const isCyrillic = /[Ѐ-ӿ]/.test(keyword);
+  const tail = isCyrillic ? '\\p{L}{0,4}(?![\\p{L}\\p{N}])' : '(?![\\p{L}\\p{N}])';
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}${tail}`, 'iu');
   const m = re.exec(haystack);
   return m ? m.index : -1;
 }
@@ -242,6 +302,7 @@ export async function GET() {
         link: article.link,
         published: article.pubDate,
         source: article.source,
+        side: sideForSource(article.source),
         risk_score: riskScore,
         coords: placed,
         coords_default: !coords,

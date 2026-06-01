@@ -77,6 +77,14 @@ const GEO_DICT: Record<string, [number, number]> = {
   // Russian border
   'belgorod': [36.587, 50.595], 'kursk': [36.193, 51.730],
   'bryansk': [34.364, 53.243], 'voronezh': [39.184, 51.672],
+  // Russian interior cities + military airfields (frequent strike targets)
+  'rostov': [39.702, 47.236], 'krasnodar': [38.975, 45.035], 'novorossiysk': [37.768, 44.724],
+  'taganrog': [38.897, 47.236], 'volgograd': [44.513, 48.708], 'saratov': [46.034, 51.533],
+  'engels': [46.209, 51.484], 'morozovsk': [41.791, 48.315], 'millerovo': [40.396, 48.922],
+  'yeysk': [38.277, 46.710], 'ryazan': [39.692, 54.627], 'tula': [37.617, 54.193],
+  'smolensk': [32.040, 54.782], 'lipetsk': [39.571, 52.603], 'murmansk': [33.083, 68.958],
+  'kazan': [49.109, 55.796], 'samara': [50.100, 53.196], 'saint petersburg': [30.361, 59.931],
+  'dzhankoi': [34.393, 45.709], 'saky': [33.599, 45.134],
   // Crimea
   'crimea': [34.102, 44.952], 'sevastopol': [33.522, 44.587], 'kerch': [36.470, 45.354],
   // Moldova/Belarus
