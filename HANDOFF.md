@@ -139,13 +139,32 @@ The OsintPanel recon tools split into two tiers:
   `SCANNER_KEY` point at a real scanner backend. Set both in `.env`.
   - **Touch points:** `src/app/api/scanner/route.ts:9-10,41-42`,
     `src/app/api/osint/sweep/route.ts`, `src/components/OsintPanel.tsx` (sweep UI).
-- **Optional richer recon:** a real **`SHODAN_API_KEY`** — today only the free keyless
-  `internetdb.shodan.io` is used (`src/app/api/osint/shodan/route.ts:12`), which has no
-  host search and no exposed-service/RTSP discovery. A full key unlocks host search and
-  directly feeds #9 (camera discovery).
+- **Shodan key — SET, but free tier (⚠️ important):** a `SHODAN_API_KEY` is now stored in
+  the **gitignored `.env`** (never commit it). `src/app/api/osint/shodan/route.ts` uses it
+  for `/shodan/host/{ip}` (richer per-host data: geo, ISP, org, service banners) with a
+  keyless `internetdb.shodan.io` fallback. **The current key is the free `oss` membership
+  (`unlocked:false`, 0 query credits) — `/shodan/host/search` returns "Requires membership
+  or higher", so host search / exposed-camera discovery does NOT work.** To enable
+  discovery (#9 exposed cams), buy a Shodan **membership** (one-time ~$49 unlocks search +
+  query credits); the code path is already documented in `docs/CAMERA_SOURCES.md` and needs
+  no further changes once the key is upgraded.
 - **⚠️ Authorization caveat:** active scanning must target only assets you are
   authorized to scan. Gate the scanner backend (allow-list / auth) before exposing it;
   do not ship an open relay.
+
+### 7b. 🌐 Proxies — defeating the geoblock (RU/UA WAN)
+RU regional cam portals (`is74.ru`, `webcamera.ru`, ЦОДД) and much of the RU WAN are
+**geo-fenced** — they return `000`/`403` from this host and from Vercel. Same risk in
+reverse for some UA sources. To reach them you need an **egress IP inside the target
+country**.
+- **Pattern (documented in `docs/CAMERA_SOURCES.md`):** set `RU_PROXY_URL` in `.env` and
+  route fetchers through `undici`'s `ProxyAgent` via a small `ruFetch()` helper. Unset →
+  direct fetch, so nothing breaks before the proxy exists.
+- Prefer a **residential/mobile** RU proxy — datacenter RU ranges are themselves often
+  blocked by the portals. The same proxy unblocks RU Telegram mirrors and (once Shodan is
+  upgraded) RU-geo camera search.
+- **Not yet wired into code** — the camera fetchers currently return curated directory
+  links and don't fetch, so add `ruFetch()` when you implement a real RU portal scraper.
 
 ### 8. ✅ DONE — more OSINT coverage on Russia (commit `e431f67`)
 - **RU Telegram channels:** added 9 milblogger/MoD channels (`milinfolive`, `wargonzo`,
@@ -181,7 +200,11 @@ UA: lat 44–53/lng 21.5–41). 12 pins total (7 RU + 5 UA).
 - **Expansion + private/unsecured cams:** see **`docs/CAMERA_SOURCES.md`** — documents the
   fetcher pattern for direct image/MJPEG/Windy feeds, plus Shodan host-search and Insecam
   for exposed cameras (RTSP→HLS relay via go2rtc/MediaMTX, read-only discovery, gate the
-  layer behind auth). Shodan host search needs a paid `SHODAN_API_KEY` (ties into #7).
+  layer behind auth).
+- **Status:** a `SHODAN_API_KEY` is set (`.env`) but is the **free `oss` tier**, which
+  **cannot do host search** — exposed-camera discovery is blocked until a paid Shodan
+  membership is purchased (see #7). RU portal scraping additionally needs `RU_PROXY_URL`
+  (see #7b) because the portals are geoblocked.
 - **Touch points:** `src/app/api/cctv/route.ts`; markers render via the existing `cctv`
   layer in `OsirisMap.tsx` (no frontend change).
 
