@@ -8,6 +8,7 @@ import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
 import SearchBar from '@/components/SearchBar';
+import { buildEntityIndex, SearchEntity } from '@/lib/entitySearch';
 import ScaleBar from '@/components/ScaleBar';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import SharePanel from '@/components/SharePanel';
@@ -89,6 +90,9 @@ export default function Dashboard() {
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const [mapView, setMapView] = useState({ zoom: 2.5, latitude: 20 });
   const [flyToLocation, setFlyToLocation] = useState<{ lat: number; lng: number; ts: number } | null>(null);
+  const [highlight, setHighlight] = useState<{ lat: number; lng: number; ts: number } | null>(null);
+  // Searchable index over every live entity array (rebuilt when data changes).
+  const entityIndex = useMemo(() => buildEntityIndex(data), [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const [globalStats, setGlobalStats] = useState<any>(null);
   const mouseCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const coordsDisplayRef = useRef<HTMLDivElement>(null);
@@ -339,82 +343,64 @@ export default function Dashboard() {
 
   // ── LAYER-AWARE DATA LOADING — only fetch when layer is toggled ON ──
   const layerFetchedRef = useRef<Set<string>>(new Set());
+
+  // Single source of truth for "how to fetch each layer's data" — shared by the
+  // layer-toggle loader below and by the search bar's ensureSearchSources().
+  const LAYER_LOADERS: Record<string, () => void> = useMemo(() => ({
+    flights: () => fetchEndpoint('/api/flights'),
+    satellites: () => fetchEndpoint('/api/satellites'),
+    fires: () => fetchEndpoint('/api/fires'),
+    cctv: () => fetchEndpoint('/api/cctv?region=all&v=2'),
+    maritime: () => fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships })),
+    balloons: () => fetchEndpoint('/api/balloons', d => ({ balloons: d.balloons })),
+    radiation: () => fetchEndpoint('/api/radiation', d => ({ radiation: d.stations })),
+    live_news: () => fetchEndpoint('/api/live-news', d => ({ live_feeds: d.feeds })),
+    weather: () => fetchEndpoint('/api/weather', d => ({ weather_events: d.events })),
+    infrastructure: () => fetchEndpoint('/api/infrastructure', d => ({ infrastructure: d.infrastructure })),
+    gdelt: () => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })),
+    air_raids: () => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })),
+    power_outages: () => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })),
+    kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })),
+  }), [fetchEndpoint]);
+
+  // Fetch a source at most once (does NOT toggle the layer on).
+  const loadOnce = useCallback((key: string) => {
+    if (layerFetchedRef.current.has(key) || !LAYER_LOADERS[key]) return;
+    layerFetchedRef.current.add(key);
+    LAYER_LOADERS[key]();
+  }, [LAYER_LOADERS]);
+
+  // Pull every searchable entity source once so the search bar can locate any
+  // entity by name even while its layer is hidden. Called when search is opened.
+  const ensureSearchSources = useCallback(() => {
+    ['flights', 'satellites', 'cctv', 'maritime', 'radiation', 'live_news', 'weather', 'infrastructure', 'gdelt', 'kab_threats', 'power_outages'].forEach(loadOnce);
+  }, [loadOnce]);
+
+  // Picking an entity from search: fly to it, reveal its layer, and highlight it.
+  const handleSelectEntity = useCallback((e: SearchEntity) => {
+    const ts = Date.now();
+    setFlyToLocation({ lat: e.lat, lng: e.lng, ts });
+    setHighlight({ lat: e.lat, lng: e.lng, ts });
+    if (e.layerKey) setActiveLayers(prev => ({ ...prev, [e.layerKey]: true }) as typeof prev);
+  }, []);
+
+  // ── LAYER-AWARE DATA LOADING — only fetch when layer is toggled ON ──
   useEffect(() => {
-
-    // Flights
-    if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private) {
-      if (!layerFetchedRef.current.has('flights')) {
-        fetchEndpoint('/api/flights');
-        layerFetchedRef.current.add('flights');
-      }
-    }
-    // Satellites
-    if (activeLayers.satellites && !layerFetchedRef.current.has('satellites')) {
-      fetchEndpoint('/api/satellites');
-      layerFetchedRef.current.add('satellites');
-    }
-    // Fires
-    if (activeLayers.fires && !layerFetchedRef.current.has('fires')) {
-      fetchEndpoint('/api/fires');
-      layerFetchedRef.current.add('fires');
-    }
-    // CCTV
-    if (activeLayers.cctv && !layerFetchedRef.current.has('cctv')) {
-      fetchEndpoint('/api/cctv?region=all&v=2');
-      layerFetchedRef.current.add('cctv');
-    }
-    // Maritime (ports/chokepoints) and/or Live Ships — one fetch feeds both
-    if ((activeLayers.maritime || activeLayers.ships || activeLayers.shadow_fleet) && !layerFetchedRef.current.has('maritime')) {
-      fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships }));
-      layerFetchedRef.current.add('maritime');
-    }
-    // Balloons
-    if (activeLayers.balloons && !layerFetchedRef.current.has('balloons')) {
-      fetchEndpoint('/api/balloons', d => ({ balloons: d.balloons }));
-      layerFetchedRef.current.add('balloons');
-    }
-    // Radiation
-    if (activeLayers.radiation && !layerFetchedRef.current.has('radiation')) {
-      fetchEndpoint('/api/radiation', d => ({ radiation: d.stations }));
-      layerFetchedRef.current.add('radiation');
-    }
-    // Live News
-    if (activeLayers.live_news && !layerFetchedRef.current.has('live_news')) {
-      fetchEndpoint('/api/live-news', d => ({ live_feeds: d.feeds }));
-      layerFetchedRef.current.add('live_news');
-    }
-    // Weather
-    if (activeLayers.weather && !layerFetchedRef.current.has('weather')) {
-      fetchEndpoint('/api/weather', d => ({ weather_events: d.events }));
-      layerFetchedRef.current.add('weather');
-    }
-    // Infrastructure
-    if (activeLayers.infrastructure && !layerFetchedRef.current.has('infrastructure')) {
-      fetchEndpoint('/api/infrastructure', d => ({ infrastructure: d.infrastructure }));
-      layerFetchedRef.current.add('infrastructure');
-    }
-    // Global Incidents (GDELT)
-    if (activeLayers.global_incidents && !layerFetchedRef.current.has('gdelt')) {
-      fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events }));
-      layerFetchedRef.current.add('gdelt');
-    }
-    // Air Raid Alerts
-    if (activeLayers.air_raids && !layerFetchedRef.current.has('air_raids')) {
-      fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts }));
-      layerFetchedRef.current.add('air_raids');
-    }
-    // Power Outages
-    if (activeLayers.power_outages && !layerFetchedRef.current.has('power_outages')) {
-      fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages }));
-      layerFetchedRef.current.add('power_outages');
-    }
-    // KAB / Glide-Bomb Threats (Telegram-derived)
-    if (activeLayers.kab_threats && !layerFetchedRef.current.has('kab_threats')) {
-      fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats }));
-      layerFetchedRef.current.add('kab_threats');
-    }
-
-  }, [activeLayers]);
+    if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private) loadOnce('flights');
+    if (activeLayers.satellites) loadOnce('satellites');
+    if (activeLayers.fires) loadOnce('fires');
+    if (activeLayers.cctv) loadOnce('cctv');
+    if (activeLayers.maritime || activeLayers.ships || activeLayers.shadow_fleet) loadOnce('maritime');
+    if (activeLayers.balloons) loadOnce('balloons');
+    if (activeLayers.radiation) loadOnce('radiation');
+    if (activeLayers.live_news) loadOnce('live_news');
+    if (activeLayers.weather) loadOnce('weather');
+    if (activeLayers.infrastructure) loadOnce('infrastructure');
+    if (activeLayers.global_incidents) loadOnce('gdelt');
+    if (activeLayers.air_raids) loadOnce('air_raids');
+    if (activeLayers.power_outages) loadOnce('power_outages');
+    if (activeLayers.kab_threats) loadOnce('kab_threats');
+  }, [activeLayers, loadOnce]);
 
   // ── LAYER-AWARE POLLING — only poll data for active layers ──
   useEffect(() => {
@@ -740,6 +726,7 @@ export default function Dashboard() {
           onRightClick={handleRightClick} 
           onViewStateChange={setMapView} 
           flyToLocation={flyToLocation}
+          highlight={highlight}
           sweepData={sweepData}
           scanTargets={scanTargets}
         />
@@ -879,7 +866,7 @@ export default function Dashboard() {
       {/* ── RIGHT HUD (desktop): Search + RECON + Live Alerts ── */}
       <div className="desktop-panel absolute right-5 top-20 bottom-24 w-80 flex flex-col gap-3 z-[200] pointer-events-auto overflow-y-auto styled-scrollbar pr-1">
         <div className="flex gap-2 items-start">
-          <div className="flex-1"><SearchBar onLocate={(lat, lng) => setFlyToLocation({ lat, lng, ts: Date.now() })} /></div>
+          <div className="flex-1"><SearchBar onLocate={(lat, lng) => setFlyToLocation({ lat, lng, ts: Date.now() })} entities={entityIndex} onEnsureLoaded={ensureSearchSources} onSelectEntity={handleSelectEntity} /></div>
           <div className="relative"><SharePanel mapView={mapView} activeLayers={activeLayers} mouseCoords={null} /></div>
         </div>
         <OsintPanel onSweepVisualize={setSweepData} onScanGeolocate={(target, data) => {
@@ -1041,7 +1028,7 @@ export default function Dashboard() {
                   {mobilePanel === 'intel' && <IntelFeed data={data} onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMobilePanel(null); }} />}
                   {mobilePanel === 'search' && (
                     <div className="space-y-2">
-                      <SearchBar onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMobilePanel(null); }} />
+                      <SearchBar onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMobilePanel(null); }} entities={entityIndex} onEnsureLoaded={ensureSearchSources} onSelectEntity={(e) => { handleSelectEntity(e); setMobilePanel(null); }} />
                       <SharePanel mapView={mapView} activeLayers={activeLayers} mouseCoords={null} />
                     </div>
                   )}

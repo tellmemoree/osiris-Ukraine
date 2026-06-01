@@ -12,6 +12,7 @@ interface OsirisMapProps {
   onRightClick?: (coords: { lat: number; lng: number }) => void;
   onViewStateChange?: (vs: { zoom: number; latitude: number }) => void;
   flyToLocation?: { lat: number; lng: number; ts: number } | null;
+  highlight?: { lat: number; lng: number; ts: number } | null;
   projection?: 'mercator' | 'globe';
   mapStyle?: string;
   sweepData?: any;
@@ -40,7 +41,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [] }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [] }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -1618,6 +1619,50 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady || !mapRef.current || !flyToLocation) return;
     mapRef.current.flyTo({ center: [flyToLocation.lng, flyToLocation.lat], zoom: 8, duration: 2000 });
   }, [mapReady, flyToLocation]);
+
+  // Transient highlight ring on a search-selected entity (expanding pulse ~4s).
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightRaf = useRef<number | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map || !highlight) return;
+
+    // Lazily create the source + layers on first use; added last so they render
+    // on top of every other layer.
+    if (!map.getSource('search-highlight')) {
+      map.addSource('search-highlight', { type: 'geojson', data: EMPTY_FC });
+      map.addLayer({ id: 'search-highlight-glow', type: 'circle', source: 'search-highlight',
+        paint: { 'circle-radius': 34, 'circle-color': '#FFD54F', 'circle-opacity': 0.12, 'circle-blur': 1 } });
+      map.addLayer({ id: 'search-highlight-ring', type: 'circle', source: 'search-highlight',
+        paint: { 'circle-radius': 16, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': '#FFD54F', 'circle-stroke-width': 2.5, 'circle-stroke-opacity': 0.9 } });
+    }
+    (map.getSource('search-highlight') as maplibregl.GeoJSONSource).setData({
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [highlight.lng, highlight.lat] }, properties: {} }],
+    });
+
+    if (highlightRaf.current) cancelAnimationFrame(highlightRaf.current);
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = ((now - start) / 1400) % 1; // 1.4s expanding-ring loop
+      if (map.getLayer('search-highlight-ring')) {
+        map.setPaintProperty('search-highlight-ring', 'circle-radius', 16 + t * 40);
+        map.setPaintProperty('search-highlight-ring', 'circle-stroke-opacity', 0.9 * (1 - t));
+      }
+      highlightRaf.current = requestAnimationFrame(tick);
+    };
+    highlightRaf.current = requestAnimationFrame(tick);
+    highlightTimer.current = setTimeout(() => {
+      if (highlightRaf.current) cancelAnimationFrame(highlightRaf.current);
+      if (map.getSource('search-highlight')) (map.getSource('search-highlight') as maplibregl.GeoJSONSource).setData(EMPTY_FC);
+    }, 4200);
+
+    return () => {
+      if (highlightRaf.current) cancelAnimationFrame(highlightRaf.current);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    };
+  }, [mapReady, highlight]);
 
   // Dynamic projection switching (lightweight — no terrain DEM)
   useEffect(() => {
