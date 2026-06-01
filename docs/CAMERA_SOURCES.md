@@ -75,6 +75,32 @@ several are geo-blocked from non-RU IPs, so test from the deploy host):
 
 Curated-list pattern (no API), like the Ottawa block — just hardcode verified pins.
 
+### Russia geoblock — route fetchers through a RU-resident proxy
+
+RU regional cam portals (`is74.ru`, `webcamera.ru`, ЦОДД, "Безопасный город") and
+much of the RU WAN are **geo-fenced** — they return `000`/`403` from non-RU IPs (this
+is why the shipped RU pins are directory links, not live frames). To pull the real
+feeds you need an egress IP inside Russia: a RU-resident HTTP/SOCKS proxy or VPS.
+
+Wire it via env and a small proxy-aware fetch (no per-call URL juggling):
+
+```ts
+// lib/proxiedFetch.ts
+import { ProxyAgent } from 'undici';
+const RU_PROXY = process.env.RU_PROXY_URL; // e.g. http://user:pass@ru-host:8080
+export function ruFetch(url: string, init: RequestInit = {}) {
+  return fetch(url, RU_PROXY
+    ? { ...init, dispatcher: new ProxyAgent(RU_PROXY) } as RequestInit
+    : init);
+}
+```
+
+Then call `ruFetch(...)` instead of `fetch(...)` inside `fetchRussiaCameras` (and any RU
+OSINT fetcher — the same proxy unblocks RU Telegram mirrors and portals). Put
+`RU_PROXY_URL` in `.env`; leave it unset and the code falls back to a direct fetch, so
+nothing breaks before the proxy exists. Prefer a residential/mobile RU proxy — datacenter
+RU ranges are often themselves blocked by the portals.
+
 ---
 
 ## 2. Exposed / unsecured cameras (do this yourself)

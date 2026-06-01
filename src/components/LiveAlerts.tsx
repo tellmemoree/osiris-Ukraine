@@ -75,6 +75,14 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     { name: 'Ukraine War Report', channel: 'UkraineWarReport', side: 'ua' },
     { name: 'OSINTtechnical', channel: 'OSINTtechnical', side: 'ua' },
     { name: 'Faytuks', channel: 'Faytuks', side: 'ua' },
+    // Ukrainian-language (Cyrillic) channels
+    { name: 'Суспільне Новини', channel: 'suspilne_news', side: 'ua' },
+    { name: 'Громадське', channel: 'hromadske_ua', side: 'ua' },
+    { name: 'Труха⚡️Україна', channel: 'truexanewsua', side: 'ua' },
+    { name: 'Сергій Флеш', channel: 'serhii_flash', side: 'ua' },
+    { name: 'Оперативно ЗСУ', channel: 'operativnoZSU', side: 'ua' },
+    { name: 'Бутусов Плюс', channel: 'butusovplus', side: 'ua' },
+    { name: 'Цаплієнко', channel: 'Tsaplienko', side: 'ua' },
     // Russian milblogger / MoD channels (adversary picture).
     { name: 'Военный осведомитель', channel: 'milinfolive', side: 'ru' },
     { name: 'WarGonzo', channel: 'wargonzo', side: 'ru' },

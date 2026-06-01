@@ -7,12 +7,18 @@ import crypto from 'crypto';
  * to traditional intelligence sources if Telegram blocks the IP.
  */
 
-// Ukrainian / neutral war-OSINT channels.
+// Ukrainian / neutral war-OSINT channels. The first group is English-language
+// OSINT; the second is native Ukrainian-language (Cyrillic) news/milblogger
+// channels — all verified scrapeable via t.me/s/ — so the UA feed reads in its
+// own language and its Cyrillic place names geolocate via the gazetteer below.
 const UA_CHANNELS = [
   'OSINTtechnical', 'Faytuks', 'Liveuamap', 'CyberKnow',
   'GeneralStaffUA', 'ukraine_now', 'ua_forces',
   'UA_Insider', 'wartranslated', 'DefMonitor', 'UkraineWarReport',
   'Militaryland', 'DeepStateUA',
+  // Ukrainian-language (Cyrillic)
+  'suspilne_news', 'hromadske_ua', 'truexanewsua', 'serhii_flash',
+  'operativnoZSU', 'butusovplus', 'Tsaplienko', 'lachentyt',
 ];
 
 // Russian milblogger / MoD channels — monitored for the adversary picture.
@@ -121,6 +127,15 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'дніпро': [48.465, 35.046], 'днепр': [48.465, 35.046], 'суми': [50.910, 34.800],
   'сумы': [50.910, 34.800], 'маріуполь': [47.097, 37.549], 'мариуполь': [47.097, 37.549],
   'вугледар': [47.779, 37.250], 'угледар': [47.779, 37.250],
+  'львів': [49.840, 24.030], 'львов': [49.840, 24.030], 'полтава': [49.588, 34.551],
+  'черкаси': [49.445, 32.060], 'чернігів': [51.494, 31.294], 'чернигов': [51.494, 31.294],
+  'краматорськ': [48.731, 37.556], 'краматорск': [48.731, 37.556], 'словянськ': [48.865, 37.616],
+  'славянск': [48.865, 37.616], 'ізюм': [49.212, 37.249], 'изюм': [49.212, 37.249],
+  'нікополь': [47.567, 34.392], 'никополь': [47.567, 34.392], 'кременчук': [49.066, 33.420],
+  // Ukrainian oblique-case stems (і↔о / ї↔є vowel shifts, e.g. Київ→Києва,
+  // Харків→Харкова, Дніпро→Дніпра) so declined mentions still geolocate.
+  'києв': [50.450, 30.523], 'харков': [49.990, 36.230], 'чернігов': [51.494, 31.294],
+  'дніпр': [48.465, 35.046], 'миколаєв': [46.975, 31.994],
 };
 
 function scoreRisk(text: string): number {
