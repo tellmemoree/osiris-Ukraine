@@ -22,7 +22,16 @@ export async function GET(req: Request) {
   }
 
   try {
-    const results: any = { domain, timestamp: new Date().toISOString() };
+    const results: {
+      domain: string;
+      timestamp: string;
+      rdap?: {
+        events?: { action?: string; date?: string }[];
+        entities?: { handle?: string; roles?: string[]; name?: string; org?: string }[];
+        [k: string]: unknown;
+      };
+      [key: string]: unknown;
+    } = { domain, timestamp: new Date().toISOString() };
 
     // RDAP (Registration Data Access Protocol) — successor to WHOIS
     try {
@@ -36,24 +45,24 @@ export async function GET(req: Request) {
           handle: data.handle,
           name: data.ldhName,
           status: data.status,
-          events: (data.events || []).map((e: any) => ({
+          events: (data.events || []).map((e: { eventAction?: string; eventDate?: string }) => ({
             action: e.eventAction,
             date: e.eventDate,
           })),
-          nameservers: (data.nameservers || []).map((ns: any) => ns.ldhName),
-          entities: (data.entities || []).map((e: any) => ({
+          nameservers: (data.nameservers || []).map((ns: { ldhName?: string }) => ns.ldhName),
+          entities: (data.entities || []).map((e: { handle?: string; roles?: string[]; vcardArray?: [unknown, [string, unknown, string, string][]] }) => ({
             handle: e.handle,
             roles: e.roles,
-            name: e.vcardArray?.[1]?.find((v: any) => v[0] === 'fn')?.[3],
-            org: e.vcardArray?.[1]?.find((v: any) => v[0] === 'org')?.[3],
-          })).filter((e: any) => e.name || e.org),
+            name: e.vcardArray?.[1]?.find((v) => v[0] === 'fn')?.[3],
+            org: e.vcardArray?.[1]?.find((v) => v[0] === 'org')?.[3],
+          })).filter((e: { name?: string; org?: string }) => e.name || e.org),
         };
 
         // Extract key dates
-        const events = results.rdap.events || [];
-        results.registration = events.find((e: any) => e.action === 'registration')?.date;
-        results.expiration = events.find((e: any) => e.action === 'expiration')?.date;
-        results.last_changed = events.find((e: any) => e.action === 'last changed')?.date;
+        const events: { action?: string; date?: string }[] = results.rdap.events || [];
+        results.registration = events.find((e) => e.action === 'registration')?.date;
+        results.expiration = events.find((e) => e.action === 'expiration')?.date;
+        results.last_changed = events.find((e) => e.action === 'last changed')?.date;
       }
     } catch (e) { console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e); }
 

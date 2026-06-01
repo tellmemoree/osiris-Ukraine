@@ -26,14 +26,27 @@ import { fetchJapanCameras } from './japan';
 
 // ═══ CAMERA SOURCE DEFINITIONS ═══
 
+// Normalized camera marker emitted by every source fetcher.
+interface Camera {
+  id: string;
+  lat: number;
+  lng: number;
+  name: string;
+  city: string;
+  country: string;
+  feed_url?: string;
+  external_url?: string;
+  source: string;
+}
+
 // ── UK: Transport for London JamCams (~900) ──
-async function fetchTfLCameras(): Promise<any[]> {
+async function fetchTfLCameras(): Promise<Camera[]> {
   try {
     const res = await stealthFetch('https://api.tfl.gov.uk/Place/Type/JamCam', { signal: AbortSignal.timeout(12000) });
     if (!res.ok) return [];
     const data = await res.json();
-    return (data || []).map((cam: any) => {
-      const imgProp = cam.additionalProperties?.find((p: any) => p.key === 'imageUrl');
+    return (data || []).map((cam: { id?: string; lat?: number; lon?: number; commonName?: string; additionalProperties?: { key?: string; value?: string }[] }) => {
+      const imgProp = cam.additionalProperties?.find((p) => p.key === 'imageUrl');
       const camId = cam.id?.replace('JamCams_', '') || '';
       return {
         id: `tfl-${cam.id}`, lat: cam.lat, lng: cam.lon,
@@ -41,27 +54,27 @@ async function fetchTfLCameras(): Promise<any[]> {
         feed_url: imgProp?.value || `https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/${camId}.jpg`,
         source: 'TfL',
       };
-    }).filter((c: any) => c.lat && c.lng);
+    }).filter((c: Camera) => c.lat && c.lng);
   } catch { return []; }
 }
 
 // ── US-WEST: WSDOT Washington State (~500) ──
-async function fetchWSDOTCameras(): Promise<any[]> {
+async function fetchWSDOTCameras(): Promise<Camera[]> {
   try {
     const res = await stealthFetch('https://data.wsdot.wa.gov/log/public/cameras.json', { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return [];
     const data = await res.json();
-    return (data || []).map((cam: any) => ({
+    return (data || []).map((cam: { CameraID?: string | number; CameraLocation?: { Latitude?: number; Longitude?: number }; Title?: string; ImageURL?: string }) => ({
       id: `wsdot-${cam.CameraID}`, lat: cam.CameraLocation?.Latitude, lng: cam.CameraLocation?.Longitude,
       name: cam.Title || 'WSDOT Camera', city: 'Washington', country: 'US',
       feed_url: cam.ImageURL || '', source: 'WSDOT',
-    })).filter((c: any) => c.lat && c.lng && c.feed_url);
+    })).filter((c: Camera) => c.lat && c.lng && c.feed_url);
   } catch { return []; }
 }
 
 // ── US-WEST: Caltrans California Districts ──
-async function fetchCaltransCameras(): Promise<any[]> {
-  const allCams: any[] = [];
+async function fetchCaltransCameras(): Promise<Camera[]> {
+  const allCams: Camera[] = [];
   for (const dist of ['d03', 'd04', 'd05', 'd06', 'd07', 'd08', 'd10', 'd11', 'd12']) {
     try {
       const res = await stealthFetch(`https://cwwp2.dot.ca.gov/data/${dist}/cctv/cctvStatus${dist.toUpperCase()}.json`, { signal: AbortSignal.timeout(8000) });
@@ -80,8 +93,8 @@ async function fetchCaltransCameras(): Promise<any[]> {
 }
 
 // ── CANADA: Ottawa, Toronto, Montreal ──
-async function fetchCanadaCameras(): Promise<any[]> {
-  const cams: any[] = [];
+async function fetchCanadaCameras(): Promise<Camera[]> {
+  const cams: Camera[] = [];
 
   // Ottawa MTO Highway Cameras
   try {
@@ -146,12 +159,12 @@ async function fetchCanadaCameras(): Promise<any[]> {
     }
   } catch { /* silent */ }
 
-  return cams.filter((c: any) => c.lat && c.lng);
+  return cams.filter((c: Camera) => c.lat && c.lng);
 }
 
 // ── US-CENTRAL: Chicago, Houston, Dallas, Denver ──
-async function fetchUSCentralCameras(): Promise<any[]> {
-  const cams: any[] = [];
+async function fetchUSCentralCameras(): Promise<Camera[]> {
+  const cams: Camera[] = [];
   // Illinois DOT
   try {
     const res = await stealthFetch('https://www.travelmidwest.com/lmiga/cameraReport.json', { signal: AbortSignal.timeout(8000) });
@@ -168,12 +181,12 @@ async function fetchUSCentralCameras(): Promise<any[]> {
     }
   } catch { /* silent */ }
 
-  return cams.filter((c: any) => c.lat && c.lng);
+  return cams.filter((c: Camera) => c.lat && c.lng);
 }
 
 // ── US-EAST: OH, DC, Florida, Georgia ──
-async function fetchUSEastCameras(): Promise<any[]> {
-  const cams: any[] = [];
+async function fetchUSEastCameras(): Promise<Camera[]> {
+  const cams: Camera[] = [];
 
   // Butler County, OH (from redhunt45 fork)
   cams.push(
@@ -224,12 +237,12 @@ async function fetchUSEastCameras(): Promise<any[]> {
     }
   } catch { /* silent */ }
 
-  return cams.filter((c: any) => c.lat && c.lng);
+  return cams.filter((c: Camera) => c.lat && c.lng);
 }
 
 // ── EUROPE: Netherlands, Germany, France ──
-async function fetchEuropeCameras(): Promise<any[]> {
-  const cams: any[] = [];
+async function fetchEuropeCameras(): Promise<Camera[]> {
+  const cams: Camera[] = [];
 
   // Netherlands Rijkswaterstaat
   try {
@@ -249,12 +262,12 @@ async function fetchEuropeCameras(): Promise<any[]> {
 
   cams.push(...await fetchAsfinagCameras());
 
-  return cams.filter((c: any) => c.lat && c.lng);
+  return cams.filter((c: Camera) => c.lat && c.lng);
 }
 
 // ── ASIA/PACIFIC ──
-async function fetchAsiaCameras(): Promise<any[]> {
-  const cams: any[] = [];
+async function fetchAsiaCameras(): Promise<Camera[]> {
+  const cams: Camera[] = [];
 
   // Singapore Live Traffic Images
   try {
@@ -289,7 +302,7 @@ async function fetchAsiaCameras(): Promise<any[]> {
 // DIRECTORIES whose URLs are verified-reachable (HTTP 200) — each marker opens the
 // public cams for that city/country. To add direct image/MJPEG feeds or
 // exposed-camera discovery, see docs/CAMERA_SOURCES.md.
-async function fetchRussiaCameras(): Promise<any[]> {
+async function fetchRussiaCameras(): Promise<Camera[]> {
   const RU_DIR = 'https://www.skylinewebcams.com/en/webcam/russia.html';
   return [
     { id: 'ru-cam-moscow', lat: 55.7558, lng: 37.6173, name: 'Moscow — live public cams', city: 'Moscow', country: 'Russia', feed_url: 'https://www.earthcam.com/world/russia/moscow/', source: 'EarthCam' },
@@ -302,7 +315,7 @@ async function fetchRussiaCameras(): Promise<any[]> {
   ];
 }
 
-async function fetchUkraineCameras(): Promise<any[]> {
+async function fetchUkraineCameras(): Promise<Camera[]> {
   const UA_DIR = 'https://www.skylinewebcams.com/en/webcam/ukraine.html';
   return [
     { id: 'ua-cam-kyiv', lat: 50.4501, lng: 30.5234, name: 'Kyiv — live public cams', city: 'Kyiv', country: 'Ukraine', feed_url: 'https://www.earthcam.com/world/ukraine/kiev/', source: 'EarthCam' },
@@ -315,7 +328,7 @@ async function fetchUkraineCameras(): Promise<any[]> {
 
 
 // ═══ REGION MAPPING ═══
-const REGION_FETCHERS: Record<string, () => Promise<any[]>> = {
+const REGION_FETCHERS: Record<string, () => Promise<Camera[]>> = {
   'russia': fetchRussiaCameras,
   'ukraine': fetchUkraineCameras,
   'uk': fetchTfLCameras,
@@ -343,7 +356,7 @@ const REGION_FETCHERS: Record<string, () => Promise<any[]>> = {
 };
 
 // Determine which regions to fetch based on viewport bounds
-function getRegionsForBounds(lat: number, lng: number, radius: number): string[] {
+function getRegionsForBounds(lat: number, lng: number): string[] {
   const regions: string[] = [];
   // UK
   if (lat > 49 && lat < 61 && lng > -8 && lng < 2) regions.push('uk');
@@ -410,7 +423,6 @@ export async function GET(request: Request) {
     const region = searchParams.get('region');
     const lat = parseFloat(searchParams.get('lat') || '0');
     const lng = parseFloat(searchParams.get('lng') || '0');
-    const radius = parseFloat(searchParams.get('radius') || '10');
 
     let regionsToFetch: string[];
 
@@ -419,7 +431,7 @@ export async function GET(request: Request) {
     } else if (region) {
       regionsToFetch = region.split(',').filter(r => r in REGION_FETCHERS);
     } else if (lat !== 0 || lng !== 0) {
-      regionsToFetch = getRegionsForBounds(lat, lng, radius);
+      regionsToFetch = getRegionsForBounds(lat, lng);
     } else {
       // Default: load all regions for global coverage
       regionsToFetch = Object.keys(REGION_FETCHERS);
@@ -429,7 +441,7 @@ export async function GET(request: Request) {
       regionsToFetch.map(r => REGION_FETCHERS[r]())
     );
 
-    const allCameras: any[] = [];
+    const allCameras: Camera[] = [];
     const sources: Record<string, number> = {};
 
     for (const result of results) {
