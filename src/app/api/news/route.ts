@@ -55,6 +55,18 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'chisinau': [47.010, 28.864], 'transnistria': [47.200, 29.400], 'tiraspol': [46.843, 29.643],
   // Belarus
   'minsk': [53.904, 27.561], 'grodno': [53.678, 23.829], 'brest': [52.097, 23.734],
+  // Other Ukrainian oblast capitals / large cities (kept specific so a story that
+  // also says "Ukraine" still pins to the city actually named).
+  'lviv': [49.840, 24.030], 'vinnytsia': [49.233, 28.468], 'zhytomyr': [50.255, 28.659],
+  'rivne': [50.619, 26.252], 'ternopil': [49.554, 25.595], 'ivano-frankivsk': [48.923, 24.711],
+  'uzhhorod': [48.621, 22.288], 'chernihiv': [51.494, 31.294], 'chernivtsi': [48.292, 25.935],
+  'khmelnytskyi': [49.423, 26.987], 'lutsk': [50.747, 25.325], 'kropyvnytskyi': [48.508, 32.262],
+  'kryvyi rih': [47.910, 33.391], 'nikopol': [47.567, 34.392], 'pavlohrad': [48.520, 35.870],
+  'izyum': [49.212, 37.249], 'okhtyrka': [50.310, 34.899],
+  // Wider hotspots that show up in the same feeds
+  'tel aviv': [32.085, 34.781], 'jerusalem': [31.769, 35.214], 'beirut': [33.888, 35.495],
+  'damascus': [33.513, 36.292], 'tehran': [35.689, 51.389], 'sanaa': [15.369, 44.191],
+  'red sea': [20.284, 38.512], 'saint petersburg': [59.931, 30.361], 'novorossiysk': [44.724, 37.768],
 };
 
 function scoreRisk(text: string): number {
@@ -66,12 +78,54 @@ function scoreRisk(text: string): number {
   return Math.min(10, score);
 }
 
+// Country / continent-level keys. Only used as a last resort: an article that
+// names both a country and a city pins to the city, never the country centroid
+// (which is what made every "Ukraine ..." story pile up in the middle of the map).
+const BROAD_KEYS = new Set<string>([
+  'ukraine', 'russia', 'israel', 'iran', 'lebanon', 'syria', 'yemen', 'china',
+  'taiwan', 'united states', 'europe', 'middle east', 'crimea', 'transnistria',
+]);
+
+// Index of the first whole-word occurrence of `keyword` in `haystack`, or -1.
+// Unicode-aware boundaries so we don't match "iran" inside another word, and
+// multi-word keys ("nova kakhovka", "red sea") are matched verbatim.
+function wordIndex(haystack: string, keyword: string): number {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu');
+  const m = re.exec(haystack);
+  return m ? m.index : -1;
+}
+
+/**
+ * Resolve the place a story is actually about. Prefers the most specific
+ * location named (city/town over country) and, among equally specific matches,
+ * the one mentioned first. Returns null when the gazetteer names nothing.
+ */
 function findCoords(text: string): [number, number] | null {
   const lower = text.toLowerCase();
+  let best: { coords: [number, number]; rank: number; pos: number } | null = null;
   for (const [keyword, coords] of Object.entries(KEYWORD_COORDS)) {
-    if (lower.includes(keyword)) return coords;
+    const pos = wordIndex(lower, keyword);
+    if (pos === -1) continue;
+    const rank = BROAD_KEYS.has(keyword) ? 1 : 2; // a named city beats a country
+    if (!best || rank > best.rank || (rank === best.rank && pos < best.pos)) {
+      best = { coords, rank, pos };
+    }
   }
-  return null;
+  return best ? best.coords : null;
+}
+
+// Spread several stories about the same place into a small (~0–8 km) cluster
+// around it, deterministically per story id, so dots don't stack into a single
+// unreadable blob over the city centre.
+function jitterAround([lat, lng]: [number, number], seed: string): [number, number] {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 16777619) >>> 0;
+  }
+  const angle = (h % 360) * (Math.PI / 180);
+  const radius = ((h >>> 9) % 70) / 1000; // up to ~0.07° ≈ 6–8 km
+  return [lat + radius * Math.cos(angle), lng + radius * Math.sin(angle)];
 }
 
 // A parsed feed item, before risk-scoring/geo-mapping in GET().
@@ -177,17 +231,19 @@ export async function GET() {
 
     const newsItems = allArticles.map(article => {
       const riskScore = scoreRisk(article.description || article.title);
+      const id = crypto.createHash('md5').update((article.link || '') + (article.pubDate || '')).digest('hex');
       const coords = findCoords(article.description || article.title);
+      const placed = coords ? jitterAround(coords, id) : null;
 
       return {
-        id: crypto.createHash('md5').update((article.link || '') + (article.pubDate || '')).digest('hex'),
+        id,
         title: article.title,
         description: article.description,
         link: article.link,
         published: article.pubDate,
         source: article.source,
         risk_score: riskScore,
-        coords: coords ? [coords[0], coords[1]] : null,
+        coords: placed,
         coords_default: !coords,
         machine_assessment: riskScore >= 8 ? "AI Analysis indicates elevated tactical priority based on OSINT stream patterns." : null,
       };
