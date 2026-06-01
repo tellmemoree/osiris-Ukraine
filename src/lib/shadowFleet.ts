@@ -118,9 +118,14 @@ async function refresh(): Promise<void> {
       return;
     }
 
-    // Merge with the seed so curated entries are never lost.
+    // Merge IMOs with the seed so curated entries are never lost. MMSIs have no
+    // seed, and the OFAC source embeds the `MMSI` token far more rarely than
+    // `IMO` — so only replace the MMSI set when this refresh actually parsed
+    // some, otherwise keep the previously-populated set instead of going blind.
     imos = new Set<number>([...SEED_IMOS, ...parsedImos]);
-    mmsis = new Set<number>(parsedMmsis);
+    if (parsedMmsis.length > 0) {
+      mmsis = new Set<number>(parsedMmsis);
+    }
     lastRefresh = Date.now();
     console.log(
       `[OSIRIS] shadow-fleet watchlist refreshed: ${imos.size} IMOs, ${mmsis.size} MMSIs (${parsedImos.length}/${parsedMmsis.length} from source)`

@@ -156,20 +156,25 @@ const BROAD_KEYS = new Set<string>([
   'россия', 'украина', 'крым',
 ]);
 
-// Index of the first whole-word occurrence of `keyword` in `haystack`, or -1.
-// Unicode-aware boundaries so we don't match "iran" inside another word, and
-// multi-word keys ("nova kakhovka", "red sea") are matched verbatim.
-function wordIndex(haystack: string, keyword: string): number {
+// Build a whole-word matcher for one gazetteer key. Unicode-aware boundaries so
+// we don't match "iran" inside another word, and multi-word keys ("nova
+// kakhovka", "red sea") match verbatim. Russian/Ukrainian place names inflect by
+// case (Белгород→Белгороду→Белгородской), so Cyrillic keys allow a short trailing
+// case-suffix; Latin keys stay strict so "Iranian" still doesn't match "Iran".
+function keywordRegex(keyword: string): RegExp {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Russian/Ukrainian place names inflect by case (Белгород→Белгороду→
-  // Белгородской), so for Cyrillic keys allow a short trailing case-suffix.
-  // Latin keys stay strict, so "Iranian" still doesn't match "Iran".
   const isCyrillic = /[Ѐ-ӿ]/.test(keyword);
   const tail = isCyrillic ? '\\p{L}{0,4}(?![\\p{L}\\p{N}])' : '(?![\\p{L}\\p{N}])';
-  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}${tail}`, 'iu');
-  const m = re.exec(haystack);
-  return m ? m.index : -1;
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}${tail}`, 'iu');
 }
+
+// Compile every gazetteer entry once at module load — findCoords runs this over
+// hundreds of articles per request, so the regexes must not be rebuilt per call.
+const COMPILED_GAZETTEER = Object.entries(KEYWORD_COORDS).map(([keyword, coords]) => ({
+  re: keywordRegex(keyword),
+  coords,
+  rank: BROAD_KEYS.has(keyword) ? 1 : 2, // a named city beats a country
+}));
 
 /**
  * Resolve the place a story is actually about. Prefers the most specific
@@ -179,10 +184,10 @@ function wordIndex(haystack: string, keyword: string): number {
 function findCoords(text: string): [number, number] | null {
   const lower = text.toLowerCase();
   let best: { coords: [number, number]; rank: number; pos: number } | null = null;
-  for (const [keyword, coords] of Object.entries(KEYWORD_COORDS)) {
-    const pos = wordIndex(lower, keyword);
-    if (pos === -1) continue;
-    const rank = BROAD_KEYS.has(keyword) ? 1 : 2; // a named city beats a country
+  for (const { re, coords, rank } of COMPILED_GAZETTEER) {
+    const m = re.exec(lower);
+    if (!m) continue;
+    const pos = m.index;
     if (!best || rank > best.rank || (rank === best.rank && pos < best.pos)) {
       best = { coords, rank, pos };
     }
@@ -200,7 +205,10 @@ function jitterAround([lat, lng]: [number, number], seed: string): [number, numb
   }
   const angle = (h % 360) * (Math.PI / 180);
   const radius = ((h >>> 9) % 70) / 1000; // up to ~0.07° ≈ 6–8 km
-  return [lat + radius * Math.cos(angle), lng + radius * Math.sin(angle)];
+  // Divide the longitude offset by cos(lat) so the spread is a true circle on
+  // the ground rather than an east-west-compressed ellipse at high latitudes.
+  const cosLat = Math.max(0.05, Math.cos(lat * Math.PI / 180));
+  return [lat + radius * Math.cos(angle), lng + (radius * Math.sin(angle)) / cosLat];
 }
 
 // A parsed feed item, before risk-scoring/geo-mapping in GET().

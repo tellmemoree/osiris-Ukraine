@@ -54,6 +54,17 @@ const OBLAST_REFS: OblastRef[] = [
   { oblast: 'Poltava oblast', coords: [34.551, 49.588], tokens: ['полтавщ', 'полтав', 'poltava', 'кременчук', 'kremenchuk', 'лубни'] },
 ];
 
+// Precompiled leading-boundary matchers per oblast. A token must start at a word
+// boundary — so "оріхов" no longer fires inside "горіхове" (hazel) — but trailing
+// letters are allowed because the tokens are declension stems ("запоріж" must
+// still match "запоріжжя"). Compiled once, not per request.
+const OBLAST_MATCHERS = OBLAST_REFS.map((ref) => ({
+  ref,
+  regexes: ref.tokens.map(
+    (t) => new RegExp(`(?<![\\p{L}\\p{N}])${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'iu')
+  ),
+}));
+
 const WINDOW_HOURS = 3;
 const WINDOW_MS = WINDOW_HOURS * 60 * 60 * 1000;
 const CACHE_TTL_MS = 60_000;
@@ -92,7 +103,7 @@ function isKab(text: string): boolean {
 }
 
 function matchOblasts(lowerText: string): OblastRef[] {
-  return OBLAST_REFS.filter((ref) => ref.tokens.some((t) => lowerText.includes(t)));
+  return OBLAST_MATCHERS.filter(({ regexes }) => regexes.some((re) => re.test(lowerText))).map(({ ref }) => ref);
 }
 
 // Extract { text, ts } per message from a Telegram /s/ HTML page.

@@ -24,7 +24,7 @@ const RISK_COLORS: Record<string, string> = {
 export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsProps) {
   const [expanded, setExpanded] = useState(true);
   const [maximized, setMaximized] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'ukraine' | 'russia' | 'news' | 'quakes' | 'feeds'>('all');
+  const [filter, setFilter] = useState<'all' | 'ukraine' | 'russia' | 'world' | 'news' | 'quakes' | 'feeds'>('all');
 
   // Built-in live feeds — verified video IDs (synced with /api/live-news)
   const BUILTIN_FEEDS = [
@@ -145,6 +145,7 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
   const filtered = filter === 'all'     ? alerts :
     filter === 'ukraine' ? alerts.filter(a => a.type === 'news' && a.side === 'ua') :
     filter === 'russia'  ? alerts.filter(a => a.type === 'news' && a.side === 'ru') :
+    filter === 'world'   ? alerts.filter(a => a.type === 'news' && a.side === 'world') :
     filter === 'news'    ? alerts.filter(a => a.type === 'news') :
     filter === 'quakes'  ? alerts.filter(a => a.type === 'quake') :
     alerts.filter(a => a.type === 'feed');
@@ -196,7 +197,7 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
           >
             {/* Filters */}
             <div className="flex gap-1 mb-2">
-              {(['all', 'ukraine', 'russia', 'news', 'quakes', 'feeds'] as const).map(f => (
+              {(['all', 'ukraine', 'russia', 'world', 'news', 'quakes', 'feeds'] as const).map(f => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
@@ -206,7 +207,7 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
                     filter === f && f === 'russia'  ? { color: '#5B8FF9', borderColor: 'rgba(91,143,249,0.5)' } : undefined
                   }
                 >
-                  {f === 'ukraine' ? '🇺🇦 UA WAR' : f === 'russia' ? '🇷🇺 RU MILBLOG' : f.toUpperCase()}
+                  {f === 'ukraine' ? '🇺🇦 UA WAR' : f === 'russia' ? '🇷🇺 RU MILBLOG' : f === 'world' ? '🌍 WORLD' : f.toUpperCase()}
                 </button>
               ))}
             </div>
