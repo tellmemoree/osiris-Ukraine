@@ -168,11 +168,11 @@ export async function GET(req: Request) {
           lng: coords?.lng || null
       });
 
-  } catch (err: any) {
+  } catch (err) {
       return NextResponse.json({ 
           query: number,
           valid: false,
-          error: err.message,
+          error: err instanceof Error ? err.message : String(err),
           number: query,
           international: query,
           national: query,

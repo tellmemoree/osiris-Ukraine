@@ -169,7 +169,7 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
         case 'ssl': url = `/api/scanner?target=${encodeURIComponent(query)}&type=ssl`; break;
         case 'subdomains': url = `/api/scanner?target=${encodeURIComponent(query)}&type=subdomains`; break;
         case 'tech': url = `/api/scanner?target=${encodeURIComponent(query)}&type=tech`; break;
-        case 'shodan': url = `https://internetdb.shodan.io/${encodeURIComponent(query)}`; break;
+        case 'shodan': url = `/api/osint/shodan?ip=${encodeURIComponent(query)}`; break;
       }
       const res = await fetch(url, activeTab === 'shodan' ? { cache: 'no-store' } : undefined);
       if (activeTab === 'shodan' && res.status === 404) {
@@ -406,7 +406,7 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
               </div>
             </div>
           )}
-          {renderFallbackExcluding(['ip','hostnames','ports','tags','vulns','cpes'])}
+          {renderFallbackExcluding(['ip','hostnames','ports','tags','vulns','cpes','services','source'])}
         </div>
       );
     }

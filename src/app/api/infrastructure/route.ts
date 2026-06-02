@@ -112,13 +112,13 @@ export async function GET() {
 
       dynamicFacilities = NUCLEAR_FACILITIES.map(facility => {
         // Check if any quake is within 150km
-        const nearbyQuakes = earthquakes.filter((eq: any) => {
+        const nearbyQuakes = earthquakes.filter((eq: { geometry: { coordinates: number[] } }) => {
           const [eqLng, eqLat] = eq.geometry.coordinates;
           return getDistanceKm(facility.lat, facility.lng, eqLat, eqLng) < 150;
         });
 
         if (nearbyQuakes.length > 0) {
-          const maxMag = Math.max(...nearbyQuakes.map((eq: any) => eq.properties.mag));
+          const maxMag = Math.max(...nearbyQuakes.map((eq: { properties: { mag: number } }) => eq.properties.mag));
           return {
             ...facility,
             status: `SEISMIC RISK (M${maxMag.toFixed(1)})`,
@@ -127,7 +127,7 @@ export async function GET() {
         return facility;
       });
     }
-  } catch (e) {
+  } catch {
     // Fallback to static list if API fails
   }
 

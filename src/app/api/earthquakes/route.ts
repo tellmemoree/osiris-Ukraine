@@ -21,7 +21,7 @@ export async function GET() {
     const data = await res.json();
     const features = data.features || [];
 
-    const earthquakes = features.map((f: any) => {
+    const earthquakes = features.map((f: { id?: string; geometry?: { coordinates?: number[] }; properties?: Record<string, unknown> }) => {
       const coords = f.geometry?.coordinates || [0, 0, 0];
       const props = f.properties || {};
       return {

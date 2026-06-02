@@ -23,7 +23,12 @@ export async function GET(req: Request) {
   }
 
   try {
-    const results: any = { ip, timestamp: new Date().toISOString() };
+    const results: {
+      ip: string;
+      timestamp: string;
+      geo?: { is_proxy?: boolean; is_hosting?: boolean; is_mobile?: boolean; org?: string; isp?: string; as_name?: string; [k: string]: unknown };
+      [key: string]: unknown;
+    } = { ip, timestamp: new Date().toISOString() };
 
     // 1. ip-api.com — geolocation (free, no key)
     try {

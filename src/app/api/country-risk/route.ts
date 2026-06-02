@@ -74,7 +74,7 @@ export async function GET() {
           const place = f.properties?.place || '';
           const mag = f.properties?.mag || 0;
           // Extract country-ish context from place name
-          for (const [code, _] of Object.entries(RISK_FACTORS)) {
+          for (const code of Object.keys(RISK_FACTORS)) {
             if (place.toLowerCase().includes(code.toLowerCase())) {
               quakeRisks[code] = (quakeRisks[code] || 0) + mag;
             }
@@ -97,7 +97,7 @@ export async function GET() {
       total_exchanges: exchangeStatus.length,
       timestamp: new Date().toISOString(),
     });
-  } catch (err) {
+  } catch {
     return NextResponse.json({ countries: [], exchanges: [], error: 'Failed' }, { status: 500 });
   }
 }

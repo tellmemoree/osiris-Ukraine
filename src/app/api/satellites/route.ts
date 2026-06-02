@@ -133,13 +133,15 @@ function propagateSGP4Simple(line1: string, line2: string): { lat: number; lng: 
 // SatNOGS Open API - Provides full TLE JSON without API keys or IP blocks
 const SATNOGS_API = 'https://db.satnogs.org/api/tle/?format=json';
 
-let globalCachedSats: any[] = [];
+interface Tle { name: string; line1: string; line2: string }
+
+let globalCachedSats: Tle[] = [];
 let globalCacheTime = 0;
 
 export async function GET() {
   try {
     const nowTime = Date.now();
-    let allSats: any[] = globalCachedSats;
+    let allSats: Tle[] = globalCachedSats;
     let source = 'memory-cache';
 
     if (globalCachedSats.length === 0 || nowTime - globalCacheTime > 3600000) { // 1 hour cache
@@ -151,7 +153,7 @@ export async function GET() {
         
         if (res.ok) {
           const data = await res.json();
-          const fetchedSats: any[] = [];
+          const fetchedSats: Tle[] = [];
           const seen = new Set<string>();
 
           for (const item of data) {
@@ -208,8 +210,10 @@ export async function GET() {
       });
     }
 
-    const cacheControl = satellites.length < 10 
-      ? 'no-store, max-age=0' 
+    // Avoid caching a near-empty satellite set from a transient TLE-source
+    // failure so the next request retries instead of serving it for the TTL.
+    const cacheControl = satellites.length < 10
+      ? 'no-store, max-age=0'
       : 'public, s-maxage=120, stale-while-revalidate=300';
 
     return NextResponse.json({

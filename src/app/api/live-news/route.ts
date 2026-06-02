@@ -36,6 +36,14 @@ const LIVE_FEEDS = [
 
   // ── State media (external only) ──
   { id: 'rt',       name: 'RT News',   city: 'Moscow',  country: 'RU', lat: 55.755, lng:  37.617, url: 'https://rumble.com/c/RTNewsEN', embed_allowed: false, category: 'state', language: 'en' },
+
+  // ── Ukraine (conflict zone 24/7 coverage) ──
+  { id: 'espreso_ua',  name: 'Espreso TV',       city: 'Lviv', country: 'UA', lat: 49.839, lng: 24.029,
+    url: 'https://www.youtube.com/@EspresoTV/live',       embed_allowed: false, category: 'conflict', language: 'uk' },
+  { id: 'ukraine24',   name: 'Ukraine 24',        city: 'Kyiv', country: 'UA', lat: 50.450, lng: 30.523,
+    url: 'https://www.youtube.com/@Ukraine24TV/live',     embed_allowed: false, category: 'conflict', language: 'uk' },
+  { id: 'suspilne',    name: 'Suspilne Novyny',   city: 'Kyiv', country: 'UA', lat: 50.452, lng: 30.518,
+    url: 'https://www.youtube.com/@suspilne.news/live',   embed_allowed: false, category: 'conflict', language: 'uk' },
 ];
 
 export async function GET() {

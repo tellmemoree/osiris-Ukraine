@@ -42,7 +42,7 @@ export async function GET() {
     else if (kpIndex >= 3) { stormLevel = 'Unsettled'; stormColor = '#D4AF37'; }
 
     // Recent alerts
-    const alerts: any[] = [];
+    const alerts: Record<string, unknown>[] = [];
     if (alertsRes.status === 'fulfilled' && Array.isArray(alertsRes.value)) {
       for (const alert of alertsRes.value.slice(0, 10)) {
         alerts.push({
@@ -54,7 +54,7 @@ export async function GET() {
     }
 
     // Recent solar flares
-    const flares: any[] = [];
+    const flares: Record<string, unknown>[] = [];
     if (flareRes.status === 'fulfilled' && Array.isArray(flareRes.value)) {
       for (const flare of flareRes.value.slice(0, 5)) {
         if (!flare.max_class) continue;

@@ -12,6 +12,7 @@ interface OsirisMapProps {
   onRightClick?: (coords: { lat: number; lng: number }) => void;
   onViewStateChange?: (vs: { zoom: number; latitude: number }) => void;
   flyToLocation?: { lat: number; lng: number; ts: number } | null;
+  highlight?: { lat: number; lng: number; ts: number } | null;
   projection?: 'mercator' | 'globe';
   mapStyle?: string;
   sweepData?: any;
@@ -41,7 +42,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -158,7 +159,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-cctv', '#39FF14', 10);
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -217,6 +218,86 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,2, 5,4, 10,8],
         'circle-color': '#FF6B00', 'circle-opacity': 0.5, 'circle-blur': 0.5,
       }});
+
+      // Ukraine admin boundary fill sources (static assets).
+      // Filled red when air-raid alerts are active — oblast OR district level.
+      map.addSource('ukraine-oblast-fill', { type: 'geojson', data: '/ukraine-oblasts.geojson' });
+      map.addSource('ukraine-district-fill', { type: 'geojson', data: '/ukraine-districts.geojson' });
+
+      // Oblast fill — shown when level==='oblast' alert; district fill when level==='district'.
+      // Both layers sit below the dot layers so dots render on top.
+      map.addLayer({ id: 'raid-oblast-fill', type: 'fill', source: 'ukraine-oblast-fill',
+        filter: ['in', ['get', 'name_en'], ['literal', []]],
+        paint: { 'fill-color': '#FF1744', 'fill-opacity': 0.22 }
+      });
+      map.addLayer({ id: 'raid-oblast-outline', type: 'line', source: 'ukraine-oblast-fill',
+        filter: ['in', ['get', 'name_en'], ['literal', []]],
+        paint: { 'line-color': '#FF1744', 'line-width': 1.5, 'line-opacity': 0.55 }
+      });
+      map.addLayer({ id: 'raid-district-fill', type: 'fill', source: 'ukraine-district-fill',
+        filter: ['in', ['get', 'name_ua'], ['literal', []]],
+        paint: { 'fill-color': '#FF1744', 'fill-opacity': 0.28 }
+      });
+      map.addLayer({ id: 'raid-district-outline', type: 'line', source: 'ukraine-district-fill',
+        filter: ['in', ['get', 'name_ua'], ['literal', []]],
+        paint: { 'line-color': '#FF1744', 'line-width': 1, 'line-opacity': 0.6 }
+      });
+
+      // Air Raid Alerts — pulsing red (Ukraine-specific alerts).
+      // Oblast-wide alerts render larger; raion (district) alerts render tighter.
+      map.addLayer({ id: 'raid-glow', type: 'circle', source: 'air-raid-alerts', paint: {
+        // Zoom interpolate must be top-level; district (0.55x) sizing goes in each stop.
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          1,  ['case', ['==', ['get','level'], 'district'], 6.6, 12],
+          5,  ['case', ['==', ['get','level'], 'district'], 11, 20],
+          10, ['case', ['==', ['get','level'], 'district'], 16.5, 30]],
+        'circle-color': '#FF1744', 'circle-opacity': 0.12, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'raid-dots', type: 'circle', source: 'air-raid-alerts', paint: {
+        // District alerts (0.7x) render tighter than oblast-wide.
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          1,  ['case', ['==', ['get','level'], 'district'], 3.5, 5],
+          5,  ['case', ['==', ['get','level'], 'district'], 5.6, 8],
+          10, ['case', ['==', ['get','level'], 'district'], 8.4, 12]],
+        'circle-color': '#FF1744', 'circle-opacity': 0.9,
+        'circle-stroke-width': 2, 'circle-stroke-color': '#FF1744', 'circle-stroke-opacity': 0.5,
+      }});
+      map.addLayer({ id: 'raid-label', type: 'symbol', source: 'air-raid-alerts', minzoom: 4, layout: {
+        'text-field': ['get','regionName'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.8], 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#FF1744', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // KAB / glide-bomb threats — deep-orange (Telegram-derived, oblast-level).
+      // Distinct from air-raid red so the two signals don't read as the same thing.
+      map.addLayer({ id: 'kab-glow', type: 'circle', source: 'kab-threats', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 13, 5, 22, 10, 34],
+        'circle-color': '#FF6B00', 'circle-opacity': 0.12, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'kab-dots', type: 'circle', source: 'kab-threats', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 5.5, 5, 9, 10, 13],
+        'circle-color': '#FF6B00', 'circle-opacity': 0.9,
+        'circle-stroke-width': 2, 'circle-stroke-color': '#FFB000', 'circle-stroke-opacity': 0.6,
+      }});
+      map.addLayer({ id: 'kab-label', type: 'symbol', source: 'kab-threats', minzoom: 4, layout: {
+        'text-field': ['concat', 'KAB ', ['get','regionName']], 'text-size': 9, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.9], 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#FF8C00', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // Power Outages — amber/yellow grid-down indicators
+      map.addLayer({ id: 'outage-glow', type: 'circle', source: 'power-outages', paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,10, 5,16, 10,24],
+        'circle-color': '#FFD500', 'circle-opacity': 0.1, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'outage-dots', type: 'circle', source: 'power-outages', paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,4, 5,7, 10,10],
+        'circle-color': ['match', ['get','type'], 'emergency','#FF6B00', '#FFD500'],
+        'circle-opacity': 0.85,
+        'circle-stroke-width': 1.5, 'circle-stroke-color': '#FFD500', 'circle-stroke-opacity': 0.4,
+      }});
+      map.addLayer({ id: 'outage-label', type: 'symbol', source: 'power-outages', minzoom: 4, layout: {
+        'text-field': ['get','regionName'], 'text-size': 8, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.6], 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#FFD500', 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
       // CCTV — outer glow ring
       map.addLayer({ id: 'cctv-glow', type: 'circle', source: 'cctv', paint: {
@@ -488,16 +569,41 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.3, 5, 0.45, 10, 0.7],
       }});
 
-      // Maritime Ships (moving entities)
-      map.addLayer({ id: 'ship-dots', type: 'circle', source: 'maritime-ships', paint: {
-        'circle-radius': ['interpolate',['linear'],['zoom'], 1,2, 5,4, 10,6],
+      // Maritime Ships (moving entities) — normal vessels only (shadow fleet
+      // is a separate toggle/layer below). Filter excludes shadow_fleet.
+      map.addLayer({ id: 'ship-dots', type: 'circle', source: 'maritime-ships',
+        filter: ['!=', ['get','shadow_fleet'], true], paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1,3, 5,5, 10,8],
         'circle-color': ['match', ['get','type'], 'military','#FF1744', 'tanker','#FF9500', 'cargo','#00BCD4', '#fff'],
         'circle-opacity': 0.8,
       }});
-      map.addLayer({ id: 'ship-label', type: 'symbol', source: 'maritime-ships', minzoom: 5, layout: {
+      map.addLayer({ id: 'ship-label', type: 'symbol', source: 'maritime-ships', minzoom: 5,
+        filter: ['!=', ['get','shadow_fleet'], true], layout: {
         'text-field': ['get','name'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 1.2], 'text-allow-overlap': false,
       }, paint: { 'text-color': ['match', ['get','type'], 'military','#FF1744', 'tanker','#FF9500', 'cargo','#00BCD4', '#fff'], 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // Shadow fleet (sanctioned / dark vessels) — independent toggle, magenta, larger.
+      map.addLayer({ id: 'ship-shadow-dots', type: 'circle', source: 'maritime-ships',
+        filter: ['==', ['get','shadow_fleet'], true], paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1,5, 5,7, 10,10],
+        'circle-color': '#E040FB', 'circle-opacity': 0.9,
+        'circle-stroke-width': 1.5, 'circle-stroke-color': '#E040FB', 'circle-stroke-opacity': 0.6,
+      }});
+      map.addLayer({ id: 'ship-shadow-label', type: 'symbol', source: 'maritime-ships', minzoom: 3,
+        filter: ['==', ['get','shadow_fleet'], true], layout: {
+        'text-field': ['get','name'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.4], 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#E040FB', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // Hide disputed boundary lines from the Carto base style (e.g. dashed
+      // line drawn between Crimea and mainland Ukraine). Regex catches any
+      // variant name the CDN may use without hard-coding layer IDs.
+      map.getStyle().layers.forEach((l: any) => {
+        if (/disputed/i.test(l.id)) {
+          try { map.setLayoutProperty(l.id, 'visibility', 'none'); } catch {}
+        }
+      });
 
       setMapReady(true);
     });
@@ -625,14 +731,76 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
+    // ── Air Raid Alerts ──
+    map.on('click', 'raid-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      const isDistrict = p.level === 'district';
+      popup(coords, `<div style="${pStyle}border:1px solid rgba(255,23,68,0.4);">
+        <div style="color:#FF1744;font-size:13px;font-weight:700;margin-bottom:6px;">🚨 AIR RAID ALERT</div>
+        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${p.regionName||'Unknown region'}</div>
+        <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">${isDistrict ? `${p.oblast||''} · raion-level` : 'whole oblast'}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
+          <div><span style="color:#5C5A54;">SCOPE</span><br/><span style="color:#FF1744;">${isDistrict ? 'DISTRICT' : 'OBLAST'}</span></div>
+          <div><span style="color:#5C5A54;">SINCE</span><br/><span style="color:#E8E6E0;">${p.startedAt ? new Date(p.startedAt).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
+        </div>
+        <a href="https://map.ukrainealarm.com" target="_blank" style="${linkStyle}color:#FF1744;border:1px solid rgba(255,23,68,0.4);background:rgba(255,23,68,0.1);">🔗 LIVE ALERT MAP</a>
+      </div>`);
+    });
+
+    // ── KAB / Glide-Bomb Threats (Telegram-derived) ──
+    map.on('click', 'kab-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      let sources: string[] = [];
+      try { sources = p.sources ? JSON.parse(p.sources) : []; } catch { sources = []; }
+      const srcLabel = sources.length ? sources.join(', ') : '—';
+      popup(coords, `<div style="${pStyle}border:1px solid rgba(255,107,0,0.45);max-width:300px;">
+        <div style="color:#FF6B00;font-size:13px;font-weight:700;margin-bottom:6px;">💣 KAB THREAT</div>
+        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${p.regionName||'Unknown region'}</div>
+        <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">${p.count||1} mention(s) · last 3h · OSINT Telegram</div>
+        <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid rgba(255,107,0,0.4);padding-left:6px;">${(p.text||'').replace(/</g,'&lt;')}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
+          <div><span style="color:#5C5A54;">LAST SEEN</span><br/><span style="color:#E8E6E0;">${p.startedAt ? new Date(p.startedAt).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
+          <div><span style="color:#5C5A54;">SOURCES</span><br/><span style="color:#E8E6E0;font-size:8px;">${srcLabel}</span></div>
+        </div>
+        <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Heuristic text signal — verify before acting.</div>
+      </div>`);
+    });
+
+    // ── Power Outages ──
+    map.on('click', 'outage-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      const typeColor = p.type === 'emergency' ? '#FF6B00' : '#FFD500';
+      popup(coords, `<div style="${pStyle}border:1px solid rgba(255,213,0,0.3);">
+        <div style="color:${typeColor};font-size:13px;font-weight:700;margin-bottom:6px;">⚡ POWER OUTAGE</div>
+        <div style="font-size:10px;color:#E8E6E0;margin-bottom:8px;">${p.regionName||'Unknown region'}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
+          <div><span style="color:#5C5A54;">TYPE</span><br/><span style="color:${typeColor};">${(p.type||'unknown').toUpperCase()}</span></div>
+          <div><span style="color:#5C5A54;">SEVERITY</span><br/><span style="color:#E8E6E0;">${(p.severity||'—').toUpperCase()}</span></div>
+          <div><span style="color:#5C5A54;">SCHEDULE</span><br/><span style="color:#E8E6E0;">${p.schedule||'—'}</span></div>
+          <div><span style="color:#5C5A54;">SOURCE</span><br/><span style="color:#E8E6E0;">${p.source||'—'}</span></div>
+        </div>
+        <a href="https://ua.energy" target="_blank" style="${linkStyle}color:#FFD500;border:1px solid rgba(255,213,0,0.4);background:rgba(255,213,0,0.1);">🔗 UKRENERGO</a>
+      </div>`);
+    });
+
     // ── GDELT Conflicts (with source article) ──
     map.on('click', 'gdelt-dots', e => {
       if (!e.features?.length) return;
       const p = e.features[0].properties as any;
       const coords = (e.features[0].geometry as any).coordinates;
+      const evtTime = p.published ? new Date(p.published) : null;
+      const evtAgo = evtTime ? Math.max(0, Math.round((Date.now() - evtTime.getTime()) / 60000)) : null;
+      const evtLabel = evtAgo == null ? '' : evtAgo < 60 ? `${evtAgo}m ago` : `${Math.round(evtAgo/60)}h ago`;
       popup(coords, `<div style="${pStyle}border:1px solid rgba(255,61,61,0.3);">
         <div style="color:#FF3D3D;font-size:12px;font-weight:700;margin-bottom:6px;">⚠️ CONFLICT EVENT</div>
-        <div style="font-size:9px;color:#E8E6E0;margin-bottom:8px;line-height:1.4;">${p.name||'Unclassified incident'}</div>
+        <div style="font-size:9px;color:#E8E6E0;margin-bottom:6px;line-height:1.4;">${p.name||'Unclassified incident'}</div>
+        ${evtTime ? `<div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">🕐 ${evtTime.toUTCString().slice(5,22)} UTC · ${evtLabel}</div>` : ''}
         <div style="display:flex;gap:6px;">
           ${p.url ? `<a href="${p.url}" target="_blank" style="${linkStyle}color:#FF3D3D;border:1px solid rgba(255,61,61,0.4);background:rgba(255,61,61,0.1);">SOURCE</a>` : ''}
           <a href="https://www.google.com/maps/@${coords[1]},${coords[0]},12z" target="_blank" style="${linkStyle}color:#448AFF;border:1px solid rgba(68,138,255,0.4);background:rgba(68,138,255,0.1);">MAP</a>
@@ -692,7 +860,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Generic hover for clickables ──
-    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-sea-atmo','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo'].forEach(layer => {
+    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-sea-atmo','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo','raid-dots','outage-dots','kab-dots'].forEach(layer => {
       map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
     });
@@ -794,24 +962,29 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Maritime Ships ──
-    map.on('click', 'ship-dots', e => {
+    ['ship-dots','ship-shadow-dots'].forEach(shipLayer => map.on('click', shipLayer, e => {
       if (!e.features?.length) return;
       const p = e.features[0].properties as any;
       const coords = (e.features[0].geometry as any).coordinates;
-      const color = p.type === 'military' ? '#FF1744' : p.type === 'tanker' ? '#FF9500' : '#00BCD4';
+      const isShadow = p.shadow_fleet === true || p.shadow_fleet === 'true';
+      const shipType = (p.type || 'cargo').toString();
+      const color = isShadow ? '#E040FB' : shipType === 'military' ? '#FF1744' : shipType === 'tanker' ? '#FF9500' : '#00BCD4';
+      const flagStr = p.flag_emoji ? `${p.flag_emoji} ${p.flag || ''}`.trim() : (p.flag || '—');
       popup(coords, `<div style="${pStyle}border:1px solid ${color}40;">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:8px;">
           <span style="color:${color};font-size:12px;font-weight:700;letter-spacing:0.1em;">🚢 ${p.name}</span>
-          <span style="color:#aaa;font-size:9px;">${p.flag}</span>
+          <span style="color:#aaa;font-size:11px;white-space:nowrap;">${flagStr}</span>
         </div>
+        ${isShadow ? `<div style="color:#E040FB;font-size:9px;font-weight:700;margin-bottom:6px;">⚠ SHADOW FLEET — sanctioned / dark vessel</div>` : ''}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
-          <div><span style="color:#5C5A54;">TYPE</span><br/><span style="color:${color};">${p.type.toUpperCase()}</span></div>
+          <div><span style="color:#5C5A54;">FLAG</span><br/><span style="color:#E8E6E0;">${flagStr}</span></div>
+          <div><span style="color:#5C5A54;">TYPE</span><br/><span style="color:${color};">${shipType.toUpperCase()}</span></div>
           <div><span style="color:#5C5A54;">SPEED</span><br/><span style="color:#E8E6E0;">${p.speed} knots</span></div>
           <div><span style="color:#5C5A54;">HEADING</span><br/><span style="color:#E8E6E0;">${p.heading}°</span></div>
           <div><span style="color:#5C5A54;">DEST</span><br/><span style="color:#E8E6E0;">${p.destination || 'UNKNOWN'}</span></div>
         </div>
       </div>`);
-    });
+    }));
 
     // ── Weather Events (NASA EONET) ──
     map.on('click', 'weather-dots', e => {
@@ -927,14 +1100,16 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   // Helper to set GeoJSON
   const setGeo = useCallback((source: string, features: any[]) => {
-    const src = mapRef.current?.getSource(source) as any;
-    if (src) src.setData({ type: 'FeatureCollection', features });
+    const map = mapRef.current;
+    const src = map?.getSource(source) as any;
+    if (src) { src.setData({ type: 'FeatureCollection', features }); map?.triggerRepaint(); }
   }, []);
 
   const setVis = useCallback((ids: string[], visible: boolean) => {
     const map = mapRef.current;
     if (!map) return;
     ids.forEach(id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none'); });
+    map.triggerRepaint();
   }, []);
 
   // Flight data → GeoJSON (GPU rendered)
@@ -970,7 +1145,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
-    setGeo('gdelt', activeLayers.global_incidents && data.gdelt ? data.gdelt.map((e: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lng, e.lat] }, properties: { name: e.name } })) : []);
+    setGeo('gdelt', activeLayers.global_incidents && data.gdelt ? data.gdelt.filter((e: any) => !e.published || (Date.now() - new Date(e.published).getTime()) < 86400000).map((e: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lng, e.lat] }, properties: { name: e.name, url: e.url, published: e.published } })) : []);
   }, [mapReady, data.gdelt, activeLayers.global_incidents, setGeo]);
 
   useEffect(() => {
@@ -1002,8 +1177,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady) return;
     setGeo('maritime', activeLayers.maritime && data.maritime_ports ? data.maritime_ports.map((p: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] }, properties: { name: p.name, country: p.country, type: p.type, volume: p.volume, fleet: p.fleet, rank: p.rank } })) : []);
     setGeo('maritime-choke', activeLayers.maritime && data.maritime_chokepoints ? data.maritime_chokepoints.map((c: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: { name: c.name, traffic: c.traffic, risk: c.risk } })) : []);
-    setGeo('maritime-ships', activeLayers.maritime && data.maritime_ships ? data.maritime_ships.map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag } })) : []);
-  }, [mapReady, data.maritime_ports, data.maritime_chokepoints, data.maritime_ships, activeLayers.maritime, setGeo]);
+    setGeo('maritime-ships', (activeLayers.ships || activeLayers.shadow_fleet) && data.maritime_ships ? data.maritime_ships.filter((s: any) => Number.isFinite(s.lat) && Number.isFinite(s.lng) && Math.abs(s.lat) <= 90 && Math.abs(s.lng) <= 180 && !(s.lat === 0 && s.lng === 0)).map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, flag_emoji: s.flag_emoji, shadow_fleet: s.shadow_fleet === true } })) : []);
+  }, [mapReady, data.maritime_ports, data.maritime_chokepoints, data.maritime_ships, activeLayers.maritime, activeLayers.ships, activeLayers.shadow_fleet, setGeo]);
 
   useEffect(() => {
     if (!mapReady) return;
@@ -1059,6 +1234,58 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
+    const alerts = activeLayers.air_raids && data.air_raids ? data.air_raids : [];
+    const dotFeatures = alerts.filter((a: any) => a.lat && a.lng).map((a: any) => ({
+      type: 'Feature', geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
+      properties: { regionName: a.regionName, alertType: a.alertType, startedAt: a.startedAt, regionId: a.regionId, level: a.level, oblast: a.oblast },
+    }));
+    setGeo('air-raid-alerts', dotFeatures);
+
+    // Update polygon fills: oblast alerts fill the oblast polygon;
+    // district alerts fill only the specific rayon — NOT the parent oblast.
+    // Normalize apostrophes: vadimklimenko API may return curly ' (U+2019),
+    // GeoJSON was built with straight ' (U+0027).
+    const normalizeApos = (s: string) => s.replace(/['‘’ʼ]/g, "'");
+    const map = mapRef.current;
+    if (map?.getLayer('raid-oblast-fill')) {
+      const oblastNames = activeLayers.air_raids
+        ? alerts.filter((a: any) => a.level === 'oblast').map((a: any) => normalizeApos(a.regionName as string)).filter(Boolean)
+        : [];
+      const districtNames = activeLayers.air_raids
+        ? alerts.filter((a: any) => a.level === 'district').map((a: any) => normalizeApos(a.regionName as string)).filter(Boolean)
+        : [];
+      map.setFilter('raid-oblast-fill',    ['in', ['get', 'name_en'], ['literal', oblastNames]]);
+      map.setFilter('raid-oblast-outline', ['in', ['get', 'name_en'], ['literal', oblastNames]]);
+      map.setFilter('raid-district-fill',    ['in', ['get', 'name_ua'], ['literal', districtNames]]);
+      map.setFilter('raid-district-outline', ['in', ['get', 'name_ua'], ['literal', districtNames]]);
+    }
+  }, [mapReady, data.air_raids, activeLayers.air_raids, setGeo]);
+
+  // KAB / glide-bomb threats (Telegram-derived, oblast-level point markers).
+  useEffect(() => {
+    if (!mapReady) return;
+    const threats = activeLayers.kab_threats && data.kab_threats ? data.kab_threats : [];
+    setGeo('kab-threats', threats.filter((t: any) => t.lat && t.lng).map((t: any) => ({
+      type: 'Feature', geometry: { type: 'Point', coordinates: [t.lng, t.lat] },
+      properties: {
+        regionName: t.regionName, oblast: t.oblast, count: t.count,
+        startedAt: t.startedAt, text: t.text, sources: t.sources, alertType: t.alertType,
+      },
+    })));
+  }, [mapReady, data.kab_threats, activeLayers.kab_threats, setGeo]);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    setGeo('power-outages', activeLayers.power_outages && data.power_outages
+      ? data.power_outages.filter((o: any) => o.lat && o.lng).map((o: any) => ({
+          type: 'Feature', geometry: { type: 'Point', coordinates: [o.lng, o.lat] },
+          properties: { regionName: o.regionName, type: o.type, severity: o.severity, schedule: o.schedule, source: o.source },
+        }))
+      : []);
+  }, [mapReady, data.power_outages, activeLayers.power_outages, setGeo]);
+
+  useEffect(() => {
+    if (!mapReady) return;
     setGeo('live-news', activeLayers.live_news && data.live_feeds ? data.live_feeds.map((f: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [f.lng, f.lat] }, properties: { name: f.name, city: f.city, country: f.country, url: f.url, category: f.category, embed_allowed: f.embed_allowed !== false } })) : []);
   }, [mapReady, data.live_feeds, activeLayers.live_news, setGeo]);
 
@@ -1066,10 +1293,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady) return;
     const items = data.news || [];
     setGeo('sigint-news', activeLayers.news_intel && items.length > 0
-      ? items.filter((n: any) => n.coords?.length === 2).map((n: any) => ({
+      ? items.filter((n: any) => n.coords?.length === 2 && (!n.published || (Date.now() - new Date(n.published).getTime()) < 86400000)).map((n: any) => ({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [n.coords[1], n.coords[0]] },
-          properties: { title: n.title, source: n.source, risk_score: n.risk_score, link: n.link }
+          properties: { title: n.title, source: n.source, risk_score: n.risk_score, link: n.link, published: n.published }
         }))
       : []);
   }, [mapReady, data.news, activeLayers.news_intel, setGeo]);
@@ -1119,7 +1346,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['infra-glow','infra-dots','infra-label'], activeLayers.infrastructure);
     setVis(['maritime-glow','maritime-dots','maritime-label'], activeLayers.maritime);
     setVis(['choke-glow','choke-dots','choke-label'], activeLayers.maritime);
-    setVis(['ship-dots','ship-label'], activeLayers.maritime);
+    setVis(['ship-dots','ship-label'], activeLayers.ships);
+    setVis(['ship-shadow-dots','ship-shadow-label'], activeLayers.shadow_fleet);
     setVis(['news-glow','news-dots','news-label'], activeLayers.live_news);
     setVis(['sigint-news-glow','sigint-news-dots','sigint-news-label'], activeLayers.news_intel);
     setVis(['conflict-icons'], activeLayers.conflict_zones !== false);
@@ -1131,6 +1359,9 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['sdk-intel','sdk-intel-glow','sdk-intel-atmo'], activeLayers.sdk_naval !== false);
     // Sweep layers always visible when data is present (controlled by useEffect)
     setVis(['sweep-connections','sweep-pulse-ring','sweep-device-glow','sweep-device-dots','sweep-device-labels'], true);
+    setVis(['raid-oblast-fill','raid-oblast-outline','raid-district-fill','raid-district-outline','raid-glow','raid-dots','raid-label'], activeLayers.air_raids);
+    setVis(['outage-glow','outage-dots','outage-label'], activeLayers.power_outages);
+    setVis(['kab-glow','kab-dots','kab-label'], activeLayers.kab_threats);
   }, [mapReady, activeLayers, setVis]);
 
   // IP Sweep visualization
@@ -1224,6 +1455,50 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady || !mapRef.current || !flyToLocation) return;
     mapRef.current.flyTo({ center: [flyToLocation.lng, flyToLocation.lat], zoom: 8, duration: 2000 });
   }, [mapReady, flyToLocation]);
+
+  // Transient highlight ring on a search-selected entity (expanding pulse ~4s).
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightRaf = useRef<number | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map || !highlight) return;
+
+    // Lazily create the source + layers on first use; added last so they render
+    // on top of every other layer.
+    if (!map.getSource('search-highlight')) {
+      map.addSource('search-highlight', { type: 'geojson', data: EMPTY_FC });
+      map.addLayer({ id: 'search-highlight-glow', type: 'circle', source: 'search-highlight',
+        paint: { 'circle-radius': 34, 'circle-color': '#FFD54F', 'circle-opacity': 0.12, 'circle-blur': 1 } });
+      map.addLayer({ id: 'search-highlight-ring', type: 'circle', source: 'search-highlight',
+        paint: { 'circle-radius': 16, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': '#FFD54F', 'circle-stroke-width': 2.5, 'circle-stroke-opacity': 0.9 } });
+    }
+    (map.getSource('search-highlight') as maplibregl.GeoJSONSource).setData({
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [highlight.lng, highlight.lat] }, properties: {} }],
+    });
+
+    if (highlightRaf.current) cancelAnimationFrame(highlightRaf.current);
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = ((now - start) / 1400) % 1; // 1.4s expanding-ring loop
+      if (map.getLayer('search-highlight-ring')) {
+        map.setPaintProperty('search-highlight-ring', 'circle-radius', 16 + t * 40);
+        map.setPaintProperty('search-highlight-ring', 'circle-stroke-opacity', 0.9 * (1 - t));
+      }
+      highlightRaf.current = requestAnimationFrame(tick);
+    };
+    highlightRaf.current = requestAnimationFrame(tick);
+    highlightTimer.current = setTimeout(() => {
+      if (highlightRaf.current) cancelAnimationFrame(highlightRaf.current);
+      if (map.getSource('search-highlight')) (map.getSource('search-highlight') as maplibregl.GeoJSONSource).setData(EMPTY_FC);
+    }, 4200);
+
+    return () => {
+      if (highlightRaf.current) cancelAnimationFrame(highlightRaf.current);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    };
+  }, [mapReady, highlight]);
 
   // Dynamic projection switching (lightweight — no terrain DEM)
   useEffect(() => {

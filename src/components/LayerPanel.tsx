@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plane, Satellite, Activity, Sun, AlertTriangle, Camera, Flame, Target,
   CloudLightning, Radiation, Tv, Anchor, Ship, Newspaper,
-  Network, Share2, Radio
+  Network, Share2, Radio, Siren, Bomb, Zap
 } from 'lucide-react';
 
 interface LayerPanelProps {
@@ -41,7 +41,9 @@ const LAYER_GROUPS = [
     fullLabel: 'MARITIME & SPACE',
     color: '#00BCD4',
     layers: [
-      { key: 'maritime', label: 'Maritime / Naval', icon: Ship, color: '#00BCD4', dataKey: 'maritime_ships,maritime_ports,maritime_chokepoints' },
+      { key: 'maritime', label: 'Maritime / Naval', icon: Anchor, color: '#00BCD4', dataKey: 'maritime_ports,maritime_chokepoints' },
+      { key: 'ships', label: 'Live Ships (AIS)', icon: Ship, color: '#00BCD4', dataKey: 'maritime_ships' },
+      { key: 'shadow_fleet', label: 'Shadow Fleet', icon: AlertTriangle, color: '#E040FB', dataKey: '' },
       { key: 'cables', label: 'Submarine Cables', icon: Share2, color: '#4FC3F7', dataKey: 'submarine_cables' },
       { key: 'satellites', label: 'Satellites', icon: Satellite, color: '#D4AF37', dataKey: 'satellites' },
     ],
@@ -73,6 +75,16 @@ const LAYER_GROUPS = [
       { key: 'infrastructure', label: 'Nuclear Facilities', icon: Radiation, color: '#76FF03', dataKey: 'infrastructure' },
       { key: 'global_incidents', label: 'Global Incidents', icon: AlertTriangle, color: '#FF3D3D', dataKey: 'gdelt' },
       { key: 'gps_jamming', label: 'GPS Jamming', icon: Radio, color: '#FF4444', dataKey: 'gps_jamming' },
+    ],
+  },
+  {
+    label: 'UA WAR',
+    fullLabel: 'UKRAINE WAR',
+    color: '#FF1744',
+    layers: [
+      { key: 'air_raids', label: 'Air Raid Alerts', icon: Siren, color: '#FF1744', dataKey: 'air_raids' },
+      { key: 'kab_threats', label: 'KAB / Glide-Bomb', icon: Bomb, color: '#FF6B00', dataKey: 'kab_threats' },
+      { key: 'power_outages', label: 'Power Outages', icon: Zap, color: '#FFD500', dataKey: 'power_outages' },
     ],
   },
   {
@@ -113,6 +125,17 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
     }
     return found ? total : null;
   };
+  // Shadow Fleet has no dedicated data array — its vessels are the
+  // shadow_fleet-flagged subset of maritime_ships. Count them explicitly so the
+  // layer shows a tally instead of nothing.
+  const countFor = (layer: { key: string; dataKey: string }): number | null => {
+    if (layer.key === 'shadow_fleet') {
+      return Array.isArray(data.maritime_ships)
+        ? data.maritime_ships.filter((s: { shadow_fleet?: boolean }) => s?.shadow_fleet === true).length
+        : null;
+    }
+    return getCount(layer.dataKey);
+  };
 
   if (isMobile) {
     return (
@@ -128,7 +151,7 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
             <div className="grid grid-cols-2 gap-2">
               {group.layers.map((layer) => {
                 const isLayerActive = activeLayers[layer.key];
-                const count = getCount(layer.dataKey);
+                const count = countFor(layer);
                 
                 return (
                   <button
@@ -226,7 +249,7 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
                     <div className="flex flex-col gap-1.5">
                       {group.layers.map((layer) => {
                         const isLayerActive = activeLayers[layer.key];
-                        const count = getCount(layer.dataKey);
+                        const count = countFor(layer);
                         const Icon = layer.icon || Shield;
                         
                         return (

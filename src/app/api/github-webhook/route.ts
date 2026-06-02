@@ -24,7 +24,7 @@ export async function POST(request: Request) {
             }
         }
 
-        const payload = JSON.parse(payloadText);
+        JSON.parse(payloadText); // validate the webhook body is JSON before forwarding
 
         // Forward the payload to the local OSIRIS Discord Bot running on Port 3005
         // Using the Tailscale internal IP of the Discord bot server

@@ -3,11 +3,12 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
 import SearchBar from '@/components/SearchBar';
+import { buildEntityIndex, SearchEntity } from '@/lib/entitySearch';
 import ScaleBar from '@/components/ScaleBar';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import SharePanel from '@/components/SharePanel';
@@ -89,6 +90,9 @@ export default function Dashboard() {
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const [mapView, setMapView] = useState({ zoom: 2.5, latitude: 20 });
   const [flyToLocation, setFlyToLocation] = useState<{ lat: number; lng: number; ts: number } | null>(null);
+  const [highlight, setHighlight] = useState<{ lat: number; lng: number; ts: number } | null>(null);
+  // Searchable index over every live entity array (rebuilt when data changes).
+  const entityIndex = useMemo(() => buildEntityIndex(data), [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const [globalStats, setGlobalStats] = useState<any>(null);
   const mouseCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const coordsDisplayRef = useRef<HTMLDivElement>(null);
@@ -103,6 +107,7 @@ export default function Dashboard() {
   const [showAlerts, setShowAlerts] = useState(false);
   const [showScmPanel, setShowScmPanel] = useState(true);
   const [showIntel, setShowIntel] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|null>(null);
   const [mapProjection, setMapProjection] = useState<'globe'|'mercator'>('globe');
@@ -124,6 +129,8 @@ export default function Dashboard() {
     jets: false,
     military: false,
     maritime: true,
+    ships: true,
+    shadow_fleet: false,
     satellites: false,
     balloons: false,
     cctv: true,
@@ -142,10 +149,26 @@ export default function Dashboard() {
     sdk_sea: true,
     sdk_air: true,
     sdk_naval: true,
+    air_raids: false,
+    power_outages: false,
+    kab_threats: false,
   });
   const [liveFeedUrl, setLiveFeedUrl] = useState<string | null>(null);
   const [liveFeedName, setLiveFeedName] = useState('');
   const [liveFeedEmbedAllowed, setLiveFeedEmbedAllowed] = useState(true);
+  // Bottom-center HUD visibility (user-dismissible; persisted across reloads)
+  const [hudVisible, setHudVisible] = useState(true);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('osiris-hud-hidden') === '1') setHudVisible(false);
+  }, []);
+  const toggleHud = useCallback(() => {
+    setHudVisible(v => {
+      const next = !v;
+      try { localStorage.setItem('osiris-hud-hidden', next ? '0' : '1'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   // Splash screen
   useEffect(() => {
@@ -280,7 +303,14 @@ export default function Dashboard() {
       if (res.ok) {
         const json = await res.json();
         const d = transform ? transform(json) : json;
-        dataRef.current = { ...dataRef.current, ...d };
+        // Don't clobber a previously-good non-empty array with a transient
+        // empty one (e.g. Telegram rate-limit returns empty news). Keep last good.
+        const merged: Record<string, any> = { ...dataRef.current };
+        for (const [k, v] of Object.entries(d)) {
+          if (Array.isArray(v) && v.length === 0 && Array.isArray(merged[k]) && merged[k].length > 0) continue;
+          merged[k] = v;
+        }
+        dataRef.current = merged;
         setDataVersion(v => v + 1);
         setBackendStatus('connected');
       }
@@ -308,7 +338,7 @@ export default function Dashboard() {
     // Polling — OPTIMIZED intervals to minimize edge requests
     const intervals = [
       setInterval(() => fetchEndpoint('/api/earthquakes'), 900000),  // 15 min (was 5)
-      setInterval(() => fetchEndpoint('/api/news'), 1800000),        // 30 min (was 10)
+      setInterval(() => fetchEndpoint('/api/news'), 180000),         // 3 min (recover fast from transient empty)
       setInterval(() => fetchEndpoint('/api/markets', d => ({ markets: d })), 900000), // 15 min (was 5)
     ];
     return () => {
@@ -320,83 +350,81 @@ export default function Dashboard() {
 
   // ── LAYER-AWARE DATA LOADING — only fetch when layer is toggled ON ──
   const layerFetchedRef = useRef<Set<string>>(new Set());
+
+  // Single source of truth for "how to fetch each layer's data" — shared by the
+  // layer-toggle loader below and by the search bar's ensureSearchSources().
+  const LAYER_LOADERS: Record<string, () => void> = useMemo(() => ({
+    flights: () => fetchEndpoint('/api/flights'),
+    satellites: () => fetchEndpoint('/api/satellites'),
+    fires: () => fetchEndpoint('/api/fires'),
+    cctv: () => fetchEndpoint('/api/cctv?region=all&v=2'),
+    maritime: () => fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships })),
+    balloons: () => fetchEndpoint('/api/balloons', d => ({ balloons: d.balloons })),
+    radiation: () => fetchEndpoint('/api/radiation', d => ({ radiation: d.stations })),
+    live_news: () => fetchEndpoint('/api/live-news', d => ({ live_feeds: d.feeds })),
+    weather: () => fetchEndpoint('/api/weather', d => ({ weather_events: d.events })),
+    infrastructure: () => fetchEndpoint('/api/infrastructure', d => ({ infrastructure: d.infrastructure })),
+    gdelt: () => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })),
+    air_raids: () => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })),
+    power_outages: () => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })),
+    kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })),
+  }), [fetchEndpoint]);
+
+  // Fetch a source at most once (does NOT toggle the layer on).
+  const loadOnce = useCallback((key: string) => {
+    if (layerFetchedRef.current.has(key) || !LAYER_LOADERS[key]) return;
+    layerFetchedRef.current.add(key);
+    LAYER_LOADERS[key]();
+  }, [LAYER_LOADERS]);
+
+  // Pull every searchable entity source once so the search bar can locate any
+  // entity by name even while its layer is hidden. Called when search is opened.
+  const ensureSearchSources = useCallback(() => {
+    ['flights', 'satellites', 'cctv', 'maritime', 'radiation', 'live_news', 'weather', 'infrastructure', 'gdelt', 'kab_threats', 'power_outages'].forEach(loadOnce);
+  }, [loadOnce]);
+
+  // Picking an entity from search: fly to it, reveal its layer, and highlight it.
+  const handleSelectEntity = useCallback((e: SearchEntity) => {
+    const ts = Date.now();
+    setFlyToLocation({ lat: e.lat, lng: e.lng, ts });
+    setHighlight({ lat: e.lat, lng: e.lng, ts });
+    if (e.layerKey) setActiveLayers(prev => ({ ...prev, [e.layerKey]: true }) as typeof prev);
+  }, []);
+
+  // ── LAYER-AWARE DATA LOADING — only fetch when layer is toggled ON ──
   useEffect(() => {
+    if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private) loadOnce('flights');
+    if (activeLayers.satellites) loadOnce('satellites');
+    if (activeLayers.fires) loadOnce('fires');
+    if (activeLayers.cctv) loadOnce('cctv');
+    if (activeLayers.maritime || activeLayers.ships || activeLayers.shadow_fleet) loadOnce('maritime');
+    if (activeLayers.balloons) loadOnce('balloons');
+    if (activeLayers.radiation) loadOnce('radiation');
+    if (activeLayers.live_news) loadOnce('live_news');
+    if (activeLayers.weather) loadOnce('weather');
+    if (activeLayers.infrastructure) loadOnce('infrastructure');
+    if (activeLayers.global_incidents) loadOnce('gdelt');
+    if (activeLayers.air_raids) loadOnce('air_raids');
+    if (activeLayers.power_outages) loadOnce('power_outages');
+    if (activeLayers.kab_threats) loadOnce('kab_threats');
+  }, [activeLayers, loadOnce]);
 
-    // Flights
-    if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private) {
-      if (!layerFetchedRef.current.has('flights')) {
-        fetchEndpoint('/api/flights');
-        layerFetchedRef.current.add('flights');
-      }
-    }
-    // Satellites
-    if (activeLayers.satellites && !layerFetchedRef.current.has('satellites')) {
-      fetchEndpoint('/api/satellites');
-      layerFetchedRef.current.add('satellites');
-    }
-    // Fires
-    if (activeLayers.fires && !layerFetchedRef.current.has('fires')) {
-      fetchEndpoint('/api/fires');
-      layerFetchedRef.current.add('fires');
-    }
-    // CCTV
-    if (activeLayers.cctv && !layerFetchedRef.current.has('cctv')) {
-      fetchEndpoint('/api/cctv?region=all&v=2');
-      layerFetchedRef.current.add('cctv');
-    }
-    // Maritime
-    if (activeLayers.maritime && !layerFetchedRef.current.has('maritime')) {
-      fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships }));
-      layerFetchedRef.current.add('maritime');
-    }
-    // Balloons
-    if (activeLayers.balloons && !layerFetchedRef.current.has('balloons')) {
-      fetchEndpoint('/api/balloons', d => ({ balloons: d.balloons }));
-      layerFetchedRef.current.add('balloons');
-    }
-    // Radiation
-    if (activeLayers.radiation && !layerFetchedRef.current.has('radiation')) {
-      fetchEndpoint('/api/radiation', d => ({ radiation: d.stations }));
-      layerFetchedRef.current.add('radiation');
-    }
-    // Live News
-    if (activeLayers.live_news && !layerFetchedRef.current.has('live_news')) {
-      fetchEndpoint('/api/live-news', d => ({ live_feeds: d.feeds }));
-      layerFetchedRef.current.add('live_news');
-    }
-    // Weather
-    if (activeLayers.weather && !layerFetchedRef.current.has('weather')) {
-      fetchEndpoint('/api/weather', d => ({ weather_events: d.events }));
-      layerFetchedRef.current.add('weather');
-    }
-    // Infrastructure
-    if (activeLayers.infrastructure && !layerFetchedRef.current.has('infrastructure')) {
-      fetchEndpoint('/api/infrastructure', d => ({ infrastructure: d.infrastructure }));
-      layerFetchedRef.current.add('infrastructure');
-    }
-    // Global Incidents (GDELT)
-    if (activeLayers.global_incidents && !layerFetchedRef.current.has('gdelt')) {
-      fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events }));
-      layerFetchedRef.current.add('gdelt');
-    }
-
-    // Submarine Cables
+  // Submarine Cables (UI overhaul) — static dataset, fetched once on toggle.
+  useEffect(() => {
     if (activeLayers.cables && !layerFetchedRef.current.has('cables')) {
       (async () => {
         try {
           const ts = Date.now();
-      const res = await fetch(`/data/submarine-cables.json?v=${ts}`);
+          const res = await fetch(`/data/submarine-cables.json?v=${ts}`);
           if (res.ok) {
-             const cablesData = await res.json();
-             dataRef.current = { ...dataRef.current, submarine_cables: cablesData.features };
-             setDataVersion(v => v + 1);
+            const cablesData = await res.json();
+            dataRef.current = { ...dataRef.current, submarine_cables: cablesData.features };
+            setDataVersion(v => v + 1);
           }
-        } catch (e) { console.warn('Cables fetch failed'); }
+        } catch { console.warn('Cables fetch failed'); }
       })();
       layerFetchedRef.current.add('cables');
     }
-
-
   }, [activeLayers]);
 
   // ── LAYER-AWARE POLLING — only poll data for active layers ──
@@ -412,8 +440,17 @@ export default function Dashboard() {
     if (activeLayers.radiation) {
       intervals.push(setInterval(() => fetchEndpoint('/api/radiation', d => ({ radiation: d.stations })), 300000)); // 5m
     }
-    if (activeLayers.maritime) {
+    if (activeLayers.maritime || activeLayers.ships || activeLayers.shadow_fleet) {
       intervals.push(setInterval(() => fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships })), 10000)); // 10s
+    }
+    if (activeLayers.air_raids) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })), 60000)); // 1 min
+    }
+    if (activeLayers.kab_threats) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })), 60000)); // 1 min
+    }
+    if (activeLayers.power_outages) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })), 300000)); // 5 min
     }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);
@@ -715,6 +752,7 @@ export default function Dashboard() {
           onRightClick={handleRightClick} 
           onViewStateChange={setMapView} 
           flyToLocation={flyToLocation}
+          highlight={highlight}
           sweepData={sweepData}
           scanTargets={scanTargets}
           demoMode={demoMode}
@@ -812,7 +850,26 @@ export default function Dashboard() {
       {/* ── RIGHT TOOL STRIP ── */}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-[250] pointer-events-auto bg-black/40 backdrop-blur-sm p-1 rounded-full border border-white/5">
         <div className="relative group">
-          <button onClick={() => { setShowIntel(!showIntel); setShowMarkets(false); setShowAlerts(false); }} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showIntel ? 'bg-[var(--cyan-primary)]/20' : 'hover:bg-white/10'}`}>
+          <button onClick={() => { const next = !showSearch; setShowSearch(next); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); if (next) ensureSearchSources(); }} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showSearch ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`}>
+            <Search className={`w-4 h-4 ${showSearch ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+          </button>
+          {/* Search Panel Slideout — coordinates, places, AND any live entity by name */}
+          <AnimatePresence>
+            {showSearch && (
+              <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="absolute right-12 top-1/2 -translate-y-1/2 w-80">
+                <SearchBar
+                  onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); }}
+                  entities={entityIndex}
+                  onEnsureLoaded={ensureSearchSources}
+                  onSelectEntity={(e) => { handleSelectEntity(e); }}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <div className="relative group">
+          <button onClick={() => { setShowIntel(!showIntel); setShowSearch(false); setShowMarkets(false); setShowAlerts(false); }} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showIntel ? 'bg-[var(--cyan-primary)]/20' : 'hover:bg-white/10'}`}>
             <Radar className={`w-4 h-4 ${showIntel ? 'text-[var(--cyan-primary)]' : 'text-white/60'}`} />
           </button>
           {/* OSINT / Recon Panel Slideout */}
@@ -832,7 +889,7 @@ export default function Dashboard() {
         </div>
 
         <div className="relative group">
-          <button onClick={() => { setShowMarkets(!showMarkets); setShowIntel(false); setShowAlerts(false); }} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showMarkets ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`}>
+          <button onClick={() => { setShowMarkets(!showMarkets); setShowIntel(false); setShowAlerts(false); setShowSearch(false); }} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showMarkets ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`}>
             <BarChart3 className={`w-4 h-4 ${showMarkets ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
           </button>
           {/* Markets Panel Slideout */}
@@ -846,7 +903,7 @@ export default function Dashboard() {
         </div>
 
         <div className="relative group">
-          <button onClick={() => { setShowAlerts(!showAlerts); setShowIntel(false); setShowMarkets(false); }} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showAlerts ? 'bg-[#FF3D3D]/20' : 'hover:bg-white/10'}`}>
+          <button onClick={() => { setShowAlerts(!showAlerts); setShowIntel(false); setShowMarkets(false); setShowSearch(false); }} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showAlerts ? 'bg-[#FF3D3D]/20' : 'hover:bg-white/10'}`}>
             <AlertTriangle className={`w-4 h-4 ${showAlerts ? 'text-[#FF3D3D]' : 'text-white/60'}`} />
           </button>
           {/* Alerts Panel Slideout */}
@@ -975,6 +1032,17 @@ export default function Dashboard() {
           <AnimatePresence>
             {mobilePanel && (
               <motion.div
+                key="mobile-backdrop"
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                onClick={() => setMobilePanel(null)}
+                className="fixed inset-0 z-[399] bg-black/40"
+                aria-hidden
+              />
+            )}
+            {mobilePanel && (
+              <motion.div
+                key="mobile-drawer"
                 initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
                 transition={{ type: 'spring', damping: 30, stiffness: 300 }}
                 className="fixed bottom-[52px] left-0 right-0 z-[400] glass-panel rounded-b-none overflow-y-auto styled-scrollbar"
@@ -1009,7 +1077,7 @@ export default function Dashboard() {
                   {mobilePanel === 'intel' && <IntelFeed data={data} onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMobilePanel(null); }} />}
                   {mobilePanel === 'search' && (
                     <div className="space-y-2">
-                      <SearchBar onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMobilePanel(null); }} />
+                      <SearchBar onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMobilePanel(null); }} entities={entityIndex} onEnsureLoaded={ensureSearchSources} onSelectEntity={(e) => { handleSelectEntity(e); setMobilePanel(null); }} />
                       <SharePanel mapView={mapView} activeLayers={activeLayers} mouseCoords={null} />
                     </div>
                   )}
@@ -1043,6 +1111,18 @@ export default function Dashboard() {
             </div>
           </div>
         </motion.div>
+      )}
+
+      {/* ── HUD hide/show toggle (desktop) ── */}
+      {!isMobile && (
+        <button
+          onClick={toggleHud}
+          title={hudVisible ? 'Hide HUD' : 'Show HUD'}
+          className="desktop-only absolute bottom-7 left-1/2 -translate-x-1/2 z-[210] pointer-events-auto glass-panel px-2 py-0.5 flex items-center gap-1 text-[8px] font-mono tracking-wider text-[var(--text-muted)] hover:text-[var(--gold-primary)] transition-colors"
+        >
+          {hudVisible ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronUp className="w-2.5 h-2.5" />}
+          {hudVisible ? 'HIDE HUD' : 'SHOW HUD'}
+        </button>
       )}
 
       {/* ── Scale Bar (desktop) ── */}
