@@ -25,6 +25,14 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
   const [expanded, setExpanded] = useState(true);
   const [maximized, setMaximized] = useState(false);
   const [filter, setFilter] = useState<'all' | 'ukraine' | 'russia' | 'world' | 'news' | 'quakes' | 'feeds'>('all');
+  // Per-item full-text toggle (news rows expand to show the entire story).
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const toggleItem = (key: string) =>
+    setExpandedItems(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
 
   // Built-in live feeds — verified video IDs (synced with /api/live-news)
   const BUILTIN_FEEDS = [
@@ -217,9 +225,12 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
               {filtered.map((alert, i) => {
                 const Icon = getIcon(alert.type);
                 const sevColor = RISK_COLORS[alert.severity] || '#FFD700';
+                const itemKey = `${alert.type}-${alert.source ?? ''}-${alert.title ?? ''}-${i}`;
+                const isItemExpanded = expandedItems.has(itemKey);
+                const isNews = alert.type === 'news';
                 return (
                   <div
-                    key={i}
+                    key={itemKey}
                     onClick={() => {
                       if (alert.lat !== undefined && alert.lng !== undefined) {
                         onLocate(alert.lat, alert.lng);
@@ -237,11 +248,30 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <Icon className="w-3 h-3 flex-shrink-0" style={{ color: sevColor }} />
-                          <span className={`text-[10px] font-mono text-[var(--text-primary)] ${alert.type === 'news' ? 'line-clamp-4 leading-snug' : 'truncate leading-tight'}`}>
-                            {alert.description || alert.title}
-                          </span>
+                        <div className="flex items-start gap-1.5 mb-1">
+                          <Icon className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: sevColor }} />
+                          {isNews ? (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleItem(itemKey); }}
+                              className="min-w-0 flex-1 text-left"
+                              title={isItemExpanded ? 'Collapse' : 'Show full text'}
+                            >
+                              {alert.title && (
+                                <span className={`block text-[10px] font-mono font-semibold text-[var(--text-primary)] leading-snug ${isItemExpanded ? '' : 'line-clamp-2'}`}>
+                                  {alert.title}
+                                </span>
+                              )}
+                              {alert.description && alert.description !== alert.title && (
+                                <span className={`block text-[10px] font-mono text-[var(--text-secondary)] leading-snug mt-0.5 ${isItemExpanded ? '' : 'line-clamp-4'}`}>
+                                  {alert.description}
+                                </span>
+                              )}
+                            </button>
+                          ) : (
+                            <span className="text-[10px] font-mono text-[var(--text-primary)] truncate leading-tight">
+                              {alert.title}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
