@@ -994,6 +994,17 @@ export default function Dashboard() {
           <AnimatePresence>
             {mobilePanel && (
               <motion.div
+                key="mobile-backdrop"
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                onClick={() => setMobilePanel(null)}
+                className="fixed inset-0 z-[399] bg-black/40"
+                aria-hidden
+              />
+            )}
+            {mobilePanel && (
+              <motion.div
+                key="mobile-drawer"
                 initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
                 transition={{ type: 'spring', damping: 30, stiffness: 300 }}
                 className="fixed bottom-[52px] left-0 right-0 z-[400] glass-panel rounded-b-none overflow-y-auto styled-scrollbar"

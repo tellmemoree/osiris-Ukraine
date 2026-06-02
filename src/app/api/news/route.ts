@@ -211,6 +211,21 @@ function jitterAround([lat, lng]: [number, number], seed: string): [number, numb
   return [lat + radius * Math.cos(angle), lng + (radius * Math.sin(angle)) / cosLat];
 }
 
+// Decode HTML entities that survive tag-stripping. Telegram/RSS payloads carry
+// numeric (&#33;), hex (&#x21;), and named entities; without this they render
+// literally (e.g. "летят&#33;"). &amp; is decoded last so we never double-decode
+// a pre-escaped "&amp;#33;" into "!".
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(parseInt(n, 10)); } catch { return _; } })
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => { try { return String.fromCodePoint(parseInt(n, 16)); } catch { return _; } })
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'")
+    .replace(/&laquo;/g, '«').replace(/&raquo;/g, '»').replace(/&mdash;/g, '—').replace(/&ndash;/g, '–')
+    .replace(/&hellip;/g, '…').replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
 // A parsed feed item, before risk-scoring/geo-mapping in GET().
 interface ParsedArticle {
   title: string;
@@ -232,7 +247,7 @@ function parseTelegramHTML(html: string, channel: string): ParsedArticle[] {
     const textMatch = blockHtml.match(textRegex);
     if (!textMatch) continue;
 
-    const text = textMatch[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+    const text = decodeEntities(textMatch[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')).trim();
     if (!text || text.length < 10) continue;
 
     // [\s\S]*? handles attributes/newlines between the date link and <time>.
@@ -260,8 +275,8 @@ function parseRSSItems(xml: string, sourceName: string): ParsedArticle[] {
       return (m?.[1] || m?.[2] || '').trim();
     };
 
-    const title = getTag('title').replace(/<[^>]+>/g, '');
-    const desc = getTag('description').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"');
+    const title = decodeEntities(getTag('title').replace(/<[^>]+>/g, ''));
+    const desc = decodeEntities(getTag('description').replace(/<[^>]+>/g, ''));
     
     items.push({
       title: title.length > 100 ? title.substring(0, 100) + '...' : title,

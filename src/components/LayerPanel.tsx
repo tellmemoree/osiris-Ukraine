@@ -118,6 +118,17 @@ function LayerPanel({ data, activeLayers, setActiveLayers }: LayerPanelProps) {
     }
     return found ? total : null;
   };
+  // Shadow Fleet has no dedicated data array — its vessels are the
+  // shadow_fleet-flagged subset of maritime_ships. Count them explicitly so the
+  // layer shows a tally instead of nothing.
+  const countFor = (layer: { key: string; dataKey: string }): number | null => {
+    if (layer.key === 'shadow_fleet') {
+      return Array.isArray(data.maritime_ships)
+        ? data.maritime_ships.filter((s: { shadow_fleet?: boolean }) => s?.shadow_fleet === true).length
+        : null;
+    }
+    return getCount(layer.dataKey);
+  };
   const totalEntities = ALL_LAYERS.reduce((s: number, l: any) => s + (getCount(l.dataKey) || 0), 0);
   const activeCount = Object.values(activeLayers).filter(Boolean).length;
 
@@ -208,7 +219,7 @@ function LayerPanel({ data, activeLayers, setActiveLayers }: LayerPanelProps) {
                       {group.layers.map((layer) => {
                         const Icon = layer.icon;
                         const isActive = activeLayers[layer.key];
-                        const count = getCount(layer.dataKey);
+                        const count = countFor(layer);
                         return (
                           <button
                             key={layer.key}
