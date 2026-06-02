@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -99,15 +99,17 @@ export default function Dashboard() {
   const [activeCamera, setActiveCamera] = useState<any>(null);
   const [spaceWeather, setSpaceWeather] = useState<any>(null);
   const [showLayers, setShowLayers] = useState(true);
-  const [showMarkets, setShowMarkets] = useState(true);
+  const [showMarkets, setShowMarkets] = useState(false);
+  const [showAlerts, setShowAlerts] = useState(false);
   const [showScmPanel, setShowScmPanel] = useState(true);
-  const [showIntel, setShowIntel] = useState(true);
+  const [showIntel, setShowIntel] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|null>(null);
   const [mapProjection, setMapProjection] = useState<'globe'|'mercator'>('globe');
   const [mapStyle, setMapStyle] = useState<'dark'|'satellite'>('dark');
   const [sweepData, setSweepData] = useState<any>(null);
   const [scanTargets, setScanTargets] = useState<any[]>([]);
+  const [demoMode, setDemoMode] = useState(false);
 
   const isMobile = useIsMobile();
   const startTime = useRef(Date.now());
@@ -138,7 +140,10 @@ export default function Dashboard() {
     war_alerts: false,
     gps_jamming: false,
     day_night: true,
-    sdk_stream: true,
+    cables: true,
+    sdk_sea: true,
+    sdk_air: true,
+    sdk_naval: true,
     air_raids: false,
     power_outages: false,
   });
@@ -287,7 +292,8 @@ export default function Dashboard() {
   const fetchEndpoint = useCallback(async (url: string, transform?: (d: any) => any, options?: RequestInit) => {
     if (typeof document !== 'undefined' && document.hidden) return;
     try {
-      const res = await fetch(url, options);
+      // Force the browser to bypass its local disk cache for real-time data
+      const res = await fetch(url, { ...options, cache: 'no-store' });
       if (res.ok) {
         const json = await res.json();
         const d = transform ? transform(json) : json;
@@ -397,6 +403,22 @@ export default function Dashboard() {
       fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events }));
       layerFetchedRef.current.add('gdelt');
     }
+    // Submarine Cables
+    if (activeLayers.cables && !layerFetchedRef.current.has('cables')) {
+      (async () => {
+        try {
+          const ts = Date.now();
+          const res = await fetch(`/data/submarine-cables.json?v=${ts}`);
+          if (res.ok) {
+            const cablesData = await res.json();
+            dataRef.current = { ...dataRef.current, submarine_cables: cablesData.features };
+            setDataVersion(v => v + 1);
+          }
+        } catch (e) { console.warn('Cables fetch failed'); }
+      })();
+      layerFetchedRef.current.add('cables');
+    }
+
     // Air Raid Alerts
     if (activeLayers.air_raids && !layerFetchedRef.current.has('air_raids')) {
       fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts }));
@@ -444,7 +466,8 @@ export default function Dashboard() {
   // Does NOT duplicate existing layer visuals — SDK layer is LINES ONLY.
   // Cameras are excluded — they have their own dedicated layer.
   useEffect(() => {
-    if (!activeLayers.sdk_stream) {
+    const anyActive = activeLayers.sdk_sea || activeLayers.sdk_air || activeLayers.sdk_naval;
+    if (!anyActive) {
       dataRef.current = { ...dataRef.current, sdk_entities: [] };
       return;
     }
@@ -515,7 +538,7 @@ export default function Dashboard() {
     }
 
     dataRef.current = { ...dataRef.current, sdk_entities: sdkEntities };
-  }, [dataVersion, activeLayers.sdk_stream]);
+  }, [dataVersion, activeLayers.sdk_sea, activeLayers.sdk_air, activeLayers.sdk_naval]);
 
   const totalFlights = useMemo(() => (
     (data.commercial_flights?.length||0)+(data.private_flights?.length||0)+(data.private_jets?.length||0)+(data.military_flights?.length||0)
@@ -733,6 +756,7 @@ export default function Dashboard() {
           flyToLocation={flyToLocation}
           sweepData={sweepData}
           scanTargets={scanTargets}
+          demoMode={demoMode}
         />
       </ErrorBoundary>
 

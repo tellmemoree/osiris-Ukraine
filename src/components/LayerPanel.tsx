@@ -6,7 +6,7 @@ import {
   Plane, Satellite, Activity, Globe, Radio, Eye,
   Shield, Sun, AlertTriangle, Camera, Flame, Target,
   CloudLightning, Radiation, Tv, Anchor, Ship, Newspaper,
-  ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Network, Zap, Siren,
+  ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Network, Zap, Siren, Share2,
 } from 'lucide-react';
 
 interface LayerPanelProps {
@@ -17,11 +17,13 @@ interface LayerPanelProps {
 
 const LAYER_GROUPS = [
   {
-    label: 'OSIRIS SDK',
+    label: 'SDK',
     icon: Network,
     color: '#1565C0',
     layers: [
-      { key: 'sdk_stream', label: 'Intelligence Stream', icon: Network, color: '#1565C0', dataKey: 'sdk_entities' },
+      { key: 'sdk_sea', label: 'Maritime Lines', icon: Ship, color: '#1976D2', dataKey: 'sdk_entities' },
+      { key: 'sdk_air', label: 'Air Corridors', icon: Plane, color: '#1565C0', dataKey: 'sdk_entities' },
+      { key: 'sdk_naval', label: 'Intel Mesh', icon: Network, color: '#0D47A1', dataKey: 'sdk_entities' },
     ],
   },
   {
@@ -40,6 +42,7 @@ const LAYER_GROUPS = [
     icon: Ship,
     color: '#00BCD4',
     layers: [
+      { key: 'cables', label: 'Subsea Cables', icon: Share2, color: '#4FC3F7', dataKey: '' },
       { key: 'maritime', label: 'Maritime / Naval', icon: Anchor, color: '#00BCD4', dataKey: 'maritime_ports,maritime_chokepoints' },
       { key: 'ships', label: 'Live Ships (AIS)', icon: Ship, color: '#00BCD4', dataKey: 'maritime_ships' },
       { key: 'shadow_fleet', label: 'Shadow Fleet', icon: AlertTriangle, color: '#E040FB', dataKey: '' },
@@ -117,7 +120,7 @@ function LayerPanel({ data, activeLayers, setActiveLayers }: LayerPanelProps) {
     }
     return found ? total : null;
   };
-  const totalEntities = ALL_LAYERS.reduce((s: number, l: any) => s + (getCount(l.dataKey) || 0), 0);
+  const totalEntities = ALL_LAYERS.filter((l: any) => l.dataKey && l.dataKey !== 'submarine_cables').reduce((s: number, l: any) => s + (getCount(l.dataKey) || 0), 0);
   const activeCount = Object.values(activeLayers).filter(Boolean).length;
 
   const toggleGroup = (groupLabel: string) => {

@@ -89,15 +89,18 @@ export default function GlobalStatusBar() {
       transition={{ delay: 4, duration: 0.8 }}
       className={`hidden md:block absolute bottom-0 left-0 right-0 pointer-events-none ${showCves ? 'z-[300]' : 'z-[198]'}`}
     >
-      <div className="h-[22px] overflow-hidden bg-[var(--bg-panel)]/80 border-t border-[var(--border-secondary)]/50 flex items-center text-[8px] font-mono tracking-wider backdrop-blur-sm">
+      <div className="h-[22px] overflow-hidden bg-black/90 border-t border-[var(--cyan-primary)]/40 flex items-center text-[8px] font-mono tracking-wider backdrop-blur-md relative" style={{ boxShadow: '0 -4px 20px rgba(0, 229, 255, 0.1)' }}>
+        {/* Animated glitch line overlay */}
+        <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--cyan-primary)] to-transparent opacity-50" style={{ animation: 'hud-scanline 3s linear infinite' }} />
+
         {/* Static label */}
-        <div className="flex-shrink-0 px-2 h-full flex items-center gap-1 border-r border-[var(--border-secondary)]/50 bg-[var(--bg-panel)] pointer-events-auto">
-          <span className="text-[var(--text-muted)]">MKT</span>
-          <span className="text-[var(--gold-primary)] font-bold">{openCount}/{exchanges.length}</span>
+        <div className="flex-shrink-0 px-3 h-full flex items-center gap-1 border-r border-[var(--cyan-primary)]/30 bg-black pointer-events-auto relative z-10 shadow-[4px_0_10px_rgba(0,0,0,0.5)]">
+          <span className="text-[var(--cyan-primary)]/50">MKT</span>
+          <span className="text-[var(--cyan-primary)] font-bold">{openCount}/{exchanges.length}</span>
         </div>
 
         {/* CSS-animated ticker */}
-        <div className="flex-1 overflow-hidden relative">
+        <div className="flex-1 overflow-hidden relative" style={{ maskImage: 'linear-gradient(to right, transparent, black 5%, black 95%, transparent)' }}>
           <div className="flex items-center animate-ticker whitespace-nowrap">
             {tickerContent}
             {tickerContent}

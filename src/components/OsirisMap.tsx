@@ -16,6 +16,7 @@ interface OsirisMapProps {
   mapStyle?: string;
   sweepData?: any;
   scanTargets?: any[];
+  demoMode?: boolean;
 }
 
 function computeSolarTerminator(): [number, number][] {
@@ -40,7 +41,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [] }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -82,6 +83,47 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     ctx.fill();
     map.addImage(id, { width: size, height: size, data: new Uint8Array(ctx.getImageData(0, 0, size, size).data) });
   }, []);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const map = mapRef.current;
+
+    // ── DEMO MODE SPINNING ──
+    let spinReq: number | undefined = undefined;
+    let isSpinning = false;
+
+    const startSpinning = () => {
+      if (!map) return;
+      isSpinning = true;
+      let lastTime = performance.now();
+
+      const frame = (time: number) => {
+        if (!isSpinning) return;
+        if (!map.isMoving() && !map.isZooming()) {
+          const dt = time - lastTime;
+          const center = map.getCenter();
+          center.lng += (0.5 * dt) / 1000;
+          map.setCenter(center);
+        }
+        lastTime = time;
+        spinReq = requestAnimationFrame(frame);
+      };
+
+      spinReq = requestAnimationFrame(frame);
+    };
+
+    if (demoMode) {
+      startSpinning();
+    } else {
+      isSpinning = false;
+      if (spinReq) cancelAnimationFrame(spinReq);
+    }
+
+    return () => {
+      isSpinning = false;
+      if (spinReq) cancelAnimationFrame(spinReq);
+    };
+  }, [mapReady, demoMode]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -455,47 +497,51 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       }, paint: { 'text-color': ['match', ['get','status'], 'DANGER','#FF1744', 'WARNING','#FF9500', '#AB47BC'], 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
       // ══ OSIRIS SDK — Lattice Intelligence Mesh ══
+      // Polybolos Style: Delicate, translucent, steel-blue splined mesh
 
-      // -- GLOW LAYERS --
-      map.addLayer({ id: 'sdk-sea-glow', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'SEA'], paint: {
-        'line-color': '#4FC3F7',
-        'line-width': ['interpolate',['linear'],['zoom'], 1, 3, 5, 6, 10, 10],
-        'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.15, 5, 0.25, 10, 0.35],
-        'line-blur': 4,
+      // ── SEA domain (Distinct Solid Lines) ──
+      map.addLayer({ id: 'sdk-sea', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'SEA'], paint: {
+        'line-color': ['coalesce', ['get', 'color'], '#1976D2'],
+        'line-width': ['interpolate',['linear'],['zoom'], 1, 0.8, 5, 1.5, 10, 2.5],
+        'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.3, 5, 0.5, 10, 0.7],
       }});
-      map.addLayer({ id: 'sdk-air-glow', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'AIR'], paint: {
-        'line-color': '#B3E5FC',
-        'line-width': ['interpolate',['linear'],['zoom'], 1, 2, 5, 4, 10, 8],
-        'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.1, 5, 0.15, 10, 0.2],
+
+      // ── AIR domain (Steel Gray / Cyan) ──
+      map.addLayer({ id: 'sdk-air-atmo', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'AIR'], paint: {
+        'line-color': '#4DD0E1',
+        'line-width': ['interpolate',['linear'],['zoom'], 1, 1.5, 5, 5, 10, 8],
+        'line-opacity': 0.04,
         'line-blur': 3,
       }});
-      map.addLayer({ id: 'sdk-intel-glow', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'INTEL'], paint: {
-        'line-color': '#81D4FA',
-        'line-width': ['interpolate',['linear'],['zoom'], 1, 2, 5, 4, 10, 6],
+      map.addLayer({ id: 'sdk-air-glow', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'AIR'], paint: {
+        'line-color': '#80DEEA',
+        'line-width': ['interpolate',['linear'],['zoom'], 1, 0.8, 5, 2, 10, 4],
         'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.08, 5, 0.12, 10, 0.18],
-        'line-blur': 2,
+        'line-blur': 1,
+      }});
+      map.addLayer({ id: 'sdk-air', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'AIR'], paint: {
+        'line-color': '#B2EBF2',
+        'line-width': ['interpolate',['linear'],['zoom'], 1, 0.15, 5, 0.6, 10, 1.2],
+        'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.2, 5, 0.35, 10, 0.5],
       }});
 
-      // -- CORE LINES --
-      // Maritime routes — solid, brightest
-      map.addLayer({ id: 'sdk-sea', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'SEA'], paint: {
-        'line-color': '#4FC3F7',
-        'line-width': ['interpolate',['linear'],['zoom'], 1, 0.6, 5, 1.2, 10, 2],
-        'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.4, 5, 0.6, 10, 0.9],
+      // ── INTEL domain (Deep Steel / Violet) ──
+      map.addLayer({ id: 'sdk-intel-atmo', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'INTEL'], paint: {
+        'line-color': '#7986CB',
+        'line-width': ['interpolate',['linear'],['zoom'], 1, 2.5, 5, 7, 10, 12],
+        'line-opacity': 0.06,
+        'line-blur': 5,
       }});
-      // Air corridors — dashed, medium
-      map.addLayer({ id: 'sdk-air', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'AIR'], paint: {
-        'line-color': '#B3E5FC',
-        'line-width': ['interpolate',['linear'],['zoom'], 1, 0.4, 5, 0.9, 10, 1.6],
-        'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.25, 5, 0.4, 10, 0.6],
-        'line-dasharray': [6, 3],
+      map.addLayer({ id: 'sdk-intel-glow', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'INTEL'], paint: {
+        'line-color': '#9FA8DA',
+        'line-width': ['interpolate',['linear'],['zoom'], 1, 1.2, 5, 3, 10, 6],
+        'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.12, 5, 0.18, 10, 0.25],
+        'line-blur': 2,
       }});
-      // Naval/Intel — dotted, subtle
       map.addLayer({ id: 'sdk-intel', type: 'line', source: 'sdk-links', filter: ['==',['get','domain'],'INTEL'], paint: {
-        'line-color': '#81D4FA',
-        'line-width': ['interpolate',['linear'],['zoom'], 1, 0.3, 5, 0.7, 10, 1.2],
-        'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.2, 5, 0.35, 10, 0.5],
-        'line-dasharray': [2, 4],
+        'line-color': '#C5CAE9',
+        'line-width': ['interpolate',['linear'],['zoom'], 1, 0.3, 5, 1, 10, 2],
+        'line-opacity': ['interpolate',['linear'],['zoom'], 1, 0.3, 5, 0.45, 10, 0.7],
       }});
 
       // Maritime Ships (moving entities) — normal vessels only (shadow fleet
@@ -742,7 +788,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       'ADS-B → Lattice': 'https://opensky-network.org',
       'Naval Intelligence': 'https://www.odni.gov',
     };
-    ['sdk-sea','sdk-sea-glow','sdk-air','sdk-air-glow','sdk-intel','sdk-intel-glow'].forEach(layer => {
+    ['sdk-sea','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo'].forEach(layer => {
       map.on('click', layer, e => {
         if (!e.features?.length) return;
         const p = e.features[0].properties as any;
@@ -768,7 +814,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Generic hover for clickables ──
-    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-air','sdk-air-glow','sdk-intel','sdk-intel-glow','raid-dots','outage-dots'].forEach(layer => {
+    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo','raid-dots','outage-dots'].forEach(layer => {
       map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
     });
@@ -1023,13 +1069,19 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // Flight data → GeoJSON (GPU rendered)
   useEffect(() => {
     if (!mapReady) return;
-    const toFeatures = (arr: any[]) => (arr || []).map((f: any) => ({
-      type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [f.lng, f.lat] },
-      properties: { callsign: f.callsign, heading: f.heading || 0, alt: f.alt, model: f.model, speed_knots: f.speed_knots, registration: f.registration, icao24: f.icao24 },
-    }));
-    setGeo('flights', activeLayers.flights ? toFeatures(data.commercial_flights) : []);
-    setGeo('private-fl', activeLayers.private ? toFeatures(data.private_flights) : []);
-    setGeo('jets', activeLayers.jets ? toFeatures(data.private_jets) : []);
+    const toFeatures = (arr: any[], decimate: number = 1) => {
+      let filtered = arr || [];
+      if (decimate > 1) {
+        filtered = filtered.filter((_, i) => i % decimate === 0);
+      }
+      return filtered.map((f: any) => ({
+        type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [f.lng, f.lat] },
+        properties: { callsign: f.callsign, heading: f.heading || 0, alt: f.alt, model: f.model, speed_knots: f.speed_knots, registration: f.registration, icao24: f.icao24 },
+      }));
+    };
+    setGeo('flights', activeLayers.flights ? toFeatures(data.commercial_flights, 10) : []);
+    setGeo('private-fl', activeLayers.private ? toFeatures(data.private_flights, 2) : []);
+    setGeo('jets', activeLayers.jets ? toFeatures(data.private_jets, 2) : []);
     setGeo('military', activeLayers.military ? toFeatures(data.military_flights) : []);
   }, [mapReady, data.commercial_flights, data.private_flights, data.private_jets, data.military_flights, activeLayers.flights, activeLayers.private, activeLayers.jets, activeLayers.military]);
 
@@ -1093,272 +1145,43 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   }, [mapReady, data.radiation, activeLayers.radiation, setGeo]);
 
   // ══ OSIRIS SDK — Lattice Sensor Mesh ══
-  // Multi-waypoint routes tracing real-world shipping lanes, air corridors, and intel lines
+  // Uses real submarine cable data for SEA domain, curated routes for AIR/INTEL
   useEffect(() => {
     if (!mapReady) return;
     setGeo('sdk-entities', []);
 
-    if (!activeLayers.sdk_stream) {
+    const anySDK = activeLayers.sdk_sea || activeLayers.sdk_air || activeLayers.sdk_naval;
+    if (!anySDK) {
       setGeo('sdk-links', []);
       return;
     }
 
-    // Spline curve generator for ultra-smooth paths
-    const splineCurve = (points: [number,number][], segments = 15): [number,number][] => {
-      if (points.length < 2) return points;
-      const res: [number,number][] = [];
-      const p = [...points];
-      p.unshift(p[0]); // Duplicate first
-      p.push(p[p.length-1]); // Duplicate last
-      for (let i = 1; i < p.length - 2; i++) {
-        for (let t = 0; t <= 1; t += 1/segments) {
-          const t2 = t*t, t3 = t2*t;
-          const x = 0.5 * ((2*p[i][0]) + (-p[i-1][0] + p[i+1][0])*t + (2*p[i-1][0] - 5*p[i][0] + 4*p[i+1][0] - p[i+2][0])*t2 + (-p[i-1][0] + 3*p[i][0] - 3*p[i+1][0] + p[i+2][0])*t3);
-          const y = 0.5 * ((2*p[i][1]) + (-p[i-1][1] + p[i+1][1])*t + (2*p[i-1][1] - 5*p[i][1] + 4*p[i+1][1] - p[i+2][1])*t2 + (-p[i-1][1] + 3*p[i][1] - 3*p[i+1][1] + p[i+2][1])*t3);
-          res.push([x,y]);
-        }
-      }
-      return res;
-    };
-
-    // Route builder — applies spline smoothing
-    const route = (waypoints: [number,number][], props: any) => ({
-      type: 'Feature' as const,
-      geometry: { type: 'LineString' as const, coordinates: splineCurve(waypoints) },
-      properties: props,
-    });
-
     const links: any[] = [];
 
-    // ── MARITIME: Real shipping lane waypoints (strictly over water) ──
-
-    links.push(route([
-      [121.47,31.23], [122.5,30.5], [120.0,26.0], [119.0,24.0], [116.0,21.0], [111.0,15.0], [109.0,10.0], [105.0,4.0], [103.84,1.26]
-    ], { fromName:'Shanghai', toName:'Singapore', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [103.84,1.26], [103.0,1.8], [100.0,4.0], [96.0,6.0], [88.0,6.0], [80.0,5.5], [70.0,8.0], [60.0,12.0], [52.0,14.0], [45.0,12.0], [43.33,12.58]
-    ], { fromName:'Singapore', toName:'Bab el-Mandeb', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [43.33,12.58], [41.0,17.0], [38.0,21.0], [35.0,25.0], [32.34,30.43]
-    ], { fromName:'Bab el-Mandeb', toName:'Suez Canal', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [32.34,30.43], [32.3,31.3], [31.5,31.8], [26.0,34.0], [18.0,35.0], [15.0,36.0], [11.0,37.5], [6.0,38.0], [0.0,36.5], [-5.35,36.0]
-    ], { fromName:'Suez Canal', toName:'Gibraltar', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [-5.35,36.0], [-9.0,36.0], [-10.0,38.0], [-10.0,43.0], [-8.0,45.0], [-5.5,48.5], [-2.0,49.5], [1.5,51.0], [3.5,51.5], [4.50,51.90]
-    ], { fromName:'Gibraltar', toName:'Rotterdam', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [121.47,31.23], [123.0,30.5], [130.0,30.0], [140.0,34.0], [150.0,40.0], [165.0,43.0], [180.0,44.0], [200.0,43.0], [220.0,38.0], [235.0,34.0], [241.73,33.74]
-    ], { fromName:'Shanghai', toName:'Los Angeles', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [103.84,1.26], [105.0,4.0], [109.0,10.0], [111.0,15.0], [116.0,21.0], [119.0,24.0], [120.0,26.0], [124.0,30.0], [127.0,32.0], [129.04,35.10]
-    ], { fromName:'Singapore', toName:'Busan', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [4.50,51.90], [3.5,51.5], [1.5,51.0], [-2.0,49.5], [-5.5,48.5], [-8.0,45.0], [-10.0,43.0], [-10.0,38.0], [-18.0,25.0], [-25.0,15.0], [-20.0,0.0], [-10.0,-20.0], [5.0,-32.0], [18.47,-34.36]
-    ], { fromName:'Rotterdam', toName:'Cape of Good Hope', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [18.47,-34.36], [22.0,-35.0], [30.0,-33.0], [40.0,-20.0], [45.0,-10.0], [52.0,5.0], [56.0,14.0], [59.0,22.0], [56.25,26.57]
-    ], { fromName:'Cape of Good Hope', toName:'Strait of Hormuz', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [-79.68,9.08], [-79.0,11.0], [-75.0,15.0], [-72.0,20.0], [-65.0,30.0], [-50.0,42.0], [-30.0,48.0], [-10.0,49.0], [-5.5,48.5], [-2.0,49.5], [1.5,51.0], [4.50,51.90]
-    ], { fromName:'Panama', toName:'Rotterdam', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [-118.27,33.74], [-118.0,32.0], [-115.0,26.0], [-105.0,18.0], [-95.0,13.0], [-85.0,8.0], [-80.0,7.5], [-79.68,9.08]
-    ], { fromName:'Los Angeles', toName:'Panama', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [-46.31,-23.95], [-44.0,-25.0], [-30.0,-28.0], [-15.0,-30.0], [0.0,-32.0], [10.0,-33.0], [18.47,-34.36]
-    ], { fromName:'Santos', toName:'Cape of Good Hope', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [55.06,25.01], [54.5,25.5], [53.0,25.8], [51.0,26.0], [50.16,26.64]
-    ], { fromName:'Dubai', toName:'Ras Tanura', domain:'SEA', source:'AIS Maritime' }));
-
-    links.push(route([
-      [79.84,6.94], [80.0,5.5], [88.0,6.0], [96.0,6.0], [100.0,4.0], [103.0,1.8], [103.84,1.26]
-    ], { fromName:'Colombo', toName:'Singapore', domain:'SEA', source:'AIS Maritime' }));
-
-    // ── AIR CORRIDORS: High altitude splined curves ──
-
-    links.push(route([
-      [-73.78,40.64], [-65.0,44.0], [-50.0,50.0], [-35.0,53.0], [-20.0,53.5], [-10.0,52.5], [-0.46,51.47]
-    ], { fromName:'JFK New York', toName:'London Heathrow', domain:'AIR', source:'ADS-B / OpenSky' }));
-
-    links.push(route([
-      [-0.46,51.47], [8.0,48.0], [18.0,44.0], [28.81,41.27], [35.0,37.0], [42.0,32.0], [50.0,28.0], [55.36,25.25]
-    ], { fromName:'London', toName:'Dubai', domain:'AIR', source:'ADS-B / OpenSky' }));
-
-    links.push(route([
-      [55.36,25.25], [65.0,20.0], [75.0,15.0], [85.0,10.0], [95.0,5.0], [103.99,1.36], [110.0,8.0], [118.0,16.0], [125.0,25.0], [132.0,30.0], [139.79,35.61]
-    ], { fromName:'Dubai', toName:'Tokyo', domain:'AIR', source:'ADS-B / OpenSky' }));
-
-    links.push(route([
-      [139.79,35.61], [148.0,38.0], [158.0,41.0], [170.0,43.0], [180.0,44.0], [195.0,43.0], [210.0,41.0], [225.0,38.0], [235.0,36.0], [241.59,33.94]
-    ], { fromName:'Tokyo', toName:'LAX', domain:'AIR', source:'ADS-B / OpenSky' }));
-
-    links.push(route([
-      [-118.41,33.94], [-110.0,35.0], [-100.0,37.0], [-90.0,39.0], [-80.0,40.0], [-73.78,40.64]
-    ], { fromName:'LAX', toName:'JFK', domain:'AIR', source:'ADS-B / OpenSky' }));
-
-    links.push(route([
-      [28.81,41.27], [40.0,42.0], [52.0,42.5], [65.0,43.0], [78.0,43.0], [90.0,42.5], [103.0,41.5], [116.60,40.08]
-    ], { fromName:'Istanbul', toName:'Beijing', domain:'AIR', source:'ADS-B / OpenSky' }));
-
-    // ── NAVAL/INTEL: Fleet deployment corridors (smooth curves) ──
-
-    links.push(route([
-      [-76.33,36.95], [-68.0,38.0], [-55.0,42.0], [-40.0,46.0], [-25.0,49.0], [-10.0,50.5], [-1.11,50.80]
-    ], { fromName:'Norfolk NAS', toName:'Portsmouth (Royal Navy)', domain:'INTEL', source:'Naval Intelligence' }));
-
-    links.push(route([
-      [-76.33,36.95], [-65.0,37.0], [-45.0,36.5], [-25.0,36.0], [-10.0,36.0], [-5.35,36.0], [2.0,37.0], [10.0,38.0], [20.0,37.0], [28.0,36.0], [35.89,34.89]
-    ], { fromName:'Norfolk NAS', toName:'Tartus (Russian Base)', domain:'INTEL', source:'Naval Intelligence' }));
-
-    links.push(route([
-      [-117.15,32.69], [-130.0,29.0], [-145.0,25.0], [-157.97,21.35], [-170.0,25.0], [-180.0,29.0], [-192.0,31.0], [-205.0,33.0], [-215.0,34.0], [-220.33,35.28]
-    ], { fromName:'San Diego NB', toName:'Yokosuka (7th Fleet)', domain:'INTEL', source:'Naval Intelligence' }));
-
-    links.push(route([
-      [139.67,35.28], [130.0,30.0], [120.0,22.0], [110.0,12.0], [104.01,1.33], [95.0,5.0], [85.0,10.0], [78.0,15.0], [72.84,18.93]
-    ], { fromName:'Yokosuka', toName:'Mumbai (Indian Navy)', domain:'INTEL', source:'Naval Intelligence' }));
-
-    links.push(route([
-      [33.42,69.07], [35.0,65.0], [30.0,58.0], [28.0,52.0], [30.0,46.0], [33.0,42.0], [30.0,38.0], [35.89,34.89]
-    ], { fromName:'Severomorsk (Northern Fleet)', toName:'Tartus', domain:'INTEL', source:'Naval Intelligence' }));
-
-    links.push(route([
-      [110.39,21.20], [112.0,24.0], [115.0,28.0], [118.0,32.0], [120.43,36.09]
-    ], { fromName:'Zhanjiang (PLA Southern Theater)', toName:'Qingdao (PLA Northern Theater)', domain:'INTEL', source:'Naval Intelligence' }));
-
-    links.push(route([
-      [5.93,43.12], [8.0,41.0], [12.0,39.0], [18.0,37.5], [25.0,36.0], [30.0,35.0], [35.89,34.89]
-    ], { fromName:'Toulon (Marine Nationale)', toName:'Tartus', domain:'INTEL', source:'Naval Intelligence' }));
-
-    links.push(route([
-      [72.84,18.93], [68.0,21.0], [63.0,23.5], [58.0,25.0], [56.25,26.57]
-    ], { fromName:'Mumbai (Western Naval Command)', toName:'Strait of Hormuz', domain:'INTEL', source:'Naval Intelligence', url:'https://www.indiannavy.nic.in/content/western-naval-command' }));
-
-    // ── ADDITIONAL HIGH-FIDELITY ROUTES ──
-
-    // Maritime: US West Coast → Hawaii → Guam → Taiwan
-    links.push(route([
-      [-122.42,37.77], [-130.0,34.0], [-140.0,29.0], [-150.0,24.0], [-157.86,21.31]
-    ], { fromName:'San Francisco', toName:'Honolulu', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:-140/centery:29/zoom:4' }));
-    
-    links.push(route([
-      [-157.86,21.31], [-170.0,18.0], [-180.0,16.5], [-200.0,14.0], [-215.25,13.44]
-    ], { fromName:'Honolulu', toName:'Guam', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:-170/centery:18/zoom:4' }));
-    
-    links.push(route([
-      [144.75,13.44], [135.0,18.0], [125.0,23.0], [121.5,25.04]
-    ], { fromName:'Guam', toName:'Taipei', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:135/centery:18/zoom:5' }));
-
-    // Maritime: US East Coast → Gulf of Mexico
-    links.push(route([
-      [-76.3,36.8], [-75.0,34.0], [-79.0,30.0], [-80.0,26.0], [-82.0,24.0], [-86.0,25.0], [-90.0,27.0], [-94.8,29.3]
-    ], { fromName:'Norfolk', toName:'Galveston', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:-85/centery:26/zoom:5' }));
-
-    // Maritime: Europe → West Africa
-    links.push(route([
-      [-9.14,38.72], [-12.0,34.0], [-15.0,28.0], [-17.0,22.0], [-17.53,14.71]
-    ], { fromName:'Lisbon', toName:'Dakar', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:-15/centery:25/zoom:4' }));
-    
-    links.push(route([
-      [-17.53,14.71], [-15.0,9.0], [-10.0,5.0], [-5.0,4.0], [0.0,4.5], [3.4,6.4]
-    ], { fromName:'Dakar', toName:'Lagos', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:-5/centery:4/zoom:5' }));
-
-    // Maritime: Australia → Japan
-    links.push(route([
-      [151.2,-33.8], [153.0,-25.0], [155.0,-15.0], [154.0,-5.0], [150.0,5.0], [145.0,15.0], [140.0,25.0], [139.7,35.6]
-    ], { fromName:'Sydney', toName:'Tokyo', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:145/centery:0/zoom:3' }));
-
-    // Maritime: Australia → Singapore
-    links.push(route([
-      [115.8,-31.9], [113.0,-25.0], [110.0,-15.0], [107.0,-5.0], [105.0,0.0], [103.8,1.2]
-    ], { fromName:'Perth', toName:'Singapore', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:110/centery:-15/zoom:4' }));
-
-    // Air: Trans-polar NY to Beijing
-    links.push(route([
-      [-73.78,40.64], [-75.0,55.0], [-78.0,70.0], [-80.0,85.0], [110.0,80.0], [115.0,60.0], [116.60,40.08]
-    ], { fromName:'JFK', toName:'Beijing', domain:'AIR', source:'ADS-B / OpenSky', url:'https://www.flightradar24.com/65.0,-75.0/4' }));
-
-    // Air: South America to Europe
-    links.push(route([
-      [-46.63,-23.55], [-40.0,-15.0], [-35.0,-5.0], [-30.0,5.0], [-20.0,15.0], [-15.0,25.0], [-10.0,35.0], [-0.46,51.47]
-    ], { fromName:'Sao Paulo', toName:'London', domain:'AIR', source:'ADS-B / OpenSky', url:'https://www.flightradar24.com/15.0,-20.0/4' }));
-
-    // Air: Middle East to Australia
-    links.push(route([
-      [55.36,25.25], [65.0,15.0], [75.0,5.0], [85.0,-5.0], [100.0,-15.0], [115.0,-25.0], [130.0,-30.0], [151.2,-33.8]
-    ], { fromName:'Dubai', toName:'Sydney', domain:'AIR', source:'ADS-B / OpenSky', url:'https://www.flightradar24.com/-5.0,90.0/4' }));
-
-    // Intel: Trans-Atlantic Subsea Data Cable (TAT-14 equivalent)
-    links.push(route([
-      [-74.01,40.12], [-65.0,42.0], [-50.0,46.0], [-35.0,48.0], [-20.0,49.0], [-5.0,50.0], [4.5,52.0]
-    ], { fromName:'New Jersey Landing', toName:'Europe Landing', domain:'INTEL', source:'Global Subsea Cable Network', url:'https://www.submarinecablemap.com/' }));
-
-    // Intel: Trans-Pacific Subsea Data Cable (FASTER equivalent)
-    links.push(route([
-      [-124.0,43.0], [-135.0,45.0], [-150.0,47.0], [-165.0,48.0], [-185.0,47.0], [-205.0,42.0], [-220.0,35.0]
-    ], { fromName:'Oregon Landing', toName:'Japan Landing', domain:'INTEL', source:'Global Subsea Cable Network', url:'https://www.submarinecablemap.com/' }));
-
-    // Intel: Mediterranean Subsea Cable (SEA-ME-WE)
-    links.push(route([
-      [5.3,43.3], [10.0,38.0], [18.0,35.0], [25.0,33.0], [31.2,31.2]
-    ], { fromName:'Marseille', toName:'Alexandria', domain:'INTEL', source:'Global Subsea Cable Network', url:'https://www.submarinecablemap.com/' }));
-
-    // Maritime: Suez to Mumbai (Arabian Sea)
-    links.push(route([
-      [32.34,30.43], [35.0,25.0], [38.0,21.0], [41.0,17.0], [43.33,12.58], [45.0,12.0], [52.0,14.0], [60.0,15.0], [68.0,17.0], [72.84,18.93]
-    ], { fromName:'Suez Canal', toName:'Mumbai', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:60/centery:15/zoom:5' }));
-
-    // Maritime: Cape of Good Hope to Australia (Southern Ocean)
-    links.push(route([
-      [18.47,-34.36], [40.0,-40.0], [60.0,-42.0], [80.0,-43.0], [100.0,-40.0], [115.8,-31.9]
-    ], { fromName:'Cape of Good Hope', toName:'Perth', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:70/centery:-40/zoom:3' }));
-
-    // Maritime: Panama Canal to Valparaiso (South America West Coast)
-    links.push(route([
-      [-79.68,9.08], [-80.0,2.0], [-81.5,-5.0], [-78.0,-15.0], [-74.0,-25.0], [-71.6,-33.0]
-    ], { fromName:'Panama Canal', toName:'Valparaiso', domain:'SEA', source:'AIS Maritime', url:'https://www.marinetraffic.com/en/ais/home/centerx:-78/centery:-15/zoom:4' }));
-
-    // Air: London to Singapore
-    links.push(route([
-      [-0.46,51.47], [15.0,48.0], [35.0,42.0], [55.0,35.0], [70.0,25.0], [85.0,15.0], [95.0,8.0], [103.8,1.2]
-    ], { fromName:'London', toName:'Singapore', domain:'AIR', source:'ADS-B / OpenSky', url:'https://www.flightradar24.com/55.0,35.0/4' }));
-
-    // Air: New York to Buenos Aires
-    links.push(route([
-      [-73.78,40.64], [-70.0,20.0], [-65.0,0.0], [-55.0,-15.0], [-58.4,-34.6]
-    ], { fromName:'JFK New York', toName:'Buenos Aires', domain:'AIR', source:'ADS-B / OpenSky', url:'https://www.flightradar24.com/-65.0,0.0/4' }));
-
-    // Air: Tokyo to Sydney
-    links.push(route([
-      [139.7,35.6], [142.0,20.0], [145.0,0.0], [148.0,-15.0], [151.2,-33.8]
-    ], { fromName:'Tokyo', toName:'Sydney', domain:'AIR', source:'ADS-B / OpenSky', url:'https://www.flightradar24.com/145.0,0.0/4' }));
-
-    // Intel: Arctic Patrol Route (Northern Fleet)
-    links.push(route([
-      [33.42,69.07], [20.0,72.0], [0.0,75.0], [-20.0,72.0], [-30.0,65.0]
-    ], { fromName:'Severomorsk', toName:'Greenland Sea', domain:'INTEL', source:'Naval Intelligence', url:'https://www.odni.gov' }));
-
-    // Intel: South China Sea Carrier Patrol
-    links.push(route([
-      [127.6,26.2], [123.0,24.0], [118.0,20.0], [114.0,15.0], [112.0,10.0]
-    ], { fromName:'Okinawa', toName:'South China Sea', domain:'INTEL', source:'Naval Intelligence', url:'https://www.odni.gov' }));
+    // ── SEA DOMAIN: Real submarine cable data (1-for-1 Match) ──
+    if (activeLayers.sdk_sea && data.submarine_cables) {
+      const ignoredColors = new Set(['#9BB5CC', '#A0B8CD', '#8EABC2', '#9bb5cc', '#a0b8cd', '#8eabc2']);
+      for (const cable of data.submarine_cables) {
+        if (!cable.geometry) continue;
+        if (cable.properties?.color && ignoredColors.has(cable.properties.color)) continue;
+        links.push({
+          type: 'Feature',
+          geometry: cable.geometry,
+          properties: {
+            domain: 'SEA',
+            fromName: cable.properties?.name || 'Submarine Cable',
+            toName: cable.properties?.landing_points || '',
+            source: 'Global Subsea Cable Network',
+            url: 'https://www.submarinecablemap.com/',
+            ...cable.properties,
+            color: '#1976D2',
+          },
+        });
+      }
+    }
 
     setGeo('sdk-links', links);
-  }, [mapReady, activeLayers.sdk_stream, setGeo]);
+  }, [mapReady, activeLayers.sdk_sea, activeLayers.sdk_air, activeLayers.sdk_naval, data.submarine_cables, setGeo]);
 
   useEffect(() => {
     if (!mapReady) return;
@@ -1469,7 +1292,9 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
     setVis(['balloon-dots','balloon-label'], activeLayers.balloons);
     setVis(['rad-glow','rad-dots','rad-label'], activeLayers.radiation);
-    setVis(['sdk-sea','sdk-air','sdk-intel'], activeLayers.sdk_stream !== false);
+    setVis(['sdk-sea'], activeLayers.sdk_sea !== false);
+    setVis(['sdk-air','sdk-air-glow','sdk-air-atmo'], activeLayers.sdk_air !== false);
+    setVis(['sdk-intel','sdk-intel-glow','sdk-intel-atmo'], activeLayers.sdk_naval !== false);
     // Sweep layers always visible when data is present (controlled by useEffect)
     setVis(['sweep-connections','sweep-pulse-ring','sweep-device-glow','sweep-device-dots','sweep-device-labels'], true);
     setVis(['raid-oblast-fill','raid-oblast-outline','raid-district-fill','raid-district-outline','raid-glow','raid-dots','raid-label'], activeLayers.air_raids);
