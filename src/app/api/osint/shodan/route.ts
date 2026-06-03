@@ -81,6 +81,62 @@ async function lookupViaKey(ip: string, key: string): Promise<ShodanResult | nul
   }
 }
 
+// ── 6-hour result cache (keyed by IP) + inflight coalescing ──
+// Shodan's free "oss" membership has tight query limits, and the dashboard may
+// request the same host repeatedly; cache results for 6h and coalesce concurrent
+// lookups so each host costs at most one upstream call per window.
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h
+const MAX_CACHE_ENTRIES = 500;
+const cache = new Map<string, { data: ShodanResult; at: number }>();
+const inflight = new Map<string, Promise<ShodanResult>>();
+const CACHE_HEADERS = { 'Cache-Control': 'public, s-maxage=21600, stale-while-revalidate=43200' };
+
+function getCached(ip: string): ShodanResult | null {
+  const hit = cache.get(ip);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data;
+  if (hit) cache.delete(ip);
+  return null;
+}
+
+function setCached(ip: string, data: ShodanResult): void {
+  // Bound memory: Map preserves insertion order, so the first key is the oldest.
+  if (cache.size >= MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(ip, { data, at: Date.now() });
+}
+
+// Resolve a host via the key → InternetDB fallback chain. Returns a normalized
+// result (including the cacheable "no records" case); throws only on a hard
+// upstream failure so transient errors are never cached.
+async function resolveHost(ip: string): Promise<ShodanResult> {
+  const key = process.env.SHODAN_API_KEY;
+  if (key) {
+    const rich = await lookupViaKey(ip, key);
+    if (rich) return rich;
+  }
+
+  const res = await fetch(`https://internetdb.shodan.io/${encodeURIComponent(ip)}`, {
+    signal: AbortSignal.timeout(8000),
+    cache: 'no-store',
+  });
+
+  if (res.status === 404) {
+    return {
+      ip,
+      status: 'No Shodan InternetDB records found',
+      ports: [], cpes: [], hostnames: [], tags: [], vulns: [],
+      source: 'internetdb',
+    };
+  }
+
+  if (!res.ok) throw new Error(`Shodan HTTP ${res.status}`);
+
+  const data = await res.json();
+  return { ...data, ip: data.ip || ip, source: 'internetdb' };
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const ip = searchParams.get('ip');
@@ -89,35 +145,28 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Missing IP parameter' }, { status: 400 });
   }
 
-  const key = process.env.SHODAN_API_KEY;
-  if (key) {
-    const rich = await lookupViaKey(ip, key);
-    if (rich) return NextResponse.json(rich);
+  const cached = getCached(ip);
+  if (cached) {
+    return NextResponse.json({ ...cached, cached: true }, { headers: CACHE_HEADERS });
+  }
+
+  // Coalesce concurrent lookups for the same IP onto a single upstream request.
+  let task = inflight.get(ip);
+  if (!task) {
+    task = resolveHost(ip);
+    inflight.set(ip, task);
   }
 
   try {
-    const res = await fetch(`https://internetdb.shodan.io/${encodeURIComponent(ip)}`, {
-      signal: AbortSignal.timeout(8000),
-      cache: 'no-store',
-    });
-
-    if (res.status === 404) {
-      return NextResponse.json({
-        ip,
-        status: 'No Shodan InternetDB records found',
-        ports: [], cpes: [], hostnames: [], tags: [], vulns: [],
-        source: 'internetdb',
-      });
-    }
-
-    if (!res.ok) throw new Error(`Shodan HTTP ${res.status}`);
-
-    const data = await res.json();
-    return NextResponse.json({ ...data, source: 'internetdb' });
+    const data = await task;
+    setCached(ip, data);
+    return NextResponse.json(data, { headers: CACHE_HEADERS });
   } catch (error) {
     return NextResponse.json(
       { error: 'Shodan lookup failed', detail: error instanceof Error ? error.message : String(error) },
       { status: 502 }
     );
+  } finally {
+    inflight.delete(ip);
   }
 }
