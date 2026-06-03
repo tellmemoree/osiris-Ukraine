@@ -93,6 +93,13 @@ popup (fire count, max FRP, latest detection, news source/link) and a "heuristic
 verify" caveat. Verified live: 26 sites, 373 theater fires, hits on Belgorod + 3 news
 locations. **Not done:** raising hits into `LiveAlerts` (map-only for now).
 
+**Refined (2026-06-03):** added oil depots/refineries (40 sites total). News matching
+hardened against false positives — only **strike-related** articles count (multilingual
+STRIKE_TERMS filter), and every place an article names is checked (news route now exposes
+`places[]` via `findAllCoords`, not just the single primary match). Each hit carries an
+FRP-based **confidence** (low/med/high); low-confidence hits render without a glow to
+de-emphasize likely false positives. **Still not done:** raising hits into `LiveAlerts`.
+
 ### 2.4 — Event timeline / playback  ·  Effort: L
 A time-scrubber to replay the last 24–72h of air raids, KAB threats, strikes, and
 geolocated news.

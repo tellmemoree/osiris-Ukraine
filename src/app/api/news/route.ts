@@ -195,6 +195,20 @@ function findCoords(text: string): [number, number] | null {
   return best ? best.coords : null;
 }
 
+// Every distinct place a story names (raw gazetteer centroids, un-jittered). Used by
+// cross-reference consumers (e.g. /api/strategic-thermal) that must check ALL mentioned
+// locations, not just the single primary one findCoords returns.
+function findAllCoords(text: string): [number, number][] {
+  const lower = text.toLowerCase();
+  const seen = new Set<string>();
+  const out: [number, number][] = [];
+  for (const { re, coords } of COMPILED_GAZETTEER) {
+    const key = `${coords[0]},${coords[1]}`;
+    if (!seen.has(key) && re.test(lower)) { seen.add(key); out.push(coords); }
+  }
+  return out;
+}
+
 // Spread several stories about the same place into a small (~0–8 km) cluster
 // around it, deterministically per story id, so dots don't stack into a single
 // unreadable blob over the city centre.
@@ -344,6 +358,7 @@ export async function GET() {
         risk_score: riskScore,
         coords: placed,
         coords_default: !coords,
+        places: findAllCoords(article.description || article.title),
         machine_assessment: riskScore >= 8 ? "AI Analysis indicates elevated tactical priority based on OSINT stream patterns." : null,
       };
     });

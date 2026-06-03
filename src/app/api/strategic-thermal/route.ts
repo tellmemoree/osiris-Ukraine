@@ -75,7 +75,7 @@ const SITES: Site[] = [
 ];
 
 interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; }
-interface NewsItem { title?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; }
+interface NewsItem { title?: string; description?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; places?: [number, number][]; }
 
 // Equirectangular distance (km) — accurate enough at this scale, cheap in a hot loop.
 function distKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
@@ -123,6 +123,29 @@ async function fetchNews(req: Request): Promise<NewsItem[]> {
   } catch { return []; }
 }
 
+// A news→fire match only counts as a thermal lead when the article is actually about a
+// strike/fire/explosion — the main false-positive filter (a sports story geolocated near
+// a wildfire shouldn't read as a strike). Multilingual EN/UA/RU stems.
+const STRIKE_TERMS = [
+  'strike', 'struck', 'explos', 'blast', 'drone', 'missile', 'shahed', 'uav', 'destroyed',
+  'burn', 'ablaze', 'depot', 'refiner', 'ammunition', 'shelling', 'detonat', 'wildfire',
+  'удар', 'вибух', 'дрон', 'ракет', 'шахед', 'бпла', 'знищ', 'пожеж', 'горить', 'склад',
+  'нпз', 'нафтоба', 'обстріл', 'влучан', 'детонац', 'приліт',
+  'взрыв', 'уничтож', 'пожар', 'горит', 'нефтеба', 'обстрел', 'прилет',
+];
+function isStrikeRelated(item: NewsItem): boolean {
+  const t = `${item.title || ''} ${item.description || ''}`.toLowerCase();
+  return STRIKE_TERMS.some(w => t.includes(w));
+}
+
+// Confidence from fire intensity + count. FRP (fire radiative power, MW) is the best single
+// discriminator: a struck depot/refinery burns hot (high FRP); a faint farm hotspot is low.
+function confidenceOf(fireCount: number, maxFrp: number): 'low' | 'med' | 'high' {
+  if (maxFrp >= 20 || fireCount >= 4) return 'high';
+  if (maxFrp >= 5 || fireCount >= 2) return 'med';
+  return 'low';
+}
+
 // Fires within `radiusKm` of (lat,lng) → aggregate hit stats.
 function fireHit(fires: Fire[], lat: number, lng: number, radiusKm: number) {
   let count = 0, maxFrp = 0, latest = '';
@@ -149,28 +172,40 @@ export async function GET(req: Request) {
       aois.push({
         id: s.id, category: s.category, name: s.name, lat: s.lat, lng: s.lng,
         hit: !!h, fireCount: h?.count ?? 0, maxFrp: h?.maxFrp ?? 0, latest: h?.latest ?? null,
+        confidence: h ? confidenceOf(h.count, h.maxFrp) : null,
       });
     }
 
-    // News: only emitted when a fire corroborates the named location.
+    // News: only STRIKE-RELATED articles, cross-referenced at EVERY place they name
+    // (articles often mention several). Deduped across articles by ~0.05° (~5 km) so one
+    // event doesn't spawn an overlapping cluster of markers.
     let newsHits = 0;
+    const newsSeen = new Set<string>();
     for (const n of news) {
-      if (!n.coords || n.coords_default) continue;
-      const [lat, lng] = n.coords;
-      if (lat < BBOX.latMin || lat > BBOX.latMax || lng < BBOX.lngMin || lng > BBOX.lngMax) continue;
-      const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
-      if (!h) continue;
-      newsHits++;
-      aois.push({
-        id: `news-${newsHits}`, category: 'news' as Category, name: n.title?.slice(0, 120) || 'News report',
-        source: n.source, side: n.side, link: n.link, lat, lng,
-        hit: true, fireCount: h.count, maxFrp: h.maxFrp, latest: h.latest,
-      });
+      if (!isStrikeRelated(n)) continue;
+      const candidates = (n.places && n.places.length)
+        ? n.places
+        : (n.coords && !n.coords_default ? [n.coords] : []);
+      for (const [lat, lng] of candidates) {
+        if (lat < BBOX.latMin || lat > BBOX.latMax || lng < BBOX.lngMin || lng > BBOX.lngMax) continue;
+        const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+        if (newsSeen.has(key)) continue;
+        const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
+        if (!h) continue;
+        newsSeen.add(key);
+        newsHits++;
+        aois.push({
+          id: `news-${newsHits}`, category: 'news' as Category, name: n.title?.slice(0, 120) || 'News report',
+          source: n.source, side: n.side, link: n.link, lat, lng,
+          hit: true, fireCount: h.count, maxFrp: h.maxFrp, latest: h.latest, confidence: confidenceOf(h.count, h.maxFrp),
+        });
+      }
     }
 
     const siteHits = aois.filter(a => a.category !== 'news' && a.hit).length;
+    const highConf = aois.filter(a => a.hit && a.confidence === 'high').length;
     return NextResponse.json(
-      { aois, counts: { sites: SITES.length, site_hits: siteHits, news_hits: newsHits, fires_in_theater: fires.length }, timestamp: new Date().toISOString() },
+      { aois, counts: { sites: SITES.length, site_hits: siteHits, news_hits: newsHits, high_confidence: highConf, fires_in_theater: fires.length }, timestamp: new Date().toISOString() },
       { headers: { 'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=1200' } }
     );
   } catch (error) {

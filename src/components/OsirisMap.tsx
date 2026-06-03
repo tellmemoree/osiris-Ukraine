@@ -266,7 +266,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // Strategic Thermal AOIs — FIRMS fires × airfields/rail/logistics/news.
       // Glow only on hits; dots colored by category and enlarged when a fire is near.
       map.addLayer({ id: 'thermal-glow', type: 'circle', source: 'thermal-aoi',
-        filter: ['==', ['get', 'hit'], true],
+        filter: ['all', ['==', ['get', 'hit'], true], ['!=', ['get', 'confidence'], 'low']],
         paint: { 'circle-radius': 18, 'circle-color': ['match', ['get', 'category'], 'airfield', '#FF3D3D', 'rail', '#FF9500', 'logistics', '#FFD500', 'oil', '#BA68C8', 'news', '#00E5FF', '#FF5722'], 'circle-opacity': 0.18, 'circle-blur': 1 }});
       map.addLayer({ id: 'thermal-dots', type: 'circle', source: 'thermal-aoi', paint: {
         'circle-radius': ['case', ['get', 'hit'], 7, 4],
@@ -921,8 +921,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       if (!p) return;
       const coords = e.features[0].geometry.coordinates.slice();
       const col = { airfield: '#FF3D3D', rail: '#FF9500', logistics: '#FFD500', oil: '#BA68C8', news: '#00E5FF' }[p.category as string] || '#FF5722';
+      const confColor = { high: '#FF3D3D', med: '#FF9500', low: '#8A8880' }[p.confidence as string] || '#8A8880';
       const hitLine = p.hit
-        ? `<div style="color:#FF6B00;font-size:9px;">🔥 ${p.fireCount} FIRMS fire(s) within range · max FRP ${p.maxFrp} · ${p.latest || ''}</div>`
+        ? `<div style="color:#FF6B00;font-size:9px;">🔥 ${p.fireCount} FIRMS fire(s) within range · max FRP ${p.maxFrp} · ${p.latest || ''}</div>
+           <div style="font-size:9px;">confidence: <span style="color:${confColor};font-weight:700;">${String(p.confidence || '—').toUpperCase()}</span></div>`
         : `<div style="color:#5C5A54;font-size:9px;">no active fire nearby (monitored)</div>`;
       const src = p.category === 'news' && p.source ? `<div style="font-size:8px;color:#8A8880;">${p.source}${p.side ? ' · ' + String(p.side).toUpperCase() : ''}</div>` : '';
       const link = p.category === 'news' && p.link ? `<a href="${p.link}" target="_blank" rel="noopener noreferrer" style="font-size:8px;color:#00E5FF;">open report ↗</a>` : '';
@@ -1207,7 +1209,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // Strategic Thermal AOIs — FIRMS × strategic sites / news.
   useEffect(() => {
     if (!mapReady) return;
-    setGeo('thermal-aoi', activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi.map((a: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [a.lng, a.lat] }, properties: { category: a.category, name: a.name, hit: a.hit, fireCount: a.fireCount, maxFrp: a.maxFrp, latest: a.latest || '', source: a.source || '', side: a.side || '', link: a.link || '' } })) : []);
+    setGeo('thermal-aoi', activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi.map((a: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [a.lng, a.lat] }, properties: { category: a.category, name: a.name, hit: a.hit, confidence: a.confidence || '', fireCount: a.fireCount, maxFrp: a.maxFrp, latest: a.latest || '', source: a.source || '', side: a.side || '', link: a.link || '' } })) : []);
   }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, setGeo]);
 
   useEffect(() => {
