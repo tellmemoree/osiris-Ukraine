@@ -159,7 +159,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-cctv', '#39FF14', 10);
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -251,6 +251,17 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         paint: { 'fill-color': ['coalesce', ['get', 'fill'], '#FF3D3D'], 'fill-opacity': 0.18 }});
       map.addLayer({ id: 'frontline-line', type: 'line', source: 'frontlines',
         paint: { 'line-color': ['coalesce', ['get', 'stroke'], '#FF3D3D'], 'line-width': 1.4, 'line-opacity': 0.85 }});
+
+      // Air quality (Open-Meteo) — PM2.5 station dots, colored by AQI band.
+      map.addLayer({ id: 'aq-glow', type: 'circle', source: 'air-quality', paint: {
+        'circle-radius': 13, 'circle-color': ['get', 'color'], 'circle-opacity': 0.16, 'circle-blur': 1 }});
+      map.addLayer({ id: 'aq-dots', type: 'circle', source: 'air-quality', paint: {
+        'circle-radius': 5, 'circle-color': ['get', 'color'], 'circle-opacity': 0.9,
+        'circle-stroke-width': 1, 'circle-stroke-color': 'rgba(0,0,0,0.4)' }});
+      map.addLayer({ id: 'aq-label', type: 'symbol', source: 'air-quality', minzoom: 4, layout: {
+        'text-field': ['concat', ['get', 'city'], '  PM2.5 ', ['to-string', ['get', 'pm25']]],
+        'text-size': 9, 'text-offset': [0, 1.2], 'text-anchor': 'top' },
+        paint: { 'text-color': '#cfd8dc', 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
       // Air Raid Alerts — pulsing red (Ukraine-specific alerts).
       // Oblast-wide alerts render larger; raion (district) alerts render tighter.
@@ -1152,6 +1163,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady) return;
     setGeo('frontlines', activeLayers.frontlines && data.frontlines ? data.frontlines : []);
   }, [mapReady, data.frontlines, activeLayers.frontlines, setGeo]);
+
+  // Air quality (Open-Meteo) — colored PM2.5 station dots.
+  useEffect(() => {
+    if (!mapReady) return;
+    setGeo('air-quality', activeLayers.air_quality && data.air_quality ? data.air_quality.map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { city: s.city, country: s.country, pm25: s.pm25, level: s.level, color: s.color, us_aqi: s.us_aqi } })) : []);
+  }, [mapReady, data.air_quality, activeLayers.air_quality, setGeo]);
 
   useEffect(() => {
     if (!mapReady) return;

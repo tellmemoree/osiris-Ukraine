@@ -42,14 +42,15 @@ Finishes the recon-enrichment work just shipped (`/api/ip-intel`, commit `e18fd5
 - **Deps:** UI buildable now (route returns 503 until keys); paste `CENSYS_API_ID`/
   `CENSYS_API_SECRET` into `.env` to see live data (see HANDOFF-recon-toolkit.md).
 
-### 1.3 — Air-quality layer  ·  Effort: S
-`/api/air-quality` is built but **returns 0 stations** — upstream **OpenAQ v2 is HTTP
-410 Gone** (deprecated). Surfacing it requires fixing the route first:
-- **Option A:** migrate to **OpenAQ v3** — needs `OPENAQ_API_KEY` (free) + `X-API-Key`
-  header; v3 shape differs (`/v3/locations/latest`).
-- **Option B (keyless):** swap to the **Open-Meteo Air Quality API** (no key), but it's
-  point/bbox forecast-shaped, not a global "latest stations" list — needs an adapter.
-Then add AQI dots under **NATURAL HAZARDS**. **Decision needed before building UI.**
+### 1.3 — Air-quality layer  ·  ✅ DONE (2026-06-03)
+**Shipped** (keyless): the dead OpenAQ v2 (HTTP 410) was replaced with the **Open-Meteo
+Air Quality API** — no key. Since Open-Meteo is point-based, the route batches a curated
+42-city list (global majors + UA/RU emphasis) into one multi-coordinate request and maps
+each point's `current` PM2.5/US-AQI to a station marker (same shape as before). Added an
+**Air Quality (PM2.5)** toggle under NATURAL HAZARDS and colored AQI dots (glow + dot +
+label) in `OsirisMap`. 1h cache; verified 42 stations live, tsc clean.
+- **Extend later:** add more cities, or switch to a bbox/viewport query if you want
+  denser coverage than the curated list.
 
 ### 1.4 — Space-weather indicator  ·  Effort: S
 `/api/space-weather` is only lightly referenced. Surface Kp index / aurora / solar
