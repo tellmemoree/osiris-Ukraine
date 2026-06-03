@@ -21,30 +21,49 @@ Last updated: 2026-05-31
 | **OSINT Framework** | Curated link tree | Reference only — `https://osintframework.com` |
 | **Wigle.net** | WiFi network geolocation | `WIGLE_API_KEY` → future layer idea |
 
-### Shodan sweep (already partially wired)
+### Shodan sweep — ✅ caching DONE (2026-06-03)
 
-`/api/shodan-sweep` exists but hits the server directly (EPYC IP gets rate-limited fast). The previous fix was to move the sweep to client-side JS. 
+`/api/osint/shodan` (host lookup) and `/api/osint/sweep` are the live routes (the
+old `/api/shodan-sweep` path in earlier notes is stale). The sweep already moved
+client-side to dodge the EPYC IP rate-limit.
 
-Next step: implement **server-side result caching** — cache Shodan results in Redis/KV for 6 hours per target IP so repeated dashboard loads don't re-query.
+**✅ Server-side result caching implemented** (commit `e18fd50`): a 6-hour in-memory
+cache keyed by IP with inflight coalescing (bounded to 500 entries) + a
+`Cache-Control: s-maxage=21600, stale-while-revalidate=43200` header, so repeated
+dashboard loads for the same host cost at most one upstream call per 6h window.
+Transient failures are never cached. (In-memory rather than Redis/KV — matches the
+codebase's existing `kab-threats` pattern and needs no extra infra.)
 
-`.env` key to add:
-```
-SHODAN_API_KEY=<your key from account.shodan.io>
-```
+`SHODAN_API_KEY` is set in the gitignored `.env` (free `oss` tier — host lookup
+works; host *search*/discovery still needs a paid membership, see HANDOFF.md #7).
 
-### Censys integration (next session)
+### Censys integration — ✅ scaffold DONE, ⚠️ needs key to activate (2026-06-03)
 
-Censys is better than Shodan for:
-- TLS certificate transparency
-- IPv6 coverage
-- Host history
+Censys is better than Shodan for: TLS certificate transparency, IPv6 coverage,
+host history.
 
-API endpoint: `https://search.censys.io/api/v2/hosts/{ip}`
+**✅ Route built** (`src/app/api/ip-intel/route.ts`, commit `e18fd50`):
+- `GET /api/ip-intel?ip=` — passive enrichment, NOT active scanning (queries the
+  Censys index, never connects to the target).
+- Censys Search v2 host endpoint (`https://search.censys.io/api/v2/hosts/{ip}`),
+  HTTP Basic auth. Normalizes ASN, geo (lat/lng/country/city), open services
+  (port/name/transport), and TLS cert fingerprints.
+- Same 6h cache + coalescing as Shodan; SSRF-guarded IP input (rejects
+  private/reserved via `validateHost`); rate-limited 10/min.
+- Returns **503 "Censys not configured"** until creds are present (mirrors
+  `/api/scanner`). Verified end-to-end on dev (:3001).
 
-Wire into `/api/ip-intel` (create new route):
-- Accept `?ip=` query param
-- Return enriched host data (open ports, certs, ASN, location)
-- Add a new map layer `ip-intel-dots` for geolocated IPs
+> ⚠️ **TO ACTIVATE — paste your Censys key:** open the gitignored **`.env`** and fill in
+> the two placeholders already waiting there:
+> ```
+> CENSYS_API_ID=<your id>
+> CENSYS_API_SECRET=<your secret>
+> ```
+> Get both (free tier, ~10k credits/mo) at https://search.censys.io/account/api,
+> then restart the dev server. The route flips from 503 to live enrichment.
+
+**Still TODO (frontend):** add the `ip-intel-dots` map layer for geolocated IPs —
+the API is ready; nothing consumes it on the map yet.
 
 ### SpiderFoot Docker (next session)
 
