@@ -105,10 +105,13 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
 - Dev server runs on **:3001** (the home box), as a detached host process:
   `setsid npx next start -p 3001` (logs to `~/.osiris-server.log`). It serves the
   production build in `.next`.
-- **Rebuild + restart :3001** (after merging code you want live): `npm run build`
+- **Rebuild + restart :3001 after EVERY code change** (committed code isn't live until
+  rebuilt — `next start` has no hot-reload): `npm run build`
   → if exit 0, kill the old listener's process group and relaunch
   `setsid bash -c 'exec npx next start -p 3001' </dev/null >~/.osiris-server.log 2>&1 &`,
   then health-check `curl :3001/api/health`. Build FIRST; only restart on success.
+  **Send the `pkill`/`kill` as its OWN Bash call** — chaining commands after it aborts
+  them (exit 144); relaunch in a separate call.
   `next start` warns about `output: 'standalone'` but serves fine here; standalone is
   for the Docker prod build (separate machine), so leave the config as-is. Restart is
   also required to pick up `.env` changes (e.g. after pasting the Censys key).

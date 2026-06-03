@@ -14,3 +14,13 @@ whole tree each session.
 **Keep it current:** when you add or materially change code (a new route, layer,
 panel, env var, convention, or you discover a dead upstream), update the relevant
 section of `ARCHITECTURE.md` in the *same* commit. A stale map is worse than none.
+
+
+# Standing workflow rules (this repo)
+
+- **Rebuild after code changes.** After ANY code change, rebuild + restart the :3001
+  dev server (see ARCHITECTURE.md → "Rebuild + restart :3001"). Committed/pushed code
+  is NOT live until rebuilt — `next start` does not hot-reload.
+- **`pkill` is its own command.** Always send `pkill`/`kill` as a standalone Bash call.
+  Chaining anything after it aborts the rest of the script (exit 144), so the follow-up
+  silently doesn't run and must be resent. One call kills; a separate call relaunches.
