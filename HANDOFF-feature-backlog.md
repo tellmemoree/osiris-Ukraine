@@ -69,20 +69,28 @@ advances/withdrawals (movement arrows or a "since yesterday" delta).
 - **Needs:** lightweight persistence for snapshots (flat JSON in `public/data/` or a
   small store) + a diff routine. Builds on 1.1.
 
-### 2.2 — RU rail / logistics layer  ·  Effort: M–L
-Russian military logistics ride the rail net. New `/api/ru-logistics` (rail nodes,
-junctions, known depots).
-- **Data sourcing (open):** OSM railways (Overpass — already used for UA admin
-  boundaries) + curated depot/marshalling-yard coords. (Listed as a non-done
-  follow-up under HANDOFF.md #8.)
+### 2.2 — RU rail / logistics layer  ·  ✅ DONE (folded into 2.3, 2026-06-03)
+**Shipped as part of the Thermal Strike AOIs layer (2.3):** rail hubs / marshalling
+yards (Rostov, Bataysk, Likhaya, Voronezh, Bryansk, Tikhoretsk, Dzhankoi, Armyansk)
+and occupied logistics nodes (Melitopol, Tokmak, Volnovakha, Mariupol, Belgorod) are
+curated sites in `/api/strategic-thermal`, monitored for nearby FIRMS hits alongside
+airfields. A standalone OSM-railway *network* overlay was NOT built (curated nodes
+cover the strike-relevant hubs); revisit if you want full rail-line geometry.
 
-### 2.3 — FIRMS thermal AOIs over RU airfields  ·  Effort: M
-Cross-reference `/api/fires` (FIRMS) with known RU airbase coordinates already in the
-news gazetteer (Engels, Morozovsk, Millerovo, Yeysk, Dyagilevo, Olenya, Saky/Dzhankoi —
-see HANDOFF.md #8). A FIRMS hotspot within N km of a base ⇒ flag a possible
-strike/incident and raise it in `LiveAlerts`.
-- **Why:** turns the existing global FIRMS feed into targeted strike-detection with no
-  new data source. Pairs naturally with the KAB-threat layer.
+### 2.3 — Thermal Strike AOIs (FIRMS × sites/rail/news)  ·  ✅ DONE (2026-06-03)
+**Shipped** as a dedicated **`thermal_aoi`** layer (toggle "Thermal Strike AOIs" under
+UKRAINE WAR). New route **`/api/strategic-thermal`** fetches FIRMS theater fires (bbox
+lat 43–71 / lng 19–66, keyless 24h CSV) and cross-references them against THREE POI
+types within range (12 km sites / 15 km news):
+- **Airfields** (Engels, Dyagilevo, Morozovsk, Millerovo, Yeysk, Olenya, Saky, Belbek…),
+- **Rail/logistics** hubs (2.2 — see above),
+- **News-named locations** — pulled by internally fetching `/api/news`
+  (`new URL('/api/news', req.url)`) and matching geolocated items to nearby fires.
+Sites are always shown (dim when no fire, glow + label on a hit); news entries appear
+only when a fire corroborates them. Map dots are colored by category with a click
+popup (fire count, max FRP, latest detection, news source/link) and a "heuristic —
+verify" caveat. Verified live: 26 sites, 373 theater fires, hits on Belgorod + 3 news
+locations. **Not done:** raising hits into `LiveAlerts` (map-only for now).
 
 ### 2.4 — Event timeline / playback  ·  Effort: L
 A time-scrubber to replay the last 24–72h of air raids, KAB threats, strikes, and

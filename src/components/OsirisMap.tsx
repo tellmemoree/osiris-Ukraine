@@ -159,7 +159,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-cctv', '#39FF14', 10);
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality', 'thermal-aoi'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -262,6 +262,22 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-field': ['concat', ['get', 'city'], '  PM2.5 ', ['to-string', ['get', 'pm25']]],
         'text-size': 9, 'text-offset': [0, 1.2], 'text-anchor': 'top' },
         paint: { 'text-color': '#cfd8dc', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // Strategic Thermal AOIs — FIRMS fires × airfields/rail/logistics/news.
+      // Glow only on hits; dots colored by category and enlarged when a fire is near.
+      map.addLayer({ id: 'thermal-glow', type: 'circle', source: 'thermal-aoi',
+        filter: ['==', ['get', 'hit'], true],
+        paint: { 'circle-radius': 18, 'circle-color': ['match', ['get', 'category'], 'airfield', '#FF3D3D', 'rail', '#FF9500', 'logistics', '#FFD500', 'news', '#00E5FF', '#FF5722'], 'circle-opacity': 0.18, 'circle-blur': 1 }});
+      map.addLayer({ id: 'thermal-dots', type: 'circle', source: 'thermal-aoi', paint: {
+        'circle-radius': ['case', ['get', 'hit'], 7, 4],
+        'circle-color': ['match', ['get', 'category'], 'airfield', '#FF3D3D', 'rail', '#FF9500', 'logistics', '#FFD500', 'news', '#00E5FF', '#FF5722'],
+        'circle-opacity': ['case', ['get', 'hit'], 0.95, 0.5],
+        'circle-stroke-width': ['case', ['get', 'hit'], 1.5, 0.5], 'circle-stroke-color': 'rgba(0,0,0,0.6)' }});
+      map.addLayer({ id: 'thermal-label', type: 'symbol', source: 'thermal-aoi', minzoom: 4,
+        filter: ['all', ['==', ['get', 'hit'], true], ['!=', ['get', 'category'], 'news']], layout: {
+        'text-field': ['concat', ['get', 'name'], '  🔥', ['to-string', ['get', 'fireCount']]],
+        'text-size': 9, 'text-offset': [0, 1.3], 'text-anchor': 'top', 'text-optional': true },
+        paint: { 'text-color': '#FFCCBC', 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
       // Air Raid Alerts — pulsing red (Ukraine-specific alerts).
       // Oblast-wide alerts render larger; raion (district) alerts render tighter.
@@ -900,6 +916,24 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
+    map.on('click', 'thermal-dots', (e: any) => {
+      const p = e.features?.[0]?.properties;
+      if (!p) return;
+      const coords = e.features[0].geometry.coordinates.slice();
+      const col = { airfield: '#FF3D3D', rail: '#FF9500', logistics: '#FFD500', news: '#00E5FF' }[p.category as string] || '#FF5722';
+      const hitLine = p.hit
+        ? `<div style="color:#FF6B00;font-size:9px;">🔥 ${p.fireCount} FIRMS fire(s) within range · max FRP ${p.maxFrp} · ${p.latest || ''}</div>`
+        : `<div style="color:#5C5A54;font-size:9px;">no active fire nearby (monitored)</div>`;
+      const src = p.category === 'news' && p.source ? `<div style="font-size:8px;color:#8A8880;">${p.source}${p.side ? ' · ' + String(p.side).toUpperCase() : ''}</div>` : '';
+      const link = p.category === 'news' && p.link ? `<a href="${p.link}" target="_blank" rel="noopener noreferrer" style="font-size:8px;color:#00E5FF;">open report ↗</a>` : '';
+      popup(coords, `<div style="${pStyle}border:1px solid ${col}88;">
+        <div style="color:${col};font-size:11px;font-weight:700;margin-bottom:4px;">${String(p.category).toUpperCase()} · THERMAL AOI</div>
+        <div style="font-size:10px;color:#E8E6E0;margin-bottom:6px;">${p.name}</div>
+        ${src}${hitLine}${link}
+        <div style="font-size:7px;color:#5C5A54;margin-top:6px;">heuristic — FIRMS heat ≠ confirmed strike. verify.</div>
+      </div>`);
+    });
+
     // ── SCM Suppliers ──
     map.on('click', 'scm-dots', e => {
       if (!e.features?.length) return;
@@ -1169,6 +1203,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady) return;
     setGeo('air-quality', activeLayers.air_quality && data.air_quality ? data.air_quality.map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { city: s.city, country: s.country, pm25: s.pm25, level: s.level, color: s.color, us_aqi: s.us_aqi } })) : []);
   }, [mapReady, data.air_quality, activeLayers.air_quality, setGeo]);
+
+  // Strategic Thermal AOIs — FIRMS × strategic sites / news.
+  useEffect(() => {
+    if (!mapReady) return;
+    setGeo('thermal-aoi', activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi.map((a: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [a.lng, a.lat] }, properties: { category: a.category, name: a.name, hit: a.hit, fireCount: a.fireCount, maxFrp: a.maxFrp, latest: a.latest || '', source: a.source || '', side: a.side || '', link: a.link || '' } })) : []);
+  }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, setGeo]);
 
   useEffect(() => {
     if (!mapReady) return;

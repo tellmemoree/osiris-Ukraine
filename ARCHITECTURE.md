@@ -74,6 +74,10 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
   `getClientIp` — use on routes that take user-supplied IPs/hosts.
 - **Graceful degradation** (see `frontlines`): `Promise.allSettled` over multiple
   upstreams; succeed on whichever responds.
+- **Cross-reference layers** (see `strategic-thermal`): a route may fetch a feed AND
+  call another route internally via `new URL('/api/news', req.url)` to correlate them
+  (here: FIRMS fires × curated sites + geolocated news → "thermal hit" AOIs). Cache the
+  combined result. Distance checks use a cheap equirectangular approx (≈111.32 km/deg).
 
 ## Recon toolkit — `src/components/OsintPanel.tsx`
 - `TABS` array defines tools `{ id, label, icon, placeholder, color }`.

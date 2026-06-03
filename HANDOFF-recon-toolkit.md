@@ -62,8 +62,9 @@ host history.
 > Get both (free tier, ~10k credits/mo) at https://search.censys.io/account/api,
 > then restart the dev server. The route flips from 503 to live enrichment.
 
-**Still TODO (frontend):** add the `ip-intel-dots` map layer for geolocated IPs —
-the API is ready; nothing consumes it on the map yet.
+**✅ Frontend done:** the IP INTEL OsintPanel tab consumes `/api/ip-intel`, and
+results geolocate onto the map via the existing `scan-targets` channel — no dedicated
+`ip-intel-dots` source was needed.
 
 ### SpiderFoot Docker (next session)
 
