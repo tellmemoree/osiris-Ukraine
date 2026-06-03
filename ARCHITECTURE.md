@@ -98,8 +98,19 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
   merged to it and push BOTH. Master (`origin/master`, a fork) is synced INTO merged
   periodically, resolving conflicts while keeping Ukraine features.
 - Work **in place** (not git worktrees) — the task spans already-checked-out branches.
-- Dev server runs on **:3001** (the home box). For verification use a throwaway
-  `next dev -p 3002` and tear it down; never disturb :3001.
+- Dev server runs on **:3001** (the home box), as a detached host process:
+  `setsid npx next start -p 3001` (logs to `~/.osiris-server.log`). It serves the
+  production build in `.next`.
+- **Rebuild + restart :3001** (after merging code you want live): `npm run build`
+  → if exit 0, kill the old listener's process group and relaunch
+  `setsid bash -c 'exec npx next start -p 3001' </dev/null >~/.osiris-server.log 2>&1 &`,
+  then health-check `curl :3001/api/health`. Build FIRST; only restart on success.
+  `next start` warns about `output: 'standalone'` but serves fine here; standalone is
+  for the Docker prod build (separate machine), so leave the config as-is. Restart is
+  also required to pick up `.env` changes (e.g. after pasting the Censys key).
+- For one-off verification use a throwaway `next dev -p 3002` and tear it down; never
+  disturb :3001. (Note: `next dev` writes into the shared `.next`, so rebuild before
+  relying on :3001 again.)
 
 ## Gotchas / known-dead upstreams (verify before trusting a "dark" route)
 - A route returning empty often means its UPSTREAM died, not that it's un-wired:
