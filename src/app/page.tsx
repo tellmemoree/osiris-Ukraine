@@ -176,20 +176,6 @@ export default function Dashboard() {
   const [liveFeedUrl, setLiveFeedUrl] = useState<string | null>(null);
   const [liveFeedName, setLiveFeedName] = useState('');
   const [liveFeedEmbedAllowed, setLiveFeedEmbedAllowed] = useState(true);
-  // Bottom-center HUD visibility (user-dismissible; persisted across reloads)
-  const [hudVisible, setHudVisible] = useState(true);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (localStorage.getItem('osiris-hud-hidden') === '1') setHudVisible(false);
-  }, []);
-  const toggleHud = useCallback(() => {
-    setHudVisible(v => {
-      const next = !v;
-      try { localStorage.setItem('osiris-hud-hidden', next ? '0' : '1'); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
-
   // Splash screen
   useEffect(() => {
     const splashTimer = setTimeout(() => setShowSplash(false), 2500);
@@ -1146,18 +1132,6 @@ export default function Dashboard() {
             </div>
           </div>
         </motion.div>
-      )}
-
-      {/* ── HUD hide/show toggle (desktop) ── */}
-      {!isMobile && (
-        <button
-          onClick={toggleHud}
-          title={hudVisible ? 'Hide HUD' : 'Show HUD'}
-          className="desktop-only absolute bottom-7 left-1/2 -translate-x-1/2 z-[210] pointer-events-auto glass-panel px-2 py-0.5 flex items-center gap-1 text-[8px] font-mono tracking-wider text-[var(--text-muted)] hover:text-[var(--gold-primary)] transition-colors"
-        >
-          {hudVisible ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronUp className="w-2.5 h-2.5" />}
-          {hudVisible ? 'HIDE HUD' : 'SHOW HUD'}
-        </button>
       )}
 
       {/* ── Scale Bar (desktop) ── */}
