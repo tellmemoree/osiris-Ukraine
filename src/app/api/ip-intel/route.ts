@@ -132,22 +132,14 @@ export async function GET(req: Request) {
     );
   }
 
-  // 2. Rate limit by client IP.
-  if (isRateLimited(getClientIp(req), 10, 60_000)) {
-    return NextResponse.json(
-      { error: 'Rate limit exceeded', detail: 'Maximum 10 lookups per minute.' },
-      { status: 429 }
-    );
-  }
-
-  // 3. Validate the IP param.
+  // 2. Validate the IP param.
   const { searchParams } = new URL(req.url);
   const ip = searchParams.get('ip')?.trim();
   if (!ip) {
     return NextResponse.json({ error: 'Missing ip parameter' }, { status: 400 });
   }
 
-  // 4. Reject private/reserved/invalid targets (don't leak internal IPs to Censys).
+  // 3. Reject private/reserved/invalid targets (don't leak internal IPs to Censys).
   const guard = await validateHost(ip);
   if (!guard.ok) {
     return NextResponse.json(
@@ -156,12 +148,23 @@ export async function GET(req: Request) {
     );
   }
 
-  // 5. Cache + coalesce.
+  // 4. Serve from cache before rate-limiting — cache hits cost nothing upstream,
+  //    so they shouldn't consume the per-client budget (a dashboard enriching
+  //    many already-cached IPs would otherwise 429 itself).
   const cached = getCached(ip);
   if (cached) {
     return NextResponse.json({ ...cached, cached: true }, { headers: CACHE_HEADERS });
   }
 
+  // 5. Rate limit only the lookups that actually hit Censys.
+  if (isRateLimited(getClientIp(req), 10, 60_000)) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded', detail: 'Maximum 10 lookups per minute.' },
+      { status: 429 }
+    );
+  }
+
+  // 6. Coalesce concurrent lookups for the same IP onto a single upstream request.
   let task = inflight.get(ip);
   if (!task) {
     task = enrich(ip);

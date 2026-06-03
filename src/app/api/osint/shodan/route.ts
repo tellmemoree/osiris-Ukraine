@@ -48,16 +48,22 @@ interface ShodanHost {
   data?: ShodanHostBanner[];
 }
 
-async function lookupViaKey(ip: string, key: string): Promise<ShodanResult | null> {
+// Outcome of the key-tier host lookup: a hit, a definitive "not in Shodan's host
+// DB" (404), or a transient/ambiguous failure (401/403/429/5xx/timeout) — the
+// last of which must NOT poison the cache with a degraded InternetDB fallback.
+type KeyLookup = { hit: ShodanResult } | { hit: null; transient: boolean };
+
+async function lookupViaKey(ip: string, key: string): Promise<KeyLookup> {
   try {
     const res = await fetch(
       `https://api.shodan.io/shodan/host/${encodeURIComponent(ip)}?key=${key}`,
       { signal: AbortSignal.timeout(9000), cache: 'no-store' }
     );
-    if (!res.ok) return null; // 401/403/404 → fall back to InternetDB
+    if (res.status === 404) return { hit: null, transient: false }; // host genuinely absent
+    if (!res.ok) return { hit: null, transient: true };  // 401/403/429/5xx → don't cache fallback
     const h: ShodanHost = await res.json();
     const vulns = Array.isArray(h.vulns) ? h.vulns : h.vulns ? Object.keys(h.vulns) : [];
-    return {
+    return { hit: {
       ip: h.ip_str || ip,
       ports: h.ports || [],
       hostnames: h.hostnames || [],
@@ -75,9 +81,9 @@ async function lookupViaKey(ip: string, key: string): Promise<ShodanResult | nul
         .slice(0, 25)
         .map((d) => ({ port: d.port as number, transport: d.transport, product: d.product })),
       source: 'shodan/host',
-    };
+    } };
   } catch {
-    return null;
+    return { hit: null, transient: true }; // timeout/network
   }
 }
 
@@ -88,7 +94,7 @@ async function lookupViaKey(ip: string, key: string): Promise<ShodanResult | nul
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h
 const MAX_CACHE_ENTRIES = 500;
 const cache = new Map<string, { data: ShodanResult; at: number }>();
-const inflight = new Map<string, Promise<ShodanResult>>();
+const inflight = new Map<string, Promise<{ data: ShodanResult; cacheable: boolean }>>();
 const CACHE_HEADERS = { 'Cache-Control': 'public, s-maxage=21600, stale-while-revalidate=43200' };
 
 function getCached(ip: string): ShodanResult | null {
@@ -107,14 +113,18 @@ function setCached(ip: string, data: ShodanResult): void {
   cache.set(ip, { data, at: Date.now() });
 }
 
-// Resolve a host via the key → InternetDB fallback chain. Returns a normalized
-// result (including the cacheable "no records" case); throws only on a hard
-// upstream failure so transient errors are never cached.
-async function resolveHost(ip: string): Promise<ShodanResult> {
+// Resolve a host via the key → InternetDB fallback chain. Returns the normalized
+// result plus whether it's safe to cache: a result is NOT cacheable when a key is
+// configured but failed transiently and we fell back to (degraded) InternetDB
+// data — otherwise one blip would pin the degraded result for the full 6h TTL.
+// Throws on a hard InternetDB failure so transient errors there aren't cached either.
+async function resolveHost(ip: string): Promise<{ data: ShodanResult; cacheable: boolean }> {
   const key = process.env.SHODAN_API_KEY;
+  let degraded = false; // key set, but couldn't get rich data this time (transient)
   if (key) {
-    const rich = await lookupViaKey(ip, key);
-    if (rich) return rich;
+    const k = await lookupViaKey(ip, key);
+    if (k.hit) return { data: k.hit, cacheable: true };
+    degraded = k.transient;
   }
 
   const res = await fetch(`https://internetdb.shodan.io/${encodeURIComponent(ip)}`, {
@@ -124,22 +134,25 @@ async function resolveHost(ip: string): Promise<ShodanResult> {
 
   if (res.status === 404) {
     return {
-      ip,
-      status: 'No Shodan InternetDB records found',
-      ports: [], cpes: [], hostnames: [], tags: [], vulns: [],
-      source: 'internetdb',
+      data: {
+        ip,
+        status: 'No Shodan InternetDB records found',
+        ports: [], cpes: [], hostnames: [], tags: [], vulns: [],
+        source: 'internetdb',
+      },
+      cacheable: !degraded,
     };
   }
 
   if (!res.ok) throw new Error(`Shodan HTTP ${res.status}`);
 
   const data = await res.json();
-  return { ...data, ip: data.ip || ip, source: 'internetdb' };
+  return { data: { ...data, ip: data.ip || ip, source: 'internetdb' }, cacheable: !degraded };
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const ip = searchParams.get('ip');
+  const ip = searchParams.get('ip')?.trim();
 
   if (!ip) {
     return NextResponse.json({ error: 'Missing IP parameter' }, { status: 400 });
@@ -158,8 +171,8 @@ export async function GET(req: Request) {
   }
 
   try {
-    const data = await task;
-    setCached(ip, data);
+    const { data, cacheable } = await task;
+    if (cacheable) setCached(ip, data);
     return NextResponse.json(data, { headers: CACHE_HEADERS });
   } catch (error) {
     return NextResponse.json(
