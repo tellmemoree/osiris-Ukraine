@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Newspaper, ChevronDown, ChevronUp, ExternalLink, MapPin, Zap } from 'lucide-react';
+import { Newspaper, ChevronDown, ChevronUp, ExternalLink, MapPin, Zap, Maximize2, Minimize2 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════════
    OSIRIS — Intelligence Feed
@@ -58,6 +58,7 @@ interface NewsItem {
 
 export default function IntelFeed({ data, onLocate }: IntelFeedProps) {
   const [expanded, setExpanded] = useState(true);
+  const [maximized, setMaximized] = useState(false);
   const [filter, setFilter] = useState<SideFilter>('all');
   // Per-item full-text toggle — tap a story to read the whole thing.
   const [openItems, setOpenItems] = useState<Set<string>>(new Set());
@@ -85,7 +86,7 @@ export default function IntelFeed({ data, onLocate }: IntelFeedProps) {
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: 0.6, duration: 0.6 }}
-      className="glass-panel flex flex-col overflow-hidden pointer-events-auto"
+      className={`glass-panel flex flex-col overflow-hidden pointer-events-auto transition-all duration-300 ${maximized ? 'fixed inset-4 z-[9999] bg-[#0a0a09]/95 backdrop-blur-3xl' : ''}`}
     >
       {/* Header */}
       <button
@@ -102,6 +103,9 @@ export default function IntelFeed({ data, onLocate }: IntelFeedProps) {
         </div>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-[var(--alert-green)] animate-osiris-pulse" />
+          <button onClick={(e) => { e.stopPropagation(); setMaximized(!maximized); if (!expanded && !maximized) setExpanded(true); }} className="hover:text-white transition-colors" title={maximized ? "Restore" : "Maximize"}>
+            {maximized ? <Minimize2 className="w-3 h-3 text-[var(--text-muted)]" /> : <Maximize2 className="w-3 h-3 text-[var(--text-muted)]" />}
+          </button>
           {expanded ? <ChevronUp className="w-3 h-3 text-[var(--text-muted)]" /> : <ChevronDown className="w-3 h-3 text-[var(--text-muted)]" />}
         </div>
       </button>
@@ -132,7 +136,7 @@ export default function IntelFeed({ data, onLocate }: IntelFeedProps) {
               ))}
             </div>
 
-            <div className="max-h-[400px] overflow-y-auto styled-scrollbar divide-y divide-[var(--border-secondary)]">
+            <div className={`${maximized ? 'max-h-[calc(100vh-180px)]' : 'max-h-[400px]'} overflow-y-auto styled-scrollbar divide-y divide-[var(--border-secondary)]`}>
               {news.length === 0 ? (
                 <div className="px-4 py-6 text-center">
                   <span className="text-[11px] font-mono text-[var(--text-muted)] tracking-widest">
