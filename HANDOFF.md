@@ -89,22 +89,27 @@ hard reload; if it vanishes, ignore.
 
 ## Still open
 
-### 10. 🧹 TODO — repo-root cleanup after the UI-overhaul merge
-The `osiris-Ukraine` ↔ `master` merge (commit `7082bc9`, "integrate UI overhaul")
-pulled in a pile of **loose helper scripts / throwaway files from master** that were
-never cleaned up. Left in place for now (deliberately, to avoid widening that merge) —
-**look into pruning later.**
-- **Obvious throwaways at repo root:** `diff.txt`, `temp_routes.txt`, `patch.js`,
-  `patch2.js`, `patch3.js`, `patch_layer.js`, `recover.js`, `make_pdf.js`,
-  `fix_netdata.py`, `fix_umami.py`.
-- **`scripts/` one-offs from the overhaul:** `disable_sdk_links.js`, `extract_v51.js`,
-  `generate_cables.js`, `patch_cables.js`, `patch_map_cables.js`, `patch_page.js`,
-  `restore_telegeography_cables.js`, `sdk_ingester.js`, `upgrade_v5.js`,
-  `upgrade_v5_1.js`. Some (e.g. the cable-generation scripts) may be worth keeping as
-  regeneration tooling for `public/data/submarine-cables*.json` — **triage before deleting**:
-  confirm each is a spent one-off vs. a reusable generator.
-- **These are master's, not ours** — so when the fork's `master` is re-synced with the
-  original upstream, decide whether they belong upstream or should be dropped from the fork.
+### 10. ✅ DONE — repo-root cleanup after the UI-overhaul merge
+The loose helper scripts / throwaway files master dragged in via the UI-overhaul
+merge (commit `7082bc9`) were triaged and pruned. **18 files removed**, none
+referenced by source or build:
+- **Root (10):** `diff.txt`, `temp_routes.txt`, `patch.js`, `patch2.js`, `patch3.js`,
+  `patch_layer.js`, `recover.js`, `make_pdf.js`, `fix_netdata.py`, `fix_umami.py`.
+- **`scripts/` (8):** `disable_sdk_links.js`, `extract_v51.js`, `generate_cables.js`,
+  `patch_cables.js`, `patch_map_cables.js`, `patch_page.js`, `upgrade_v5.js`,
+  `upgrade_v5_1.js`.
+
+These were one-time source patches (`patch*.js`, `disable_sdk_links.js`, `upgrade_v5*.js`),
+Windows-path transcript extracts (`recover.js`, `extract_v51.js`, `make_pdf.js`), server-infra
+one-offs (`fix_netdata.py`, `fix_umami.py`), temp text dumps (`diff.txt`, `temp_routes.txt`),
+and the **obsolete synthetic** cable generator (`generate_cables.js` — fabricated random
+cables; superseded).
+
+**Kept (2 reusable tools in `scripts/`):**
+- `restore_telegeography_cables.js` — regenerates the real 717-cable TeleGeography dataset
+  that `public/data/submarine-cables.json` actually serves.
+- `sdk_ingester.js` — dev seeder for the live `/api/sdk/ingest` endpoint.
+
 
 ### 3. ⚠️ PARTIAL — lint / CRLF hygiene
 - **CRLF: ✅ DONE.** All 27 remaining CRLF files renormalized to LF; the index is now
