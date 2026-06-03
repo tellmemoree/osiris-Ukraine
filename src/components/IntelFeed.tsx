@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Newspaper, ChevronDown, ChevronUp, ExternalLink, MapPin, Zap, Maximize2, Minimize2 } from 'lucide-react';
 
@@ -59,6 +60,8 @@ interface NewsItem {
 export default function IntelFeed({ data, onLocate }: IntelFeedProps) {
   const [expanded, setExpanded] = useState(true);
   const [maximized, setMaximized] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [filter, setFilter] = useState<SideFilter>('all');
   // Per-item full-text toggle — tap a story to read the whole thing.
   const [openItems, setOpenItems] = useState<Set<string>>(new Set());
@@ -81,7 +84,7 @@ export default function IntelFeed({ data, onLocate }: IntelFeedProps) {
     { id: 'world', label: '🌍 WORLD' },
   ];
 
-  return (
+  const content = (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
@@ -234,4 +237,13 @@ export default function IntelFeed({ data, onLocate }: IntelFeedProps) {
       </AnimatePresence>
     </motion.div>
   );
+
+  // When maximized, portal to document.body so `fixed inset-4` is viewport-relative —
+  // otherwise the mobile drawer's framer-motion transform traps it and "maximize"
+  // shrinks the panel instead of going fullscreen. (Mirrors MarketsPanel.)
+  if (maximized && mounted && typeof document !== 'undefined') {
+    return createPortal(content, document.body);
+  }
+
+  return content;
 }
