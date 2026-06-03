@@ -10,7 +10,8 @@ export const dynamic = 'force-dynamic';
  * coincide with something we care about — a possible strike/incident signal:
  *   1. Curated RU strategic AIRFIELDS (strategic-aviation + frontline-relevant).
  *   2. RU / occupied RAIL & LOGISTICS hubs.
- *   3. Locations NAMED IN NEWS (geolocated by /api/news), corroborated by a fire.
+ *   3. OIL DEPOTS / REFINERIES (frequent strike targets).
+ *   4. Locations NAMED IN NEWS (geolocated by /api/news), corroborated by a fire.
  *
  * Sites are always returned (monitored markers, `hit` flips true when a fire is
  * within range); news entries are returned ONLY when a fire corroborates them.
@@ -18,7 +19,7 @@ export const dynamic = 'force-dynamic';
  * industrial heat all trip FIRMS). Treat as a lead, verify before acting.
  */
 
-type Category = 'airfield' | 'rail' | 'logistics' | 'news';
+type Category = 'airfield' | 'rail' | 'logistics' | 'oil' | 'news';
 interface Site { id: string; name: string; category: Exclude<Category, 'news'>; lat: number; lng: number; }
 
 // Theater bounding box — western RU + Ukraine + occupied + Crimea + Kola (Olenya).
@@ -56,6 +57,21 @@ const SITES: Site[] = [
   { id: 'lg-volnovakha', name: 'Volnovakha (rail/logistics)', category: 'logistics', lat: 47.60, lng: 37.50 },
   { id: 'lg-mariupol', name: 'Mariupol (port/rail)', category: 'logistics', lat: 47.10, lng: 37.55 },
   { id: 'lg-belgorod', name: 'Belgorod (staging)', category: 'logistics', lat: 50.60, lng: 36.59 },
+  // ── Oil depots / refineries (frequent strike targets) ──
+  { id: 'oil-novorossiysk', name: 'Novorossiysk (Sheskharis oil terminal)', category: 'oil', lat: 44.70, lng: 37.80 },
+  { id: 'oil-tuapse', name: 'Tuapse refinery', category: 'oil', lat: 44.10, lng: 39.08 },
+  { id: 'oil-ustluga', name: 'Ust-Luga oil terminal (Baltic)', category: 'oil', lat: 59.67, lng: 28.27 },
+  { id: 'oil-ryazan', name: 'Ryazan refinery', category: 'oil', lat: 54.61, lng: 39.69 },
+  { id: 'oil-volgograd', name: 'Volgograd (Lukoil) refinery', category: 'oil', lat: 48.62, lng: 44.42 },
+  { id: 'oil-novoshakhtinsk', name: 'Novoshakhtinsk refinery', category: 'oil', lat: 47.78, lng: 39.93 },
+  { id: 'oil-slavyansk', name: 'Slavyansk-na-Kubani refinery', category: 'oil', lat: 45.26, lng: 38.13 },
+  { id: 'oil-ilsky', name: 'Ilsky refinery', category: 'oil', lat: 44.84, lng: 38.58 },
+  { id: 'oil-afipsky', name: 'Afipsky refinery', category: 'oil', lat: 44.90, lng: 38.84 },
+  { id: 'oil-krasnodar', name: 'Krasnodar refinery', category: 'oil', lat: 45.07, lng: 39.03 },
+  { id: 'oil-saratov', name: 'Saratov refinery', category: 'oil', lat: 51.50, lng: 46.10 },
+  { id: 'oil-syzran', name: 'Syzran refinery', category: 'oil', lat: 53.16, lng: 48.47 },
+  { id: 'oil-kstovo', name: 'Kstovo refinery (Nizhny Novgorod)', category: 'oil', lat: 56.15, lng: 44.20 },
+  { id: 'oil-feodosia', name: 'Feodosia oil terminal (Crimea)', category: 'oil', lat: 45.04, lng: 35.38 },
 ];
 
 interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; }

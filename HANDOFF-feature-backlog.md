@@ -84,6 +84,7 @@ lat 43–71 / lng 19–66, keyless 24h CSV) and cross-references them against TH
 types within range (12 km sites / 15 km news):
 - **Airfields** (Engels, Dyagilevo, Morozovsk, Millerovo, Yeysk, Olenya, Saky, Belbek…),
 - **Rail/logistics** hubs (2.2 — see above),
+- **Oil depots / refineries** (Novorossiysk, Tuapse, Ryazan, Volgograd, Afipsky, Syzran…),
 - **News-named locations** — pulled by internally fetching `/api/news`
   (`new URL('/api/news', req.url)`) and matching geolocated items to nearby fires.
 Sites are always shown (dim when no fire, glow + label on a hit); news entries appear
