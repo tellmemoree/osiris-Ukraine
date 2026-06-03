@@ -55,6 +55,7 @@ const LAYER_GROUPS = [
     layers: [
       { key: 'cctv', label: 'CCTV Cameras', icon: Camera, color: '#39FF14', dataKey: 'cameras' },
       { key: 'live_news', label: 'Live News Feeds', icon: Tv, color: '#FF4081', dataKey: 'live_feeds' },
+      { key: 'news_intel', label: 'News Geo-Dots', icon: Newspaper, color: '#D4AF37', dataKey: 'news' },
     ],
   },
   {
