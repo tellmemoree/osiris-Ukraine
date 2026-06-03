@@ -36,6 +36,9 @@ interface Camera {
   country: string;
   feed_url?: string;
   external_url?: string;
+  // Embedded live streams (e.g. YouTube iframe) — used by curated Middle East cams.
+  stream_url?: string;
+  stream_type?: string;
   source: string;
 }
 
@@ -327,8 +330,53 @@ async function fetchUkraineCameras(): Promise<Camera[]> {
 }
 
 
+
+// ── MIDDLE EAST: Israel, Lebanon (curated embedded live streams) ──
+async function fetchMiddleEastCameras(): Promise<Camera[]> {
+  const cams: Camera[] = [];
+
+  // Israel Curated (Embedded)
+  cams.push(
+    {
+      id: 'il-israel-multicam', lat: 32.0853, lng: 34.7818,
+      name: 'Israel Multi-Cam (Live)', city: 'Tel Aviv', country: 'Israel',
+      stream_url: 'https://www.youtube.com/embed/gmtlJ_m2r5A?autoplay=1&mute=1',
+      stream_type: 'iframe',
+      source: 'YouTube Live',
+    },
+    {
+      id: 'il-jerusalem-live', lat: 31.7767, lng: 35.2345,
+      name: 'Jerusalem Western Wall', city: 'Jerusalem', country: 'Israel',
+      stream_url: 'https://www.youtube.com/embed/77akujLn4k8?autoplay=1&mute=1',
+      stream_type: 'iframe',
+      source: 'YouTube Live',
+    }
+  );
+
+  // Lebanon Curated (Embedded)
+  cams.push(
+    {
+      id: 'lb-beirut-skyline', lat: 33.8938, lng: 35.5018,
+      name: 'Beirut Skyline Live', city: 'Beirut', country: 'Lebanon',
+      stream_url: 'https://www.youtube.com/embed/qJf4NqPKLjI?autoplay=1&mute=1',
+      stream_type: 'iframe',
+      source: 'YouTube Live',
+    },
+    {
+      id: 'lb-me-multicam', lat: 33.2721, lng: 35.2033,
+      name: 'Middle East Multi-Cam (Live)', city: 'Regional', country: 'Middle East',
+      stream_url: 'https://www.youtube.com/embed/oxT5R6I0N6E?autoplay=1&mute=1',
+      stream_type: 'iframe',
+      source: 'YouTube Live',
+    }
+  );
+
+  return cams;
+}
+
 // ═══ REGION MAPPING ═══
 const REGION_FETCHERS: Record<string, () => Promise<Camera[]>> = {
+  'middle-east': fetchMiddleEastCameras,
   'russia': fetchRussiaCameras,
   'ukraine': fetchUkraineCameras,
   'uk': fetchTfLCameras,
@@ -372,6 +420,8 @@ function getRegionsForBounds(lat: number, lng: number): string[] {
   if (lat > 44 && lat < 53 && lng > 21.5 && lng < 41) regions.push('ukraine');
   // Russia (western RU + occupied territories through to the Far East)
   if (lat > 41 && lat < 78 && lng > 19 && lng < 180) regions.push('russia');
+  // Middle East (Israel, Lebanon)
+  if (lat > 29 && lat < 34.5 && lng > 34 && lng < 36.5) regions.push('middle-east');
   // Europe
   const inBulgaria = lat > 41 && lat < 44.5 && lng > 22 && lng < 29.5;
   const inGreece = lat > 34.5 && lat < 41.8 && lng > 19 && lng < 30;

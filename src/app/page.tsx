@@ -864,8 +864,8 @@ export default function Dashboard() {
       {/* ── NEW SIDEBAR (Root Level) ── */}
       {showLayers && !isMobile && <LayerPanel data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} />}
 
-      {/* ── RIGHT TOOL STRIP ── */}
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-[250] pointer-events-auto bg-black/40 backdrop-blur-sm p-1 rounded-full border border-white/5">
+      {/* ── RIGHT TOOL STRIP (desktop only — mobile uses bottom nav) ── */}
+      {!isMobile && <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-[250] pointer-events-auto bg-black/40 backdrop-blur-sm p-1 rounded-full border border-white/5">
         <div className="relative group">
           <button onClick={() => { const next = !showSearch; setShowSearch(next); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); if (next) ensureSearchSources(); }} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showSearch ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`}>
             <Search className={`w-4 h-4 ${showSearch ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
@@ -932,7 +932,7 @@ export default function Dashboard() {
             )}
           </AnimatePresence>
         </div>
-      </div>
+      </div>}
 
       {/* ── LIVE FEED VIEWER OVERLAY ── */}
       <AnimatePresence>
