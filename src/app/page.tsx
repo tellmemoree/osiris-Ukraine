@@ -42,14 +42,31 @@ function useIsMobile() {
   return isMobile;
 }
 const UptimeClock = () => {
-  const [uptime, setUptime] = useState('00:00:00');
-  const startTime = useRef(Date.now());
+  const [uptime, setUptime] = useState('--:--:--');
+  // Server process uptime, seeded from /api/health (process.uptime, seconds) and
+  // ticked locally between resyncs — NOT the time this page has been open.
+  const baseRef = useRef<{ serverSec: number; at: number } | null>(null);
+  const fmt = (sec: number) => {
+    const e = Math.max(0, Math.floor(sec));
+    return `${String(Math.floor(e/3600)).padStart(2,'0')}:${String(Math.floor((e%3600)/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
+  };
   useEffect(() => {
-    const iv = setInterval(() => {
-      const e = Math.floor((Date.now() - startTime.current) / 1000);
-      setUptime(`${String(Math.floor(e/3600)).padStart(2,'0')}:${String(Math.floor((e%3600)/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`);
+    let alive = true;
+    const sync = async () => {
+      try {
+        const r = await fetch('/api/health', { cache: 'no-store' });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (alive && typeof d.uptime === 'number') baseRef.current = { serverSec: d.uptime, at: Date.now() };
+      } catch { /* keep last known base across transient failures */ }
+    };
+    sync();
+    const resync = setInterval(sync, 60000);
+    const tick = setInterval(() => {
+      const b = baseRef.current;
+      if (b) setUptime(fmt(b.serverSec + (Date.now() - b.at) / 1000));
     }, 1000);
-    return () => clearInterval(iv);
+    return () => { alive = false; clearInterval(resync); clearInterval(tick); };
   }, []);
   return <span className="hidden lg:inline">UPTIME: <span className="text-[var(--gold-primary)]">{uptime}</span></span>;
 };
@@ -856,7 +873,7 @@ export default function Dashboard() {
           {/* Search Panel Slideout — coordinates, places, AND any live entity by name */}
           <AnimatePresence>
             {showSearch && (
-              <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="absolute right-12 top-1/2 -translate-y-1/2 w-80">
+              <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="absolute right-12 top-1/2 -translate-y-1/2 w-80 flex justify-end">
                 <SearchBar
                   onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); }}
                   entities={entityIndex}

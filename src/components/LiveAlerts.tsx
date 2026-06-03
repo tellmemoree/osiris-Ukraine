@@ -22,6 +22,14 @@ const RISK_COLORS: Record<string, string> = {
   LOW: '#00E676',
 };
 
+// Tab labels split into flag + text so spacing stays uniform across tabs —
+// inlining the emoji into the string left the flag tabs visually wider/detached.
+const TAB_META: Record<string, { flag?: string; text: string }> = {
+  ukraine: { flag: '🇺🇦', text: 'UA WAR' },
+  russia:  { flag: '🇷🇺', text: 'RU MILBLOG' },
+  world:   { flag: '🌍', text: 'WORLD' },
+};
+
 export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsProps) {
   const [expanded, setExpanded] = useState(true);
   const [maximized, setMaximized] = useState(false);
@@ -212,8 +220,10 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
             className={`flex flex-col flex-1 min-h-0 ${maximized ? 'bg-[#0a0a09]' : 'bg-transparent'}`}
           >
             {/* Filters - Fixed Height, Never Shrinks */}
-            <div className={`flex-shrink-0 flex gap-1 ${maximized ? 'px-6 py-4 border-b border-[#2A2A28] bg-[#111111]' : 'px-3 py-2 border-b border-[rgba(255,255,255,0.05)]'}`}>
-              {(['all', 'ukraine', 'russia', 'world', 'news', 'quakes', 'feeds'] as const).map(f => (
+            <div className={`flex-shrink-0 flex flex-wrap gap-1 ${maximized ? 'px-6 py-4 border-b border-[#2A2A28] bg-[#111111]' : 'px-3 py-2 border-b border-[rgba(255,255,255,0.05)]'}`}>
+              {(['all', 'ukraine', 'russia', 'world', 'news', 'quakes', 'feeds'] as const).map(f => {
+                const meta = TAB_META[f] ?? { text: f.toUpperCase() };
+                return (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
@@ -223,9 +233,13 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
                     filter === f && f === 'russia'  ? { color: '#5B8FF9', borderColor: 'rgba(91,143,249,0.5)' } : undefined
                   }
                 >
-                  {f === 'ukraine' ? '🇺🇦 UA WAR' : f === 'russia' ? '🇷🇺 RU MILBLOG' : f === 'world' ? '🌍 WORLD' : f.toUpperCase()}
+                  <span className="inline-flex items-center gap-1 leading-none">
+                    {meta.flag && <span>{meta.flag}</span>}
+                    <span>{meta.text}</span>
+                  </span>
                 </button>
-              ))}
+                );
+              })}
             </div>
 
             {/* Alert List - Internally Scrolling */}
@@ -306,10 +320,13 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
                         </div>
                       </div>
 
-                      {/* Fly-to icon */}
-                      {alert.lat !== undefined && (
-                        <MapPin className="w-3 h-3 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5" />
-                      )}
+                      {/* Fly-to icon — column is always reserved (even with no coords) so
+                          the footer's SOURCE link aligns to the same right edge on every row */}
+                      <div className="w-3 flex-shrink-0 mt-0.5">
+                        {alert.lat !== undefined && (
+                          <MapPin className="w-3 h-3 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

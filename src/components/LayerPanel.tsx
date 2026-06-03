@@ -112,6 +112,18 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
 
   const toggle = (key: string) => setActiveLayers((prev: any) => ({ ...prev, [key]: !prev[key] }));
+
+  // Toggle every layer in a group at once: if any are on, turn the whole group
+  // off; otherwise turn them all on. Skips sdk_ransomware (coming-soon stub).
+  const toggleGroup = (group: { layers: { key: string }[] }) => {
+    const keys = group.layers.map(l => l.key).filter(k => k !== 'sdk_ransomware');
+    setActiveLayers((prev: any) => {
+      const anyOn = keys.some(k => prev[k]);
+      const next = { ...prev };
+      keys.forEach(k => { next[k] = !anyOn; });
+      return next;
+    });
+  };
   
   const getCount = (dk: string): number | null => {
     if (!dk) return null;
@@ -140,14 +152,27 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
   if (isMobile) {
     return (
       <div className="flex flex-col gap-4 py-2">
-        {LAYER_GROUPS.map((group) => (
+        {LAYER_GROUPS.map((group) => {
+          const groupActiveCount = group.layers.filter(l => activeLayers[l.key]).length;
+          return (
           <div key={group.label} className="flex flex-col gap-2">
-            <div 
-              className="text-[10px] font-bold font-mono tracking-widest border-b border-white/10 pb-1"
-              style={{ color: group.color }}
+            <button
+              onClick={() => toggleGroup(group)}
+              className="flex items-center justify-between border-b border-white/10 pb-1 active:opacity-80 transition-opacity"
             >
-              {group.fullLabel}
-            </div>
+              <span className="text-[10px] font-bold font-mono tracking-widest" style={{ color: group.color }}>
+                {group.fullLabel}
+              </span>
+              <span
+                className="text-[8px] font-mono tracking-wider px-1.5 py-0.5 rounded border"
+                style={{
+                  color: groupActiveCount > 0 ? group.color : 'rgba(255,255,255,0.4)',
+                  borderColor: groupActiveCount > 0 ? `${group.color}80` : 'rgba(255,255,255,0.15)',
+                }}
+              >
+                {groupActiveCount > 0 ? 'ALL OFF' : 'ALL ON'}
+              </span>
+            </button>
             <div className="grid grid-cols-2 gap-2">
               {group.layers.map((layer) => {
                 const isLayerActive = activeLayers[layer.key];
@@ -188,7 +213,8 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     );
   }
@@ -243,9 +269,24 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
                       boxShadow: `0 0 30px ${group.color}15, inset 0 0 20px ${group.color}05`
                     }}
                   >
-                    <div className="text-[11px] font-bold font-mono mb-3 tracking-widest border-b border-white/10 pb-2" style={{ color: group.color }}>
-                      {group.fullLabel}
-                    </div>
+                    <button
+                      onClick={() => toggleGroup(group)}
+                      className="w-full flex items-center justify-between mb-3 pb-2 border-b border-white/10 hover:opacity-90 transition-opacity"
+                      title={groupActiveCount > 0 ? 'Turn entire group off' : 'Turn entire group on'}
+                    >
+                      <span className="text-[11px] font-bold font-mono tracking-widest" style={{ color: group.color }}>
+                        {group.fullLabel}
+                      </span>
+                      <span
+                        className="text-[8px] font-mono tracking-wider px-1.5 py-0.5 rounded border transition-colors"
+                        style={{
+                          color: groupActiveCount > 0 ? group.color : 'rgba(255,255,255,0.4)',
+                          borderColor: groupActiveCount > 0 ? `${group.color}80` : 'rgba(255,255,255,0.15)',
+                        }}
+                      >
+                        {groupActiveCount > 0 ? 'ALL OFF' : 'ALL ON'}
+                      </span>
+                    </button>
                     <div className="flex flex-col gap-1.5">
                       {group.layers.map((layer) => {
                         const isLayerActive = activeLayers[layer.key];

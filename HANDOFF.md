@@ -183,6 +183,26 @@ country**.
 - **Not yet wired into code** — the camera fetchers currently return curated directory
   links and don't fetch, so add `ruFetch()` when you implement a real RU portal scraper.
 
+#### Proxy Research — RuNet CCTV Access
+
+**Selected Provider: IPRoyal**
+- Site: iproyal.com
+- Type: Residential proxies (RU geo pool available)
+- Protocol: HTTP/HTTPS + SOCKS5
+- Pricing: Pay-per-GB, no monthly commitment
+- Why: Cheapest entry point among international residential providers,
+  RU IPs available, works for camera aggregator sites that block datacenter IPs
+
+**Integration plan**
+- Use `https-proxy-agent` or `socks-proxy-agent` in Next.js API routes
+- Apply proxy only to CCTV fetch calls, not all traffic
+- Rotate per-request if pool allows
+
+**Rejected options**
+- DO droplet — US/EU IP, gets geo-blocked same as direct
+- Free proxies — unreliable, mostly datacenter, security risk
+- Russian VPS (Selectel/Timeweb) — blocked by UA sanctions law
+
 ### 8. ✅ DONE — more OSINT coverage on Russia (commit `e431f67`)
 - **RU Telegram channels:** added 9 milblogger/MoD channels (`milinfolive`, `wargonzo`,
   `epoddubny`, `sashakots`, `dva_majora`, `voenkorKotenok`, `rvvoenkor`, `grey_zone`,
