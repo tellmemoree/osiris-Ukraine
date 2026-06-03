@@ -25,6 +25,7 @@ const TABS = [
   { id: 'subdomains', label: 'SUBDOMAINS', icon: Layers, placeholder: 'Domain to enumerate', color: '#00BCD4' },
   { id: 'tech', label: 'TECH DETECT', icon: Code, placeholder: 'URL to fingerprint', color: '#9C27B0' },
   { id: 'shodan', label: 'SHODAN IOT', icon: Network, placeholder: 'IP address', color: '#FF3D3D' },
+  { id: 'ipintel', label: 'IP INTEL', icon: MapPin, placeholder: 'IP address', color: '#00BCD4' },
   { id: 'bgp', label: 'BGP ROUTE', icon: Globe, placeholder: 'IP or ASN', color: '#00E5FF' },
   { id: 'mac', label: 'MAC ADDR', icon: Fingerprint, placeholder: 'MAC address', color: '#FFD700' },
   { id: 'phone', label: 'PHONE INTEL', icon: Phone, placeholder: 'Phone number (e.g. +1...)', color: '#FF9500' },
@@ -170,6 +171,7 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
         case 'subdomains': url = `/api/scanner?target=${encodeURIComponent(query)}&type=subdomains`; break;
         case 'tech': url = `/api/scanner?target=${encodeURIComponent(query)}&type=tech`; break;
         case 'shodan': url = `/api/osint/shodan?ip=${encodeURIComponent(query)}`; break;
+        case 'ipintel': url = `/api/ip-intel?ip=${encodeURIComponent(query)}`; break;
       }
       const res = await fetch(url, activeTab === 'shodan' ? { cache: 'no-store' } : undefined);
       if (activeTab === 'shodan' && res.status === 404) {
@@ -187,7 +189,11 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
           if (data.lat && data.lng && onScanGeolocate) {
              onScanGeolocate(query, { lat: data.lat, lng: data.lng, type: 'phone', region: data.region });
           }
-        } else if (activeTab !== 'sweep' && activeTab !== 'vuln' && activeTab !== 'crypto' && activeTab !== 'mac' && activeTab !== 'bgp' && activeTab !== 'github' && activeTab !== 'leaks' && activeTab !== 'phone') {
+        } else if (activeTab === 'ipintel') {
+          if (data.lat && data.lng && onScanGeolocate) {
+            onScanGeolocate(query, { lat: data.lat, lng: data.lng, type: 'ip-intel', city: data.city, country: data.country, isp: data.as_name });
+          }
+        } else if (activeTab !== 'sweep' && activeTab !== 'vuln' && activeTab !== 'crypto' && activeTab !== 'mac' && activeTab !== 'bgp' && activeTab !== 'github' && activeTab !== 'leaks' && activeTab !== 'phone' && activeTab !== 'ipintel') {
           fetch(`/api/osint/ip?ip=${encodeURIComponent(query)}`)
             .then(r => r.json())
             .then(locData => {
@@ -407,6 +413,36 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
             </div>
           )}
           {renderFallbackExcluding(['ip','hostnames','ports','tags','vulns','cpes','services','source'])}
+        </div>
+      );
+    }
+
+    // ── CENSYS IP INTEL ──
+    if (activeTab === 'ipintel') {
+      return (
+        <div>
+          <SectionHeader title="CENSYS IP INTELLIGENCE" icon={MapPin} color="#00BCD4" />
+          <ResultRow label="Target IP" value={r.ip || query} color="#00BCD4" />
+          {r.status && <ResultRow label="Status" value={r.status} color="#FF9500" />}
+          {r.asn !== undefined && <ResultRow label="ASN" value={`AS${r.asn}${r.as_name ? ' — ' + r.as_name : ''}`} color="#00E5FF" />}
+          {(r.city || r.country) && <ResultRow label="Location" value={[r.city, r.country].filter(Boolean).join(', ')} />}
+          {typeof r.lat === 'number' && typeof r.lng === 'number' && <ResultRow label="Coords" value={`${r.lat.toFixed(3)}, ${r.lng.toFixed(3)}`} />}
+          {r.services?.length > 0 && (
+            <ResultRow label="Open Services" color="#00E5FF" value={r.services.map((sv: any) => `${sv.port}${sv.transport ? '/' + sv.transport : ''}${sv.name ? ' ' + sv.name : ''}`).join(', ')} />
+          )}
+          {r.certs?.length > 0 && (
+            <div className="mt-2 p-2 border border-[#00BCD4]/30 bg-[#00BCD4]/10 rounded">
+              <span className="text-[10px] font-mono text-[#00BCD4] font-bold mb-1 block">TLS CERTS ({r.certs.length})</span>
+              <div className="flex flex-wrap gap-1">
+                {r.certs.slice(0, 8).map((c: string) => (
+                  <span key={c} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#1A1A18] text-[#8A8880]" title={c}>{c.slice(0, 16)}…</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {r.last_updated && <ResultRow label="Last Seen" value={r.last_updated} />}
+          {r.cached && <ResultRow label="Cache" value="hit (≤6h)" color="#8A8880" />}
+          {renderFallbackExcluding(['ip','asn','as_name','city','country','lat','lng','services','certs','last_updated','source','status','cached'])}
         </div>
       );
     }

@@ -35,12 +35,14 @@ exists and is unused by any component.
 - **Note:** Militaryland's geojson endpoint is now 404 — the route degrades gracefully
   to DeepState (the better source anyway).
 
-### 1.2 — IP-intel map layer + Censys OsintPanel tab  ·  Effort: M
-Finishes the recon-enrichment work just shipped (`/api/ip-intel`, commit `e18fd50`).
-- **Build:** `ip_intel` map layer (`ip-intel-dots`) for geolocated lookups; a Censys
-  result card/tab in `src/components/OsintPanel.tsx` (ASN, geo, services, certs).
-- **Deps:** UI buildable now (route returns 503 until keys); paste `CENSYS_API_ID`/
-  `CENSYS_API_SECRET` into `.env` to see live data (see HANDOFF-recon-toolkit.md).
+### 1.2 — IP-intel map layer + Censys OsintPanel tab  ·  ✅ DONE (2026-06-03)
+**Shipped:** added an **IP INTEL** tab to `OsintPanel` (TABS entry + URL case +
+result renderer showing ASN, geo, open services, TLS certs). Results plot on the map
+via the **existing `scan-targets` channel** (`onScanGeolocate`) — no separate
+`ip-intel-dots` source needed, since Censys already returns lat/lng. Until
+`CENSYS_API_ID`/`CENSYS_API_SECRET` are pasted into `.env`, the tab shows the route's
+503 "Censys not configured" message; with keys it renders full enrichment + a map dot.
+- **Verified:** route reachable (503 no-key), page compiles, tsc clean.
 
 ### 1.3 — Air-quality layer  ·  ✅ DONE (2026-06-03)
 **Shipped** (keyless): the dead OpenAQ v2 (HTTP 410) was replaced with the **Open-Meteo
