@@ -169,6 +169,7 @@ export default function Dashboard() {
     air_raids: false,
     power_outages: false,
     kab_threats: false,
+    frontlines: false,
   });
   const [liveFeedUrl, setLiveFeedUrl] = useState<string | null>(null);
   const [liveFeedName, setLiveFeedName] = useState('');
@@ -385,6 +386,7 @@ export default function Dashboard() {
     air_raids: () => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })),
     power_outages: () => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })),
     kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })),
+    frontlines: () => fetchEndpoint('/api/frontlines', d => ({ frontlines: d.frontlines?.features || [] })),
   }), [fetchEndpoint]);
 
   // Fetch a source at most once (does NOT toggle the layer on).
@@ -424,6 +426,7 @@ export default function Dashboard() {
     if (activeLayers.air_raids) loadOnce('air_raids');
     if (activeLayers.power_outages) loadOnce('power_outages');
     if (activeLayers.kab_threats) loadOnce('kab_threats');
+    if (activeLayers.frontlines) loadOnce('frontlines');
   }, [activeLayers, loadOnce]);
 
   // Submarine Cables (UI overhaul) — static dataset, fetched once on toggle.
@@ -468,6 +471,9 @@ export default function Dashboard() {
     }
     if (activeLayers.power_outages) {
       intervals.push(setInterval(() => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })), 300000)); // 5 min
+    }
+    if (activeLayers.frontlines) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/frontlines', d => ({ frontlines: d.frontlines?.features || [] })), 1800000)); // 30 min
     }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);

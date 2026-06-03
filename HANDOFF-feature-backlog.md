@@ -13,18 +13,27 @@ is kept in lockstep (fast-forward) and both are pushed. See HANDOFF.md.
 > `frontlines`, `air-quality`, `sentinel`, and the new `ip-intel`. Surfacing these
 > is the highest payoff-per-effort work available.
 
+> **Update (2026-06-03) — the dark routes were dark because they're BROKEN, not just
+> un-wired.** `/api/frontlines` read `.features` but DeepState nests under `.map.features`
+> (fixed — now live). `/api/air-quality`'s upstream OpenAQ v2 returns **HTTP 410 Gone**
+> (deprecated). Verify a dark route actually returns data before building UI for it.
+
 ---
 
 ## Direction 1 — Surface "dark" data (quick wins)
 
-### 1.1 — Frontline overlay  ·  Effort: S–M  ·  ⭐ top pick
+### 1.1 — Frontline overlay  ·  ✅ DONE (2026-06-03)
 A conflict map with **no frontline** is the most glaring gap. `/api/frontlines`
 exists and is unused by any component.
 - **Build:** add a line/control-zone layer in `src/components/OsirisMap.tsx`; add a
   `frontlines` toggle under the **UKRAINE WAR** group in `LayerPanel.tsx`.
-- **First step:** inspect the `/api/frontlines` response shape (GeoJSON? point list?)
-  and pick the right MapLibre layer type (line vs fill).
-- **Deps:** none. Data route already live.
+- **Shipped:** fixed the route schema bug (`.map.features`), wired `frontlines` into
+  `LAYER_LOADERS` + toggle-gated loading/polling, added a **Frontline (DeepState)**
+  toggle under the UKRAINE WAR group, and render fill + line layers in `OsirisMap`
+  using each feature's own DeepState colors (`['get','fill']`/`['get','stroke']`).
+  Live: 522 features (119 occupied-zone polygons + 403 POI points; points not drawn).
+- **Note:** Militaryland's geojson endpoint is now 404 — the route degrades gracefully
+  to DeepState (the better source anyway).
 
 ### 1.2 — IP-intel map layer + Censys OsintPanel tab  ·  Effort: M
 Finishes the recon-enrichment work just shipped (`/api/ip-intel`, commit `e18fd50`).
@@ -34,8 +43,13 @@ Finishes the recon-enrichment work just shipped (`/api/ip-intel`, commit `e18fd5
   `CENSYS_API_SECRET` into `.env` to see live data (see HANDOFF-recon-toolkit.md).
 
 ### 1.3 — Air-quality layer  ·  Effort: S
-`/api/air-quality` is built and dark. Add a layer under **NATURAL HAZARDS**
-(AQI dots/heat). Useful as a secondary environmental signal (smoke from fires/strikes).
+`/api/air-quality` is built but **returns 0 stations** — upstream **OpenAQ v2 is HTTP
+410 Gone** (deprecated). Surfacing it requires fixing the route first:
+- **Option A:** migrate to **OpenAQ v3** — needs `OPENAQ_API_KEY` (free) + `X-API-Key`
+  header; v3 shape differs (`/v3/locations/latest`).
+- **Option B (keyless):** swap to the **Open-Meteo Air Quality API** (no key), but it's
+  point/bbox forecast-shaped, not a global "latest stations" list — needs an adapter.
+Then add AQI dots under **NATURAL HAZARDS**. **Decision needed before building UI.**
 
 ### 1.4 — Space-weather indicator  ·  Effort: S
 `/api/space-weather` is only lightly referenced. Surface Kp index / aurora / solar

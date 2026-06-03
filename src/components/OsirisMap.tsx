@@ -159,7 +159,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-cctv', '#39FF14', 10);
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -242,6 +242,15 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         filter: ['in', ['get', 'name_ua'], ['literal', []]],
         paint: { 'line-color': '#FF1744', 'line-width': 1, 'line-opacity': 0.6 }
       });
+
+      // Frontline (DeepState/Militaryland) — occupied-zone fills + outlines. Uses
+      // each feature's own DeepState style colors; fills sit under the dot/label
+      // layers added below so markers stay legible.
+      map.addLayer({ id: 'frontline-fill', type: 'fill', source: 'frontlines',
+        filter: ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false],
+        paint: { 'fill-color': ['coalesce', ['get', 'fill'], '#FF3D3D'], 'fill-opacity': 0.18 }});
+      map.addLayer({ id: 'frontline-line', type: 'line', source: 'frontlines',
+        paint: { 'line-color': ['coalesce', ['get', 'stroke'], '#FF3D3D'], 'line-width': 1.4, 'line-opacity': 0.85 }});
 
       // Air Raid Alerts — pulsing red (Ukraine-specific alerts).
       // Oblast-wide alerts render larger; raion (district) alerts render tighter.
@@ -1137,6 +1146,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady) return;
     setGeo('earthquakes', activeLayers.earthquakes && data.earthquakes ? data.earthquakes.map((eq: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [eq.lng, eq.lat] }, properties: { magnitude: eq.magnitude, place: eq.place } })) : []);
   }, [mapReady, data.earthquakes, activeLayers.earthquakes, setGeo]);
+
+  // Frontline overlay — features already carry geometry + DeepState style props.
+  useEffect(() => {
+    if (!mapReady) return;
+    setGeo('frontlines', activeLayers.frontlines && data.frontlines ? data.frontlines : []);
+  }, [mapReady, data.frontlines, activeLayers.frontlines, setGeo]);
 
   useEffect(() => {
     if (!mapReady) return;

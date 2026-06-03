@@ -10,9 +10,19 @@ import { stealthFetch } from '@/lib/stealthFetch';
  */
 
 interface GeoJSONFeatureCollection {
-  type: 'FeatureCollection';
-  features: unknown[];
+  type?: string;
+  features?: unknown[];
+  // DeepState's /history/last nests the FeatureCollection under `map`, not at top level.
+  map?: { features?: unknown[]; [key: string]: unknown };
   [key: string]: unknown;
+}
+
+// DeepState returns { id, map: { features }, datetime }; Militaryland returns a
+// plain FeatureCollection. Pull features from wherever this source put them.
+function extractFeatures(d: GeoJSONFeatureCollection | undefined): unknown[] {
+  if (Array.isArray(d?.map?.features)) return d.map.features as unknown[];
+  if (Array.isArray(d?.features)) return d.features;
+  return [];
 }
 
 async function fetchDeepState(): Promise<GeoJSONFeatureCollection> {
@@ -48,22 +58,21 @@ export async function GET() {
   const deepStateData = deepStateResult.value;
   const sources: string[] = ['DeepState'];
 
-  let mergedFeatures: unknown[] = Array.isArray(deepStateData?.features)
-    ? deepStateData.features
-    : [];
+  let mergedFeatures: unknown[] = extractFeatures(deepStateData);
 
   if (militarylandResult.status === 'fulfilled') {
-    const mlData = militarylandResult.value;
-    if (Array.isArray(mlData?.features)) {
-      mergedFeatures = [...mergedFeatures, ...mlData.features];
+    const mlFeatures = extractFeatures(militarylandResult.value);
+    if (mlFeatures.length) {
+      mergedFeatures = [...mergedFeatures, ...mlFeatures];
       sources.push('Militaryland');
     }
   } else {
     console.warn('Frontlines fetch warning (Militaryland):', militarylandResult.reason);
   }
 
+  // Build a clean FeatureCollection — don't spread deepStateData, which would
+  // re-embed the entire nested `map` object and double the payload.
   const frontlines: GeoJSONFeatureCollection = {
-    ...deepStateData,
     type: 'FeatureCollection',
     features: mergedFeatures,
   };
