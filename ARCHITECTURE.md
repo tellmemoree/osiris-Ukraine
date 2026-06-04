@@ -117,11 +117,19 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
   air-quality via Open-Meteo).
 
 ## Branch & dev workflow
-- **`osiris-Ukraine`** = active tinkering branch (build here). **`osiris-Ukraine-merged`**
-  = integration branch kept in lockstep: after committing to osiris-Ukraine, fast-forward
-  merged to it and push BOTH. Master (`origin/master`, a fork) is synced INTO merged
-  periodically, resolving conflicts while keeping Ukraine features.
-- Work **in place** (not git worktrees) — the task spans already-checked-out branches.
+- **`osiris-Ukraine`** = active feature/tinkering branch (build features here).
+  **`osiris-Ukraine-merged`** = integration/deploy branch = Ukraine features + master.
+- **Two-branch, merge-NOT-fast-forward model** (the branches intentionally diverge — do
+  NOT try to keep them FF-lockstep, that breaks the moment each side gets its own commits):
+  - Feature work → commit on `osiris-Ukraine`, then **merge `osiris-Ukraine` into
+    `osiris-Ukraine-merged`** (a real merge commit), push both.
+  - Master sync → **merge `origin/master` into `osiris-Ukraine-merged`** (a fork upstream),
+    resolving conflicts while keeping Ukraine features. Master does NOT go into
+    `osiris-Ukraine` directly; it arrives there only if you later merge merged back.
+  - `osiris-Ukraine-merged` is what gets deployed (carries both lines).
+- Work **in place** (not git worktrees). Background-job worktree isolation is disabled for
+  this repo via `.claude/settings.json` → `worktree.bgIsolation: "none"` (gitignored,
+  machine-local) so in-place merges/edits aren't forced into an ephemeral worktree.
 - Dev server runs on **:3001** (the home box), as a detached host process:
   `setsid npx next start -p 3001` (logs to `~/.osiris-server.log`). It serves the
   production build in `.next`.
