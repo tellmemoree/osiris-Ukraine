@@ -30,6 +30,23 @@ services:
       - default
       - umami_default
 
+  osiris-cache:
+    image: nginx:alpine
+    container_name: osiris-cache
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx-cache:/var/cache/nginx
+    depends_on:
+      - osiris
+    restart: unless-stopped
+    networks:
+      - default
+
+volumes:
+  nginx-cache:
+
 networks:
   umami_default:
     external: true

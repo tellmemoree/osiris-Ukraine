@@ -9,7 +9,10 @@ export async function GET(req: Request) {
   try {
     // We will call the breach-analytics endpoint to get deep details on what exactly was leaked.
     const res = await fetch(`https://api.xposedornot.com/v1/breach-analytics?email=${encodeURIComponent(email)}`, {
-      headers: { 'Accept': 'application/json' }
+      headers: { 
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OSIRIS/1.0'
+      }
     });
     
     if (res.status === 404) {
@@ -43,6 +46,6 @@ export async function GET(req: Request) {
       data_exposed: Array.from(dataExposed).sort()
     });
   } catch (error) {
-    return NextResponse.json({ error: 'Leak lookup failed', detail: error instanceof Error ? error.message : String(error) }, { status: 502 });
+    return NextResponse.json({ error: 'Leak lookup failed', detail: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }

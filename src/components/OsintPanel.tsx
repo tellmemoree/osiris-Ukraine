@@ -162,7 +162,7 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
         case 'bgp': url = `/api/osint/bgp?query=${encodeURIComponent(query)}`; break;
         case 'mac': url = `/api/osint/mac?mac=${encodeURIComponent(query)}`; break;
         case 'phone': url = `/api/osint/phone?number=${encodeURIComponent(query)}`; break;
-        case 'leaks': url = `/api/osint/leaks?email=${encodeURIComponent(query)}`; break;
+        case 'leaks': url = `https://api.xposedornot.com/v1/breach-analytics?email=${encodeURIComponent(query)}`; break;
         case 'crypto': url = `/api/osint/crypto?address=${encodeURIComponent(query)}`; break;
         case 'github': url = `/api/osint/github?user=${encodeURIComponent(query)}`; break;
         case 'scanner': url = `/api/scanner?target=${encodeURIComponent(query)}&type=${scanType}`; break;
@@ -179,9 +179,37 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
         setLoading(false);
         return;
       }
+      if (activeTab === 'leaks' && res.status === 404) {
+        setResults({ email: query, breached: false, breaches: [], data_exposed: [] });
+        setHistory(prev => [{ tab: activeTab, query, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 9)]);
+        setLoading(false);
+        return;
+      }
       const data = await res.json();
       if (res.ok) {
-        setResults(data);
+        let parsedData = data;
+        if (activeTab === 'leaks') {
+           let breachList: string[] = [];
+           const dataExposed = new Set<string>();
+           if (data.BreachesSummary && data.BreachesSummary.site) {
+              breachList = data.BreachesSummary.site.split(';').filter(Boolean);
+           }
+           if (data.ExposedData && Array.isArray(data.ExposedData)) {
+              data.ExposedData.forEach((item: any) => {
+                 if (item.data_classes && Array.isArray(item.data_classes)) {
+                    item.data_classes.forEach((dc: string) => dataExposed.add(dc));
+                 }
+              });
+           }
+           parsedData = {
+              email: query,
+              breached: breachList.length > 0,
+              breaches: breachList,
+              data_exposed: Array.from(dataExposed).sort()
+           };
+        }
+
+        setResults(parsedData);
         setHistory(prev => [{ tab: activeTab, query, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 9)]);
         
         // Geolocate the target in the background

@@ -141,6 +141,14 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       center: [25.48, 42.70], zoom: 6.5, minZoom: 1.5, maxZoom: 18,
       attributionControl: false,
       maxPitch: 85,
+      transformRequest: (url: string) => {
+        // Route all CARTO CDN requests through the internal Next.js proxy API
+        if (url.includes('cartocdn.com')) {
+          const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+          return { url: `${baseUrl}/api/proxy-tiles?url=${encodeURIComponent(url)}` };
+        }
+        return { url };
+      },
     });
 
     map.on('load', () => {
@@ -159,7 +167,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-cctv', '#39FF14', 10);
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality', 'thermal-aoi'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality', 'thermal-aoi', 'ioda-outages', 'malware-nodes'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -351,6 +359,38 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-field': ['get','name'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 1.8], 'text-max-width': 12, 'text-allow-overlap': false,
       }, paint: { 'text-color': '#39FF14', 'text-halo-color': '#000', 'text-halo-width': 1, 'text-opacity': 0.7 }});
+
+      // ══ NETWORK INTEL — IODA Internet Outages ══
+      map.addLayer({ id: 'ioda-glow', type: 'circle', source: 'ioda-outages', paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,14, 5,24, 10,36],
+        'circle-color': '#00E5FF', 'circle-opacity': 0.12, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'ioda-dots', type: 'circle', source: 'ioda-outages', paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,4, 5,7, 10,12],
+        'circle-color': ['interpolate',['linear'],['get','score'], 0,'#00E5FF', 50,'#FFD700', 100,'#FF1744'],
+        'circle-opacity': 0.85,
+        'circle-stroke-width': 2, 'circle-stroke-color': '#00E5FF', 'circle-stroke-opacity': 0.5,
+      }});
+      map.addLayer({ id: 'ioda-label', type: 'symbol', source: 'ioda-outages', minzoom: 3, layout: {
+        'text-field': ['concat',['get','country'],' OUTAGE'], 'text-size': 9, 'text-font': ['Open Sans Bold'],
+        'text-offset': [0, 2], 'text-max-width': 14, 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#00E5FF', 'text-halo-color': '#000', 'text-halo-width': 1, 'text-opacity': 0.8 }});
+
+      // ══ NETWORK INTEL — Live Malware (abuse.ch) ══
+      map.addLayer({ id: 'malware-glow', type: 'circle', source: 'malware-nodes', paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,10, 5,18, 10,28],
+        'circle-color': '#FF1744', 'circle-opacity': 0.1, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'malware-dots', type: 'circle', source: 'malware-nodes', paint: {
+        'circle-radius': ['interpolate',['linear'],['zoom'], 1,3, 5,5, 10,8],
+        'circle-color': ['match', ['get','threat_type'], 'botnet_c2','#FF1744', 'malware_url','#FF9500', '#FF1744'],
+        'circle-opacity': 0.9,
+        'circle-stroke-width': 1.5, 'circle-stroke-color': '#FFFFFF', 'circle-stroke-opacity': 0.5,
+      }});
+      map.addLayer({ id: 'malware-label', type: 'symbol', source: 'malware-nodes', minzoom: 4, layout: {
+        'text-field': ['get','malware'], 'text-size': 8, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.8], 'text-max-width': 10, 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#FF1744', 'text-halo-color': '#000', 'text-halo-width': 1, 'text-opacity': 0.7 }});
 
       // GDELT
       map.addLayer({ id: 'gdelt-dots', type: 'circle', source: 'gdelt', paint: {
@@ -1222,6 +1262,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('gdelt', activeLayers.global_incidents && data.gdelt ? data.gdelt.filter((e: any) => !e.published || (Date.now() - new Date(e.published).getTime()) < 86400000).map((e: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lng, e.lat] }, properties: { name: e.name, url: e.url, published: e.published } })) : []);
   }, [mapReady, data.gdelt, activeLayers.global_incidents, setGeo]);
 
+  // IODA Internet Outages
+  useEffect(() => {
+    if (!mapReady) return;
+    setGeo('ioda-outages', activeLayers.internet_outages && data.ioda_outages ? data.ioda_outages.map((o: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [o.lng, o.lat] }, properties: { country: o.country, score: o.score, level: o.level, datasource: o.datasource } })) : []);
+  }, [mapReady, data.ioda_outages, activeLayers.internet_outages, setGeo]);
+
+  // Malware Threats
+  useEffect(() => {
+    if (!mapReady) return;
+    setGeo('malware-nodes', activeLayers.malware && data.malware_threats ? data.malware_threats.map((t: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [t.lng, t.lat] }, properties: { ip: t.ip, malware: t.malware, status: t.status, threat_type: t.threat_type, country: t.country } })) : []);
+  }, [mapReady, data.malware_threats, activeLayers.malware, setGeo]);
+
   useEffect(() => {
     if (!mapReady) return;
     setGeo('gps-jamming', activeLayers.gps_jamming && data.gps_jamming ? data.gps_jamming.map((z: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [z.lng, z.lat] }, properties: { severity: z.severity } })) : []);
@@ -1408,6 +1460,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['eq-circles','eq-label'], activeLayers.earthquakes);
     setVis(['sat-dots'], activeLayers.satellites);
     setVis(['gdelt-dots'], activeLayers.global_incidents);
+    setVis(['ioda-glow','ioda-dots','ioda-label'], activeLayers.internet_outages);
+    setVis(['malware-glow','malware-dots','malware-label'], activeLayers.malware);
     setVis(['jam-fill','jam-label'], activeLayers.gps_jamming);
     setVis(['day-night-fill'], activeLayers.day_night);
     setVis(['fl-commercial'], activeLayers.flights);

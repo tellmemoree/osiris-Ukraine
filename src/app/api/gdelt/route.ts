@@ -3,10 +3,13 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 /**
- * OSIRIS — Global Incidents API (GDELT Fallback / RSS OSINT Mapper)
- * Since GDELT v2 Geo is frequently down (404/Timeout), this fallback
- * aggregates global news RSS (BBC, Al Jazeera, etc.) and performs
- * lightweight keyword geo-mapping to generate incident points.
+ * OSIRIS — Global Incidents API (GDELT 2.0 GeoJSON, with RSS OSINT fallback)
+ *
+ * Primary source: GDELT GEO 2.0 API — real geo-coded events, free, no auth.
+ * GDELT's geo endpoint is frequently down (404/timeout); when it returns
+ * nothing usable we fall back to aggregating global + Ukraine-war news RSS
+ * (BBC, Al Jazeera, ISW, Ukrainian sources, …) and lightweight keyword
+ * geo-mapping so the layer is never empty.
  */
 
 const RSS_FEEDS = [
@@ -101,93 +104,163 @@ interface ConflictEvent {
   name: string;
   url: string;
   html: string;
-  type: 'conflict';
-  published: string;
+  type: string;
+  published?: string;
+  count?: number;
+  shareimage?: string;
+}
+
+// Primary source: live GDELT GEO 2.0 API — real events with actual coordinates.
+async function fetchGdeltEvents(): Promise<ConflictEvent[]> {
+  const queries = [
+    'protest OR riot OR unrest',
+    'conflict OR military OR attack OR strike',
+    'coup OR revolution OR emergency',
+  ];
+
+  const allEvents: ConflictEvent[] = [];
+  let eventId = 0;
+
+  for (const query of queries) {
+    try {
+      const encodedQuery = encodeURIComponent(query);
+      const url = `https://api.gdeltproject.org/api/v2/geo/geo?query=${encodedQuery}&format=GeoJSON&timespan=24h&maxpoints=100`;
+
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000), cache: 'no-store' });
+      if (!res.ok) continue;
+
+      const geojson = await res.json();
+      if (!geojson?.features) continue;
+
+      for (const feature of geojson.features) {
+        const coords = feature.geometry?.coordinates;
+        if (!coords || coords.length < 2) continue;
+
+        const props = feature.properties || {};
+        const name = props.name || props.html?.replace(/<[^>]*>/g, '').slice(0, 120) || 'GDELT Event';
+        const eventUrl = props.url || props.shareimage || '';
+
+        // Deduplicate by proximity (within 0.5 degrees)
+        const isDupe = allEvents.some(e =>
+          Math.abs(e.lat - coords[1]) < 0.5 && Math.abs(e.lng - coords[0]) < 0.5 && e.name === name
+        );
+        if (isDupe) continue;
+
+        allEvents.push({
+          id: `gdelt-${eventId++}`,
+          lat: coords[1],
+          lng: coords[0],
+          name,
+          url: eventUrl,
+          html: props.html || '',
+          type: query.includes('protest') ? 'unrest' : query.includes('conflict') ? 'conflict' : 'political',
+          count: props.count || 1,
+          shareimage: props.shareimage || '',
+        });
+      }
+    } catch {
+      // Individual query failure is non-fatal
+    }
+  }
+
+  return allEvents;
+}
+
+// Fallback source: aggregate global news RSS and keyword geo-map to incident points.
+async function fetchRssEvents(): Promise<ConflictEvent[]> {
+  const allEvents: ConflictEvent[] = [];
+  let eventId = 0;
+
+  for (const feed of RSS_FEEDS) {
+    try {
+      const res = await fetch(feed.url, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) continue;
+      const xml = await res.text();
+
+      // Very rudimentary regex to extract items to avoid heavy XML parser deps
+      const items = xml.match(/<item>([\s\S]*?)<\/item>/gi) || [];
+
+      for (const item of items) {
+        const titleMatch = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i) || item.match(/<title>(.*?)<\/title>/i);
+        const linkMatch = item.match(/<link>(.*?)<\/link>/i);
+        const descMatch = item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/i) || item.match(/<description>(.*?)<\/description>/i);
+        const dateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/i);
+
+        if (!titleMatch || !linkMatch) continue;
+
+        // Time of origin: RSS pubDate (fallback to now if missing/invalid).
+        // Skip events older than 24h so the map self-clears.
+        const parsed = dateMatch ? new Date(dateMatch[1]) : new Date();
+        const published = Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+        const ageHours = (Date.now() - new Date(published).getTime()) / 3600000;
+        if (ageHours > 24) continue;
+
+        const title = titleMatch[1];
+        const link = linkMatch[1];
+        const desc = descMatch ? descMatch[1] : '';
+
+        const textToSearch = (title + ' ' + desc).toLowerCase();
+
+        // Check if it's a conflict event
+        const isConflict = CONFLICT_KEYWORDS.some(kw => textToSearch.includes(kw));
+        if (!isConflict) continue;
+
+        // Try to geo-map
+        let coords: [number, number] | null = null;
+        for (const [location, point] of Object.entries(GEO_DICT)) {
+          // using word boundary regex
+          const regex = new RegExp(`\\b${location}\\b`, 'i');
+          if (regex.test(textToSearch)) {
+            // Deterministic jitter based on event index so events in the same country don't overlap
+            const jitterLng = ((eventId * 137.5) % 200 - 100) / 100 * 1.5;
+            const jitterLat = ((eventId * 251.3) % 200 - 100) / 100 * 1.5;
+            coords = [point[0] + jitterLng, point[1] + jitterLat];
+            break;
+          }
+        }
+
+        if (coords) {
+          allEvents.push({
+            id: `osint-${feed.source.replace(/\s+/g, '')}-${eventId++}`,
+            lat: coords[1],
+            lng: coords[0],
+            name: `[${feed.source}] ${title}`,
+            url: link,
+            html: `<a href="${link}" target="_blank">${title}</a><br/><i>Source: ${feed.source}</i>`,
+            type: 'conflict',
+            published,
+          });
+        }
+      }
+    } catch {
+      console.warn(`Failed to fetch ${feed.source}`);
+    }
+  }
+
+  return allEvents;
 }
 
 export async function GET() {
   try {
-    const allEvents: ConflictEvent[] = [];
-    let eventId = 0;
+    // Try live GDELT first; fall back to RSS OSINT mapping when it's empty/down.
+    let events = await fetchGdeltEvents();
+    let source = 'GDELT 2.0 GeoJSON API';
 
-    for (const feed of RSS_FEEDS) {
-      try {
-        const res = await fetch(feed.url, { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) continue;
-        const xml = await res.text();
-        
-        // Very rudimentary regex to extract items to avoid heavy XML parser deps
-        const items = xml.match(/<item>([\s\S]*?)<\/item>/gi) || [];
-        
-        for (const item of items) {
-          const titleMatch = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i) || item.match(/<title>(.*?)<\/title>/i);
-          const linkMatch = item.match(/<link>(.*?)<\/link>/i);
-          const descMatch = item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/i) || item.match(/<description>(.*?)<\/description>/i);
-          const dateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/i);
-
-          if (!titleMatch || !linkMatch) continue;
-
-          // Time of origin: RSS pubDate (fallback to now if missing/invalid).
-          // Skip events older than 24h so the map self-clears.
-          const parsed = dateMatch ? new Date(dateMatch[1]) : new Date();
-          const published = Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
-          const ageHours = (Date.now() - new Date(published).getTime()) / 3600000;
-          if (ageHours > 24) continue;
-
-          const title = titleMatch[1];
-          const link = linkMatch[1];
-          const desc = descMatch ? descMatch[1] : '';
-          
-          const textToSearch = (title + ' ' + desc).toLowerCase();
-          
-          // Check if it's a conflict event
-          const isConflict = CONFLICT_KEYWORDS.some(kw => textToSearch.includes(kw));
-          if (!isConflict) continue;
-
-          // Try to geo-map
-          let coords: [number, number] | null = null;
-          for (const [location, point] of Object.entries(GEO_DICT)) {
-            // using word boundary regex
-            const regex = new RegExp(`\\b${location}\\b`, 'i');
-            if (regex.test(textToSearch)) {
-              // Deterministic jitter based on event index so events in the same country don't overlap
-              const jitterLng = ((eventId * 137.5) % 200 - 100) / 100 * 1.5;
-              const jitterLat = ((eventId * 251.3) % 200 - 100) / 100 * 1.5;
-              coords = [point[0] + jitterLng, point[1] + jitterLat];
-              break;
-            }
-          }
-
-          if (coords) {
-            allEvents.push({
-              id: `osint-${feed.source.replace(/\s+/g, '')}-${eventId++}`,
-              lat: coords[1],
-              lng: coords[0],
-              name: `[${feed.source}] ${title}`,
-              url: link,
-              html: `<a href="${link}" target="_blank">${title}</a><br/><i>Source: ${feed.source}</i>`,
-              type: 'conflict',
-              published,
-            });
-          }
-        }
-      } catch {
-        console.warn(`Failed to fetch ${feed.source}`);
-      }
+    if (events.length === 0) {
+      events = await fetchRssEvents();
+      source = 'OSINT RSS Mapping (GDELT fallback)';
     }
 
     return NextResponse.json({
-      events: allEvents,
-      total: allEvents.length,
+      events,
+      total: events.length,
       timestamp: new Date().toISOString(),
-      source: 'OSINT RSS Mapping'
+      source,
     }, {
-      headers: {
-        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
-      },
+      headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' },
     });
   } catch (error) {
-    console.error('OSINT RSS fetch error:', error);
-    return NextResponse.json({ events: [], error: 'Failed to fetch OSINT data' }, { status: 500 });
+    console.error('[OSIRIS] GDELT/OSINT fetch error:', error);
+    return NextResponse.json({ events: [], total: 0, error: 'Failed to fetch incident data' }, { status: 500 });
   }
 }

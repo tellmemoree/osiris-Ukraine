@@ -92,6 +92,15 @@ const LAYER_GROUPS = [
     ],
   },
   {
+    label: 'NETWORK',
+    fullLabel: 'NETWORK INTEL',
+    color: '#00E5FF',
+    layers: [
+      { key: 'internet_outages', label: 'Internet Outages', icon: Network, color: '#00E5FF', dataKey: 'ioda_outages' },
+      { key: 'malware', label: 'Live Malware', icon: AlertTriangle, color: '#FF1744', dataKey: 'malware_threats' },
+    ],
+  },
+  {
     label: 'DISPLAY',
     fullLabel: 'DISPLAY',
     color: '#448AFF',
