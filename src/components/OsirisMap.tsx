@@ -663,8 +663,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       map.addLayer({ id: 'ship-shadow-dots', type: 'circle', source: 'maritime-ships',
         filter: ['==', ['get','shadow_fleet'], true], paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1,5, 5,7, 10,10],
-        'circle-color': '#E040FB', 'circle-opacity': 0.9,
-        'circle-stroke-width': 1.5, 'circle-stroke-color': '#E040FB', 'circle-stroke-opacity': 0.6,
+        'circle-color': '#E040FB',
+        // Dim vessels that have gone AIS-dark (last position is stale) so a
+        // hours-old track is visibly distinct from a live one.
+        'circle-opacity': ['case', ['get','stale'], 0.35, 0.9],
+        'circle-stroke-width': 1.5, 'circle-stroke-color': '#E040FB',
+        'circle-stroke-opacity': ['case', ['get','stale'], 0.3, 0.6],
       }});
       map.addLayer({ id: 'ship-shadow-label', type: 'symbol', source: 'maritime-ships', minzoom: 3,
         filter: ['==', ['get','shadow_fleet'], true], layout: {
@@ -1303,7 +1307,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady) return;
     setGeo('maritime', activeLayers.maritime && data.maritime_ports ? data.maritime_ports.map((p: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] }, properties: { name: p.name, country: p.country, type: p.type, volume: p.volume, fleet: p.fleet, rank: p.rank } })) : []);
     setGeo('maritime-choke', activeLayers.maritime && data.maritime_chokepoints ? data.maritime_chokepoints.map((c: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: { name: c.name, traffic: c.traffic, risk: c.risk } })) : []);
-    setGeo('maritime-ships', (activeLayers.ships || activeLayers.shadow_fleet) && data.maritime_ships ? data.maritime_ships.filter((s: any) => Number.isFinite(s.lat) && Number.isFinite(s.lng) && Math.abs(s.lat) <= 90 && Math.abs(s.lng) <= 180 && !(s.lat === 0 && s.lng === 0)).map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, flag_emoji: s.flag_emoji, shadow_fleet: s.shadow_fleet === true } })) : []);
+    setGeo('maritime-ships', (activeLayers.ships || activeLayers.shadow_fleet) && data.maritime_ships ? data.maritime_ships.filter((s: any) => Number.isFinite(s.lat) && Number.isFinite(s.lng) && Math.abs(s.lat) <= 90 && Math.abs(s.lng) <= 180 && !(s.lat === 0 && s.lng === 0)).map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, flag_emoji: s.flag_emoji, shadow_fleet: s.shadow_fleet === true, stale: s.stale === true, minutes_since_update: s.minutes_since_update } })) : []);
   }, [mapReady, data.maritime_ports, data.maritime_chokepoints, data.maritime_ships, activeLayers.maritime, activeLayers.ships, activeLayers.shadow_fleet, setGeo]);
 
   useEffect(() => {
