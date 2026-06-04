@@ -86,6 +86,13 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
   expansion). Deltas are `null` until a second UTC day is recorded. Rendered by
   `src/components/FrontlineTracker.tsx` — a glass card shown bottom-right on desktop and
   in the mobile layers drawer, gated on `activeLayers.frontlines`.
+- **Live in-memory AIS cache** (see `maritime`): a persistent `aisstream.io` WebSocket
+  fills a `globalThis` ship cache (positions self-prune at 10 min). The route returns
+  the **full** vessel set (no response cap). Shadow-fleet flagging is mostly IMO-based,
+  and IMO arrives only in the infrequent type-5 `ShipStaticData` message — so the learned
+  sanctioned-MMSI set is persisted to `~/.osiris-data/shadow-mmsi.json` and restored on
+  startup, otherwise a restart would blind the layer for hours. Needs `AIS_API_KEY`; with
+  no key the WS never connects and `ships` is empty (NOT a code bug — check the env first).
 
 ## Recon toolkit — `src/components/OsintPanel.tsx`
 - `TABS` array defines tools `{ id, label, icon, placeholder, color }`.

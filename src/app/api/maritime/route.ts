@@ -1,7 +1,17 @@
 import { NextResponse } from 'next/server';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 import WebSocket from 'ws';
 import { flagFromMmsi } from '@/lib/mmsi-flags';
 import { getShadowFleetImos, getShadowFleetMmsis } from '@/lib/shadowFleet';
+
+// Learned sanctioned-MMSI set is persisted here so a server restart doesn't
+// blind the shadow-fleet layer. IMO↔MMSI links are learned from the infrequent
+// type-5 ShipStaticData message; without persistence they'd take hours to
+// re-accumulate after every restart.
+const SHADOW_STATE_DIR = path.join(os.homedir(), '.osiris-data');
+const SHADOW_STATE_FILE = path.join(SHADOW_STATE_DIR, 'shadow-mmsi.json');
 
 /**
  * OSIRIS — Maritime Intelligence
@@ -125,16 +135,42 @@ const globalForAis = globalThis as unknown as {
   // (and is therefore dropped by the lat/lng store guard), and stays attached
   // across the ship's subsequent position-only updates.
   shadowMmsi: Set<number>;
+  // Throttle handle for the debounced disk-write of shadowMmsi.
+  shadowSaveTimer: ReturnType<typeof setTimeout> | null;
 };
 
 if (!globalForAis.shipsCache) {
   globalForAis.shipsCache = new Map();
   globalForAis.isAisConnecting = false;
   globalForAis.shadowMmsi = new Set();
+  globalForAis.shadowSaveTimer = null;
+  // Best-effort restore of the learned sanctioned-MMSI set. Mutates the same
+  // Set the `shadowMmsi` const below references, so additions land in it.
+  fs.readFile(SHADOW_STATE_FILE, 'utf8')
+    .then((txt) => {
+      const arr: unknown = JSON.parse(txt);
+      if (Array.isArray(arr)) {
+        for (const m of arr) if (typeof m === 'number') globalForAis.shadowMmsi.add(m);
+        console.log(`[OSIRIS] shadow-fleet: restored ${globalForAis.shadowMmsi.size} learned MMSIs from disk`);
+      }
+    })
+    .catch(() => {/* no prior state — start empty */});
 }
 
 const shipsCache = globalForAis.shipsCache;
 const shadowMmsi = globalForAis.shadowMmsi;
+
+// Persist the learned MMSI set, coalescing bursts into at most one write / 10s.
+function persistShadowMmsi() {
+  if (globalForAis.shadowSaveTimer) return;
+  globalForAis.shadowSaveTimer = setTimeout(async () => {
+    globalForAis.shadowSaveTimer = null;
+    try {
+      await fs.mkdir(SHADOW_STATE_DIR, { recursive: true });
+      await fs.writeFile(SHADOW_STATE_FILE, JSON.stringify([...shadowMmsi]), 'utf8');
+    } catch {/* best-effort — losing the cache only costs re-accumulation */}
+  }, 10000);
+}
 
 function connectAisStream() {
   if (globalForAis.isAisConnecting) return;
@@ -208,8 +244,9 @@ function connectAisStream() {
       // Primary shadow-fleet match: MMSI rides on EVERY message (incl. position
       // reports), so a sanctioned MMSI flags the vessel immediately — no need to
       // wait for the infrequent ShipStaticData/IMO message below.
-      if (getShadowFleetMmsis().has(mmsi)) {
+      if (getShadowFleetMmsis().has(mmsi) && !shadowMmsi.has(mmsi)) {
         shadowMmsi.add(mmsi);
+        persistShadowMmsi();
       }
 
       // Extract Name from MetaData if available (present in most messages)
@@ -233,8 +270,9 @@ function connectAisStream() {
         // Cross-reference against the dynamic shadow-fleet watchlist (IMO is only
         // available in ShipStaticData). Record the MMSI in the sticky set so the
         // flag is not lost if this message precedes the first position fix.
-        if (staticData.ImoNumber && getShadowFleetImos().has(staticData.ImoNumber)) {
+        if (staticData.ImoNumber && getShadowFleetImos().has(staticData.ImoNumber) && !shadowMmsi.has(mmsi)) {
           shadowMmsi.add(mmsi);
+          persistShadowMmsi();
         }
       }
 
@@ -342,22 +380,10 @@ export async function GET() {
     };
   });
 
-  // Cap the vessels returned to the client to keep the 10s poll + GeoJSON
-  // rebuild light: keep all shadow-fleet matches, then fill to ~6000 with the
-  // most recently-updated vessels. Full set above still drives port congestion.
-  const SHIP_RESPONSE_CAP = 6000;
-  let responseShips = ships;
-  if (ships.length > SHIP_RESPONSE_CAP) {
-    const flagged = ships.filter((s) => s.shadow_fleet);
-    const rest = ships
-      .filter((s) => !s.shadow_fleet)
-      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-      .slice(0, Math.max(0, SHIP_RESPONSE_CAP - flagged.length));
-    responseShips = [...flagged, ...rest];
-  }
-
-  // Enrich with flag state derived from the MMSI (ITU MID → ISO country).
-  responseShips = responseShips.map((s) => {
+  // Return the full vessel set — no response cap. Every tracked ship reaches the
+  // client/map (cache is still bounded at 20k upstream + the 10-min staleness
+  // prune above). Enrich with flag state derived from the MMSI (ITU MID → ISO).
+  const responseShips = ships.map((s) => {
     const f = flagFromMmsi(s.mmsi);
     return { ...s, flag: f ? f.iso : null, flag_emoji: f ? f.emoji : null };
   });
