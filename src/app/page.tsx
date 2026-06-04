@@ -171,6 +171,7 @@ export default function Dashboard() {
     power_outages: false,
     kab_threats: false,
     frontlines: false,
+    captures: false,
     air_quality: false,
     thermal_aoi: false,
     internet_outages: false,
@@ -378,6 +379,7 @@ export default function Dashboard() {
     power_outages: () => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })),
     kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })),
     frontlines: () => fetchEndpoint('/api/frontlines', d => ({ frontlines: d.frontlines?.features || [] })),
+    captures: () => fetchEndpoint('/api/captures', d => ({ captures: d.captures })),
     air_quality: () => fetchEndpoint('/api/air-quality', d => ({ air_quality: d.stations })),
     thermal_aoi: () => fetchEndpoint('/api/strategic-thermal', d => ({ thermal_aoi: d.aois })),
   }), [fetchEndpoint]);
@@ -420,6 +422,7 @@ export default function Dashboard() {
     if (activeLayers.power_outages) loadOnce('power_outages');
     if (activeLayers.kab_threats) loadOnce('kab_threats');
     if (activeLayers.frontlines) loadOnce('frontlines');
+    if (activeLayers.captures) loadOnce('captures');
     if (activeLayers.air_quality) loadOnce('air_quality');
     if (activeLayers.thermal_aoi) loadOnce('thermal_aoi');
   }, [activeLayers, loadOnce]);
@@ -486,6 +489,9 @@ export default function Dashboard() {
     }
     if (activeLayers.thermal_aoi) {
       intervals.push(setInterval(() => fetchEndpoint('/api/strategic-thermal', d => ({ thermal_aoi: d.aois })), 300000)); // 5 min
+    }
+    if (activeLayers.captures) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/captures', d => ({ captures: d.captures })), 300000)); // 5 min
     }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);

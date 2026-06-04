@@ -167,7 +167,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-cctv', '#39FF14', 10);
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality', 'thermal-aoi', 'ioda-outages', 'malware-nodes'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'captures', 'air-quality', 'thermal-aoi', 'ioda-outages', 'malware-nodes'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -326,6 +326,31 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-field': ['concat', 'KAB ', ['get','regionName']], 'text-size': 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 1.9], 'text-allow-overlap': false,
       }, paint: { 'text-color': '#FF8C00', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // Territorial Captures / Advances — RU gains red, UA recaptures blue.
+      // Square-ish look (high stroke on a small dot) to read distinctly from the
+      // round strike/threat dots; side drives every colour via ['get','side'].
+      map.addLayer({ id: 'captures-glow', type: 'circle', source: 'captures', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 18, 10, 28],
+        'circle-color': ['match', ['get', 'side'], 'ua', '#2979FF', '#FF3D3D'],
+        'circle-opacity': 0.14, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'captures-dots', type: 'circle', source: 'captures', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 4.5, 5, 7, 10, 10],
+        'circle-color': ['match', ['get', 'side'], 'ua', '#2979FF', '#FF3D3D'],
+        'circle-opacity': 0.95,
+        'circle-stroke-width': 2,
+        'circle-stroke-color': ['match', ['get', 'side'], 'ua', '#82B1FF', '#FF8A80'],
+        'circle-stroke-opacity': 0.85,
+      }});
+      map.addLayer({ id: 'captures-label', type: 'symbol', source: 'captures', minzoom: 4, layout: {
+        'text-field': ['concat', ['match', ['get', 'side'], 'ua', '🇺🇦 ', '🇷🇺 '], ['get', 'name']],
+        'text-size': 9, 'text-font': ['Open Sans Regular'], 'text-offset': [0, 1.6],
+        'text-anchor': 'top', 'text-optional': true, 'text-max-width': 14,
+      }, paint: {
+        'text-color': ['match', ['get', 'side'], 'ua', '#82B1FF', '#FF8A80'],
+        'text-halo-color': '#000', 'text-halo-width': 1,
+      }});
 
       // Power Outages — amber/yellow grid-down indicators
       map.addLayer({ id: 'outage-glow', type: 'circle', source: 'power-outages', paint: {
@@ -850,6 +875,25 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
+    map.on('click', 'captures-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      const isUa = p.side === 'ua';
+      const col = isUa ? '#2979FF' : '#FF3D3D';
+      const flag = isUa ? '🇺🇦' : '🇷🇺';
+      const verb = isUa ? 'UKRAINIAN RECAPTURE / ADVANCE' : 'RUSSIAN CAPTURE / ADVANCE';
+      const link = p.link ? `<a href="${p.link}" target="_blank" rel="noopener noreferrer" style="font-size:8px;color:#00E5FF;">open report ↗</a>` : '';
+      popup(coords, `<div style="${pStyle}border:1px solid ${col}88;max-width:300px;">
+        <div style="color:${col};font-size:11px;font-weight:700;margin-bottom:4px;">${flag} ${verb}</div>
+        <div style="font-size:10px;color:#E8E6E0;margin-bottom:6px;line-height:1.35;">${(p.name||'').replace(/</g,'&lt;')}</div>
+        <div style="font-size:8px;color:#8A8880;">${p.source || '—'}${p.side_reported ? ' · reported by ' + String(p.side_reported).toUpperCase() : ''}${Number(p.count) > 1 ? ' · ' + p.count + ' reports' : ''}</div>
+        <div style="font-size:8px;color:#5C5A54;">${p.date ? new Date(p.date).toUTCString().slice(5,17) + ' UTC' : ''}</div>
+        ${link}
+        <div style="font-size:7px;color:#5C5A54;margin-top:6px;">heuristic — claimed control change, contested. verify.</div>
+      </div>`);
+    });
+
     // ── Power Outages ──
     map.on('click', 'outage-dots', e => {
       if (!e.features?.length) return;
@@ -971,11 +1015,24 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
            <div style="font-size:9px;">confidence: <span style="color:${confColor};font-weight:700;">${String(p.confidence || '—').toUpperCase()}</span></div>`
         : `<div style="color:#5C5A54;font-size:9px;">no active fire nearby (monitored)</div>`;
       const src = p.category === 'news' && p.source ? `<div style="font-size:8px;color:#8A8880;">${p.source}${p.side ? ' · ' + String(p.side).toUpperCase() : ''}</div>` : '';
+      // Multiple reports can corroborate one fire cell (different channels / both
+      // sides). List the others so the marker isn't silently attributed to just one.
+      let moreSrc = '';
+      if (p.category === 'news') {
+        try {
+          const all = JSON.parse(p.sources || '[]') as { source?: string; side?: string; title?: string }[];
+          const extra = all.slice(1);
+          if (extra.length) {
+            moreSrc = `<div style="font-size:8px;color:#5C5A54;margin-top:3px;">+${extra.length} more report(s) here:</div>`
+              + extra.map(s => `<div style="font-size:8px;color:#8A8880;">${s.source || '?'}${s.side ? ' · ' + String(s.side).toUpperCase() : ''}${s.title ? ' — ' + s.title : ''}</div>`).join('');
+          }
+        } catch { /* properties.sources malformed — show primary only */ }
+      }
       const link = p.category === 'news' && p.link ? `<a href="${p.link}" target="_blank" rel="noopener noreferrer" style="font-size:8px;color:#00E5FF;">open report ↗</a>` : '';
       popup(coords, `<div style="${pStyle}border:1px solid ${col}88;">
         <div style="color:${col};font-size:11px;font-weight:700;margin-bottom:4px;">${String(p.category).toUpperCase()} · THERMAL AOI</div>
         <div style="font-size:10px;color:#E8E6E0;margin-bottom:6px;">${p.name}</div>
-        ${src}${hitLine}${link}
+        ${src}${moreSrc}${hitLine}${link}
         <div style="font-size:7px;color:#5C5A54;margin-top:6px;">heuristic — FIRMS heat ≠ confirmed strike. verify.</div>
       </div>`);
     });
@@ -1253,7 +1310,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // Strategic Thermal AOIs — FIRMS × strategic sites / news.
   useEffect(() => {
     if (!mapReady) return;
-    setGeo('thermal-aoi', activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi.map((a: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [a.lng, a.lat] }, properties: { category: a.category, name: a.name, hit: a.hit, confidence: a.confidence || '', fireCount: a.fireCount, maxFrp: a.maxFrp, latest: a.latest || '', source: a.source || '', side: a.side || '', link: a.link || '' } })) : []);
+    setGeo('thermal-aoi', activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi.map((a: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [a.lng, a.lat] }, properties: { category: a.category, name: a.name, hit: a.hit, confidence: a.confidence || '', fireCount: a.fireCount, maxFrp: a.maxFrp, latest: a.latest || '', source: a.source || '', side: a.side || '', link: a.link || '', sources: JSON.stringify(a.sources || []) } })) : []);
   }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, setGeo]);
 
   useEffect(() => {
@@ -1404,6 +1461,19 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     })));
   }, [mapReady, data.kab_threats, activeLayers.kab_threats, setGeo]);
 
+  // Territorial Captures / Advances
+  useEffect(() => {
+    if (!mapReady) return;
+    const caps = activeLayers.captures && data.captures ? data.captures : [];
+    setGeo('captures', caps.filter((c: any) => c.lat && c.lng).map((c: any) => ({
+      type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
+      properties: {
+        side: c.side, name: c.name, source: c.source || '', side_reported: c.side_reported || '',
+        link: c.link || '', date: c.date || '', count: c.count || 1,
+      },
+    })));
+  }, [mapReady, data.captures, activeLayers.captures, setGeo]);
+
   useEffect(() => {
     if (!mapReady) return;
     setGeo('power-outages', activeLayers.power_outages && data.power_outages
@@ -1494,6 +1564,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['raid-oblast-fill','raid-oblast-outline','raid-district-fill','raid-district-outline','raid-glow','raid-dots','raid-label'], activeLayers.air_raids);
     setVis(['outage-glow','outage-dots','outage-label'], activeLayers.power_outages);
     setVis(['kab-glow','kab-dots','kab-label'], activeLayers.kab_threats);
+    setVis(['captures-glow','captures-dots','captures-label'], activeLayers.captures);
   }, [mapReady, activeLayers, setVis]);
 
   // IP Sweep visualization

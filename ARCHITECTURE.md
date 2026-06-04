@@ -78,11 +78,41 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
   call another route internally via `new URL('/api/news', req.url)` to correlate them
   (here: FIRMS fires × curated sites + geolocated news → "thermal hit" AOIs). Cache the
   combined result. Distance checks use a cheap equirectangular approx (≈111.32 km/deg).
+  A news item is a thermal lead only if `isStrikeRelated` AND **not** `isTerritorialAdvance`
+  — capture/liberation reports ("освободила"/"под контроль"/"liberated") sit in ambient
+  front-line FIRMS heat and carry combat verbs, so they were false positives; `ADVANCE_TERMS`
+  uses PRECISE stems (no bare "occupied"/`наступ`) so genuine strikes near occupied areas
+  survive. An article is cross-referenced at EVERY place `/api/news` `places[]` names, but
+  only places with a fire within `NEWS_RADIUS_KM` surface (region-level mentions whose
+  centroid has no nearby fire legitimately can't corroborate). Co-located corroborations
+  (same ~0.05°/~5 km cell — multiple channels or both sides reporting one event) MERGE into
+  ONE AOI carrying every contributing `sources[]` entry (not first-come-wins), surfaced in
+  the OsirisMap thermal popup as "+N more report(s) here".
   Note: `/api/news` returns a **war/conflict-filtered** set (`isConflict`) — bilingual
   (English `RISK_KEYWORDS` + Cyrillic `CONFLICT_TERMS_CYR` stems) so RU/UA milblogger
   posts survive; keeps all conflicts, drops channel ads/sport/weather. Cyrillic stems
   must avoid common-word collisions (e.g. bare `наступ` matches "наступний"/next — use
   `наступальн`/`контрнаступ`). This feeds IntelFeed, LiveAlerts, and the `news_intel` dots.
+  Geolocation is a hand-curated `KEYWORD_COORDS` gazetteer (Latin + Cyrillic UA/RU keys;
+  `BROAD_KEYS` = country/peninsula, only used when no city is named). `keywordRegex` only
+  APPENDS up to 4 case-suffix letters — it CANNOT swap a nominative's final vowel — so key
+  declinable -а/-ка/-е place names on their CONSONANT STEM (`костянтинівк`, `судж`,
+  `феодос`) to catch oblique cases. Two hazards when adding keys: (1) terminal-vowel
+  declension as above; (2) common-word collisions (`лиман`=estuary, `украинск`/`українськ`
+  =the adjective "Ukrainian", `орехов`=Moscow's Orekhovo) — validate every new key against
+  a declined probe AND a false-friend probe before committing (see the `keywordRegex`
+  harness pattern).
+- **Actor-classified news layer** (see `captures`): the flip-side of `strategic-thermal`
+  — where that route DROPS territorial-advance reports, `captures` SURFACES them as their
+  own layer (`UA WAR` group, key `captures`). It reuses the same `ADVANCE_TERMS` (keep the
+  two copies in sync) and classifies each item by the side that ADVANCED via `captureSide`
+  — NOT the reporting channel's `side` (a UA channel routinely reports a RU capture). Each
+  side's own euphemism is the signal: RU "освобод(ить)" → ru; UA "звільн"/"deoccupy"/
+  "recapture" → ua; hostile "окуп/захопл/seized" framing → ru; else fall back to the army
+  named. Plotted on the un-jittered raw centroid (recovered as the `places[]` entry nearest
+  to `/api/news`'s jittered `coords`) so the same town from multiple channels dedups by
+  place+side (count of corroborating reports); a town claimed by BOTH sides keeps two
+  markers. Map styling: RU red `#FF3D3D`, UA blue `#2979FF`, flag-prefixed labels.
 - **Snapshot/diff over time** (see `frontline-changes`): a route may persist a daily
   snapshot to `~/.osiris-data/<name>.json` (OUTSIDE the repo/`.next`, so it survives
   rebuilds) and return deltas. `frontline-changes` fetches `/api/frontlines`, sums all

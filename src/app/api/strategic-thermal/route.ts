@@ -138,6 +138,23 @@ function isStrikeRelated(item: NewsItem): boolean {
   return STRIKE_TERMS.some(w => t.includes(w));
 }
 
+// Territorial-control / capture-advance reports ("Russia liberated X", "took
+// control of Y") sit in ambient front-line FIRMS heat AND carry combat verbs, so
+// they slip past isStrikeRelated as false positives — yet they are NOT strikes on
+// strategic targets. Exclude them. PRECISE capture/liberation/control-change stems
+// only: deliberately omit bare "occupied"/"наступ" (the latter collides with
+// "наступний"/next — see ARCHITECTURE.md) so genuine strike reports ("...depot in
+// the occupied Donetsk region") are NOT dropped.
+const ADVANCE_TERMS = [
+  'liberat', 'recaptur', 'took control', 'under control', 'gained control', 'overran',
+  'освобод', 'под контроль', 'захват', 'продвин',     // RU: liberated / under control / seized / advanced
+  'звільн', 'під контроль', 'захопл', 'просун',       // UA: liberated / under control / captured / advanced
+];
+function isTerritorialAdvance(item: NewsItem): boolean {
+  const t = `${item.title || ''} ${item.description || ''}`.toLowerCase();
+  return ADVANCE_TERMS.some(w => t.includes(w));
+}
+
 // Confidence from fire intensity + count. FRP (fire radiative power, MW) is the best single
 // discriminator: a struck depot/refinery burns hot (high FRP); a faint farm hotspot is low.
 function confidenceOf(fireCount: number, maxFrp: number): 'low' | 'med' | 'high' {
@@ -176,31 +193,51 @@ export async function GET(req: Request) {
       });
     }
 
-    // News: only STRIKE-RELATED articles, cross-referenced at EVERY place they name
-    // (articles often mention several). Deduped across articles by ~0.05° (~5 km) so one
-    // event doesn't spawn an overlapping cluster of markers.
-    let newsHits = 0;
-    const newsSeen = new Set<string>();
+    // News: only STRIKE-RELATED articles that are NOT territorial-advance reports,
+    // cross-referenced at EVERY place they name (one article often lists several struck
+    // targets — but only places with a corroborating fire within NEWS_RADIUS_KM surface,
+    // which is the whole point of the heuristic). Co-located corroborations (same ~0.05°
+    // /~5 km cell — different channels, or one strike reported by both sides) MERGE into a
+    // single AOI that carries EVERY contributing source, instead of whichever article was
+    // processed first silently winning (and mis-attributing) the marker.
+    type Contributor = { source?: string; side?: string; link?: string; title?: string };
+    type NewsAoi = {
+      id: string; category: 'news'; name: string; source?: string; side?: string; link?: string;
+      lat: number; lng: number; hit: true; fireCount: number; maxFrp: number; latest: string;
+      confidence: 'low' | 'med' | 'high'; sources: Contributor[];
+    };
+    const newsByCell = new Map<string, NewsAoi>();
     for (const n of news) {
-      if (!isStrikeRelated(n)) continue;
+      if (!isStrikeRelated(n) || isTerritorialAdvance(n)) continue;
       const candidates = (n.places && n.places.length)
         ? n.places
         : (n.coords && !n.coords_default ? [n.coords] : []);
+      const seenThisArticle = new Set<string>();
       for (const [lat, lng] of candidates) {
         if (lat < BBOX.latMin || lat > BBOX.latMax || lng < BBOX.lngMin || lng > BBOX.lngMax) continue;
         const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
-        if (newsSeen.has(key)) continue;
+        if (seenThisArticle.has(key)) continue; // one article contributes one marker per place
+        seenThisArticle.add(key);
         const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
         if (!h) continue;
-        newsSeen.add(key);
-        newsHits++;
-        aois.push({
-          id: `news-${newsHits}`, category: 'news' as Category, name: n.title?.slice(0, 120) || 'News report',
+        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120) };
+        const existing = newsByCell.get(key);
+        if (existing) {
+          if (!existing.sources.some(s => s.source === contributor.source && s.title === contributor.title)) {
+            existing.sources.push(contributor);
+          }
+          continue;
+        }
+        newsByCell.set(key, {
+          id: `news-${newsByCell.size + 1}`, category: 'news', name: contributor.title || 'News report',
           source: n.source, side: n.side, link: n.link, lat, lng,
-          hit: true, fireCount: h.count, maxFrp: h.maxFrp, latest: h.latest, confidence: confidenceOf(h.count, h.maxFrp),
+          hit: true, fireCount: h.count, maxFrp: h.maxFrp, latest: h.latest,
+          confidence: confidenceOf(h.count, h.maxFrp), sources: [contributor],
         });
       }
     }
+    for (const a of newsByCell.values()) aois.push(a);
+    const newsHits = newsByCell.size;
 
     const siteHits = aois.filter(a => a.category !== 'news' && a.hit).length;
     const highConf = aois.filter(a => a.hit && a.confidence === 'high').length;
