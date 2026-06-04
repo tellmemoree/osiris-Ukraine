@@ -156,6 +156,30 @@ const BROAD_KEYS = new Set<string>([
   'россия', 'украина', 'крым',
 ]);
 
+// Cyrillic (RU/UA) conflict stems. RISK_KEYWORDS above is English-only, so
+// without these every Russian/Ukrainian-language milblogger post scores 0 and
+// would be wrongly dropped by the conflict filter. Substring-matched (lowercased)
+// so inflected/declined forms still hit (e.g. ракета/ракети/ракетний → 'ракет').
+const CONFLICT_TERMS_CYR = [
+  // NOTE: bare 'наступ' is deliberately excluded — it is the stem of "наступний/
+  // наступного" (next), a very common non-war word; use 'наступальн' (offensive)
+  // and 'контрнаступ' (counter-offensive) instead.
+  'ракет', 'удар', 'обстрел', 'обстріл', 'дрон', 'бпла', 'фпв', 'наступальн', 'фронт',
+  'зсу', 'всу', 'окуп', 'штурм', 'снаряд', 'шахед', 'герань', 'контрнаступ',
+  'мобіліз', 'мобилиз', 'війн', 'войн', 'бій', 'бой', 'взрыв', 'вибух', 'пво',
+  'ппо', 'хаймарс', 'авіаудар', 'авиаудар', 'оборон', 'загарбник', 'загиб',
+  'поранен', 'танк', 'артилер', 'артиллер', 'бойов', 'боев', 'атак',
+];
+
+// A post counts as war/conflict news if it carries any English risk keyword OR
+// any Cyrillic conflict stem. Keeps ALL conflicts (UA-RU, Middle East, …) and
+// drops non-war noise (channel ads, promos, sport, weather) in either language.
+function isConflict(text: string): boolean {
+  const lower = text.toLowerCase();
+  return RISK_KEYWORDS.some((kw) => lower.includes(kw)) ||
+    CONFLICT_TERMS_CYR.some((kw) => lower.includes(kw));
+}
+
 // Build a whole-word matcher for one gazetteer key. Unicode-aware boundaries so
 // we don't match "iran" inside another word, and multi-word keys ("nova
 // kakhovka", "red sea") match verbatim. Russian/Ukrainian place names inflect by
@@ -341,7 +365,11 @@ export async function GET() {
       }
     }
 
-    const newsItems = allArticles.map(article => {
+    // Keep only war/conflict items (bilingual). Drops channel ads, promos,
+    // sport, weather, and other off-topic posts that these OSINT feeds also carry.
+    const conflictArticles = allArticles.filter(a => isConflict(`${a.title} ${a.description}`));
+
+    const newsItems = conflictArticles.map(article => {
       const riskScore = scoreRisk(article.description || article.title);
       const id = crypto.createHash('md5').update((article.link || '') + (article.pubDate || '')).digest('hex');
       const coords = findCoords(article.description || article.title);

@@ -78,6 +78,11 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
   call another route internally via `new URL('/api/news', req.url)` to correlate them
   (here: FIRMS fires × curated sites + geolocated news → "thermal hit" AOIs). Cache the
   combined result. Distance checks use a cheap equirectangular approx (≈111.32 km/deg).
+  Note: `/api/news` returns a **war/conflict-filtered** set (`isConflict`) — bilingual
+  (English `RISK_KEYWORDS` + Cyrillic `CONFLICT_TERMS_CYR` stems) so RU/UA milblogger
+  posts survive; keeps all conflicts, drops channel ads/sport/weather. Cyrillic stems
+  must avoid common-word collisions (e.g. bare `наступ` matches "наступний"/next — use
+  `наступальн`/`контрнаступ`). This feeds IntelFeed, LiveAlerts, and the `news_intel` dots.
 - **Snapshot/diff over time** (see `frontline-changes`): a route may persist a daily
   snapshot to `~/.osiris-data/<name>.json` (OUTSIDE the repo/`.next`, so it survives
   rebuilds) and return deltas. `frontline-changes` fetches `/api/frontlines`, sums all
