@@ -43,3 +43,8 @@ scanner_backend_backup.js
 
 # Security - Prevent accidental manual leaks
 *Manual*.md
+
+# Claude Code local agent config + worktrees (machine-local, not committed)
+.claude/settings.json
+.claude/settings.local.json
+.claude/worktrees/
