@@ -78,6 +78,14 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
   call another route internally via `new URL('/api/news', req.url)` to correlate them
   (here: FIRMS fires × curated sites + geolocated news → "thermal hit" AOIs). Cache the
   combined result. Distance checks use a cheap equirectangular approx (≈111.32 km/deg).
+- **Snapshot/diff over time** (see `frontline-changes`): a route may persist a daily
+  snapshot to `~/.osiris-data/<name>.json` (OUTSIDE the repo/`.next`, so it survives
+  rebuilds) and return deltas. `frontline-changes` fetches `/api/frontlines`, sums all
+  DeepState polygon areas (equirectangular shoelace), writes/refreshes today's UTC
+  snapshot (capped at 120 days), and returns `delta_1d`/`delta_7d` (growth = RU
+  expansion). Deltas are `null` until a second UTC day is recorded. Rendered by
+  `src/components/FrontlineTracker.tsx` — a glass card shown bottom-right on desktop and
+  in the mobile layers drawer, gated on `activeLayers.frontlines`.
 
 ## Recon toolkit — `src/components/OsintPanel.tsx`
 - `TABS` array defines tools `{ id, label, icon, placeholder, color }`.

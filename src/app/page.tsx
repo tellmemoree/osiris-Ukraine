@@ -16,6 +16,7 @@ import ViewPresets from '@/components/ViewPresets';
 import KeyboardShortcuts from '@/components/KeyboardShortcuts';
 import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
+import FrontlineTracker from '@/components/FrontlineTracker';
 
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
@@ -1089,6 +1090,11 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <LayerPanel data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} />
+                      {activeLayers.frontlines && (
+                        <div className="mt-2">
+                          <FrontlineTracker isMobile />
+                        </div>
+                      )}
                       <div className="mt-2">
                         <ViewPresets onNavigate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMapView(v => ({ ...v, zoom })); setMobilePanel(null); }} />
                       </div>
@@ -1131,6 +1137,18 @@ export default function Dashboard() {
               <span className="text-[var(--gold-primary)] font-bold tabular-nums">{mapView.zoom.toFixed(1)}</span>
             </div>
           </div>
+        </motion.div>
+      )}
+
+      {/* ── Frontline change tracker (desktop) ── */}
+      {!isMobile && activeLayers.frontlines && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="absolute bottom-6 right-4 z-[205] pointer-events-none"
+        >
+          <FrontlineTracker />
         </motion.div>
       )}
 
