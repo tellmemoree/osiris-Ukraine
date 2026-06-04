@@ -5,8 +5,9 @@ Forward-looking feature candidates (distinct from the bug/review follow-ups in
 [`HANDOFF-recon-toolkit.md`](./HANDOFF-recon-toolkit.md)). Groomed 2026-06-03.
 
 **Effort key:** S = ~1 session · M = a few sessions · L = multi-session/needs design.
-**Branch workflow:** build on `osiris-Ukraine` (tinkering); `osiris-Ukraine-merged`
-is kept in lockstep (fast-forward) and both are pushed. See HANDOFF.md.
+**Branch workflow:** build features on `osiris-Ukraine`; integrate into
+`osiris-Ukraine-merged` (= Ukraine + master) by **merging, not fast-forward** — the
+branches diverge on purpose. Master syncs go INTO `-merged`. See ARCHITECTURE.md → Branch & dev workflow.
 
 > **Biggest single insight from grooming:** several backend routes are *built but
 > dark* — they have working `/api/*` handlers but **zero frontend references**:
