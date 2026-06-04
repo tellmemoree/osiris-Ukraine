@@ -50,6 +50,22 @@ const FALLBACK_FEEDS = {
 
 const RISK_KEYWORDS = ['war','missile','strike','attack','crisis','tension','military','conflict','defense','clash','nuclear','invasion','bomb','drone','weapon','sanctions','ceasefire','escalation', 'killed', 'destroyed', 'operation', 'casualty', 'frontline', 'threat','mobilization','counterattack','offensive','shelling','artillery','occupied','liberated','breakthrough','bridgehead','incursion','shahed','himars','kab','glide bomb'];
 
+// Cyrillic (RU/UA) conflict stems. RISK_KEYWORDS above is English-only, so
+// without these every Russian/Ukrainian-language milblogger post scores the
+// baseline 1 (no risk badge, never "critical") AND would be wrongly dropped by
+// the conflict filter. Substring-matched (lowercased) so inflected/declined
+// forms still hit (e.g. ракета/ракети/ракетний → 'ракет').
+// NOTE: bare 'наступ' is deliberately excluded — it is the stem of "наступний/
+// наступного" (next), a very common non-war word; use 'наступальн' (offensive)
+// and 'контрнаступ' (counter-offensive) instead.
+const CONFLICT_TERMS_CYR = [
+  'ракет', 'удар', 'обстрел', 'обстріл', 'дрон', 'бпла', 'фпв', 'наступальн', 'фронт',
+  'зсу', 'всу', 'окуп', 'штурм', 'снаряд', 'шахед', 'герань', 'контрнаступ',
+  'мобіліз', 'мобилиз', 'війн', 'войн', 'бій', 'бой', 'взрыв', 'вибух', 'пво',
+  'ппо', 'хаймарс', 'авіаудар', 'авиаудар', 'оборон', 'загарбник', 'загиб',
+  'поранен', 'танк', 'артилер', 'артиллер', 'бойов', 'боев', 'атак',
+];
+
 // NOTE: tuples are [lat, lng] here — the OPPOSITE of gdelt/route.ts's GEO_DICT.
 const KEYWORD_COORDS: Record<string, [number, number]> = {
   'ukraine': [49.487, 31.272], 'kyiv': [50.450, 30.523], 'russia': [61.524, 105.318],
@@ -141,7 +157,12 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
 function scoreRisk(text: string): number {
   const lower = text.toLowerCase();
   let score = 1;
+  // English keywords AND Cyrillic conflict stems both count — otherwise every
+  // RU/UA-language post floors at 1 and never earns a risk badge / "critical".
   for (const kw of RISK_KEYWORDS) {
+    if (lower.includes(kw)) score += 2;
+  }
+  for (const kw of CONFLICT_TERMS_CYR) {
     if (lower.includes(kw)) score += 2;
   }
   return Math.min(10, score);
@@ -155,21 +176,6 @@ const BROAD_KEYS = new Set<string>([
   'taiwan', 'united states', 'europe', 'middle east', 'crimea', 'transnistria',
   'россия', 'украина', 'крым',
 ]);
-
-// Cyrillic (RU/UA) conflict stems. RISK_KEYWORDS above is English-only, so
-// without these every Russian/Ukrainian-language milblogger post scores 0 and
-// would be wrongly dropped by the conflict filter. Substring-matched (lowercased)
-// so inflected/declined forms still hit (e.g. ракета/ракети/ракетний → 'ракет').
-const CONFLICT_TERMS_CYR = [
-  // NOTE: bare 'наступ' is deliberately excluded — it is the stem of "наступний/
-  // наступного" (next), a very common non-war word; use 'наступальн' (offensive)
-  // and 'контрнаступ' (counter-offensive) instead.
-  'ракет', 'удар', 'обстрел', 'обстріл', 'дрон', 'бпла', 'фпв', 'наступальн', 'фронт',
-  'зсу', 'всу', 'окуп', 'штурм', 'снаряд', 'шахед', 'герань', 'контрнаступ',
-  'мобіліз', 'мобилиз', 'війн', 'войн', 'бій', 'бой', 'взрыв', 'вибух', 'пво',
-  'ппо', 'хаймарс', 'авіаудар', 'авиаудар', 'оборон', 'загарбник', 'загиб',
-  'поранен', 'танк', 'артилер', 'артиллер', 'бойов', 'боев', 'атак',
-];
 
 // A post counts as war/conflict news if it carries any English risk keyword OR
 // any Cyrillic conflict stem. Keeps ALL conflicts (UA-RU, Middle East, …) and
