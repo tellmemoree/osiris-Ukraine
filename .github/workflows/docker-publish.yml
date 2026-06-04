@@ -1,0 +1,97 @@
+name: Docker Publish
+
+# Builds the standalone production image (Dockerfile) and publishes it to the
+# GitHub Container Registry. `osiris-Ukraine-merged` is the deploy branch
+# (carries Ukraine features + master — see ARCHITECTURE.md → Branch & dev workflow).
+# Pull requests build the image but do NOT push (validation only).
+
+on:
+  push:
+    branches: [osiris-Ukraine-merged]
+    tags: ["v*"]
+  pull_request:
+    branches: [osiris-Ukraine-merged]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    name: build · smoke-test · push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        # Skip login on PRs from forks (no package-write secret available).
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags & labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'osiris-Ukraine-merged') }}
+
+      # Build once to a local image so we can smoke-test before pushing.
+      - name: Build image (load locally)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: osiris:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test /api/health
+        run: |
+          docker run -d --name osiris-smoke -p 3000:3000 osiris:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/api/health | grep -q '"status":"operational"'; then
+              echo "✅ health check passed"
+              docker rm -f osiris-smoke
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "❌ health check failed — container logs:"
+          docker logs osiris-smoke
+          docker rm -f osiris-smoke
+          exit 1
+
+      # Re-uses the build cache from above; only pushes on non-PR events.
+      - name: Build & push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

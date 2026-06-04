@@ -1,0 +1,33 @@
+version: 2
+
+updates:
+  # npm dependencies — group the noisy minor/patch bumps into one PR/week.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    target-branch: osiris-Ukraine-merged
+    labels:
+      - dependencies
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Next.js is pinned (16.2.6) — this repo tracks a forked Next with
+      # breaking changes (see AGENTS.md); bump deliberately, not via bot.
+      - dependency-name: next
+        update-types: ["version-update:semver-major"]
+
+  # Keep GitHub Actions pinned to current majors.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - ci
+      - dependencies

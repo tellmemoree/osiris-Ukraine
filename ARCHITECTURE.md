@@ -147,6 +147,22 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
   disturb :3001. (Note: `next dev` writes into the shared `.next`, so rebuild before
   relying on :3001 again.)
 
+## CI/CD (`.github/`)
+- **`workflows/ci.yml`** — on push to `master`/`osiris-Ukraine`/`osiris-Ukraine-merged`
+  and all PRs: `npm ci` → `tsc --noEmit` (blocking) → `npm run lint` (advisory,
+  `continue-on-error` — inherited `no-explicit-any` debt is WON'T FIX) → `npm run build`
+  (blocking). Node 22, npm cache.
+- **`workflows/docker-publish.yml`** — on push to the deploy branch
+  `osiris-Ukraine-merged` (and `v*` tags): builds the standalone `Dockerfile`,
+  smoke-tests `/api/health` on the local image, then pushes to GHCR
+  (`ghcr.io/<repo>`). PRs build + smoke-test but do NOT push. `latest` tag tracks
+  `osiris-Ukraine-merged`. Uses GHA build cache.
+- **`workflows/codeql.yml`** — JS/TS static security analysis (push/PR to
+  `master`/`osiris-Ukraine-merged` + weekly cron). Fits the SSRF-guarded, IP/host-input
+  surface (see SECURITY.md).
+- **`dependabot.yml`** — weekly npm (grouped minor/patch; `next` major ignored — pinned
+  fork) + github-actions updates, targeting `osiris-Ukraine-merged`.
+
 ## Gotchas / known-dead upstreams (verify before trusting a "dark" route)
 - A route returning empty often means its UPSTREAM died, not that it's un-wired:
   - **DeepState** (`frontlines`) nests features under `.map.features`, not `.features`.
