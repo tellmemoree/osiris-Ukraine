@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import { fetchDeepState, extractFeatures } from '@/lib/deepstate';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,11 +79,10 @@ function snapBefore(series: Snap[], cutoffDate: string): Snap | null {
   return pick ?? series[0] ?? null;
 }
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    const res = await fetch(new URL('/api/frontlines', req.url), { signal: AbortSignal.timeout(15000) });
-    const data = res.ok ? await res.json() : null;
-    const features: { geometry?: { type?: string; coordinates?: unknown } }[] = data?.frontlines?.features || [];
+    const deepStateData = await fetchDeepState();
+    const features = extractFeatures(deepStateData) as { geometry?: { type?: string; coordinates?: unknown } }[];
     if (!features.length) {
       return NextResponse.json({ error: 'No frontline data available' }, { status: 502 });
     }
