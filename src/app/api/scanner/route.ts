@@ -150,13 +150,15 @@ function probePort(host: string, port: number, ms = 2500): Promise<boolean> {
 }
 
 async function scanQuickNative(hostname: string) {
+  // Resolve to IP first — probePort connects to the IP, never the raw user-supplied hostname
+  const ip = await resolveIp(hostname);
   const t0 = Date.now();
   const open: { port: number; state: string; service: string }[] = [];
   const BATCH = 11;
   for (let i = 0; i < COMMON_PORTS.length; i += BATCH) {
     const rows = await Promise.all(
       COMMON_PORTS.slice(i, i + BATCH).map(async ([port, service]) => ({
-        port, service, state: (await probePort(hostname, port)) ? 'open' : 'closed',
+        port, service, state: (await probePort(ip, port)) ? 'open' : 'closed',
       }))
     );
     open.push(...rows.filter(r => r.state === 'open'));
@@ -199,12 +201,21 @@ async function scanSsl(target: string) {
 }
 
 async function scanSslNative(hostname: string): Promise<Record<string, unknown>> {
+  // rejectUnauthorized:false is deliberate — this function's purpose is to INSPECT
+  // certificates on arbitrary hosts, including expired, self-signed, and mismatched ones.
+  // Authorization error state is preserved and returned in the `authorized` field so the
+  // caller can still distinguish a valid cert from an invalid one.
+  const tlsOpts: tls.ConnectionOptions = {
+    host: hostname, port: 443, servername: hostname,
+    rejectUnauthorized: false, // required to read certs on invalid/expired hosts
+  };
   return new Promise((resolve, reject) => {
-    const sock = tls.connect({ host: hostname, port: 443, servername: hostname, rejectUnauthorized: false }, () => {
+    const sock = tls.connect(tlsOpts, () => {
       try {
         const cert = sock.getPeerCertificate(true) as tls.DetailedPeerCertificate & { valid_from?: string; valid_to?: string };
         const protocol = sock.getProtocol() ?? 'unknown';
         const cipher = sock.getCipher() as { name?: string; version?: string; bits?: number } | null;
+        const authorized = !sock.authorizationError;
         sock.end();
         const sans = ((cert as any).subjectaltname ?? '')
           .split(', ').filter(Boolean)
@@ -212,7 +223,7 @@ async function scanSslNative(hostname: string): Promise<Record<string, unknown>>
         const subj = cert.subject as Record<string, string> | null ?? {};
         const iss = cert.issuer as Record<string, string> | null ?? {};
         resolve({
-          host: hostname, valid: !sock.authorizationError, protocol,
+          host: hostname, authorized, valid: authorized, protocol,
           cipher: cipher?.name, cipher_bits: cipher?.bits,
           subject: subj.CN ?? JSON.stringify(subj),
           issuer: iss.O ?? iss.CN ?? JSON.stringify(iss),
@@ -248,12 +259,12 @@ async function scanHeaders(target: string) {
     };
   }
 
-  // Fallback: live HTTP fetch
-  return scanHeadersNative(target);
+  // Fallback: live HTTP fetch — use validated hostname, not raw target
+  return scanHeadersNative(hostname);
 }
 
-async function scanHeadersNative(target: string) {
-  const url = /^https?:\/\//i.test(target) ? target : `https://${target}`;
+async function scanHeadersNative(hostname: string) {
+  const url = `https://${hostname}`;
   let res: Response;
   try {
     res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(8000), redirect: 'follow' });
@@ -275,10 +286,10 @@ async function scanHeadersNative(target: string) {
 const TECH_SIGS: [string, string, string][] = [
   ['WordPress','CMS','wp-content|wp-includes|wordpress'],
   ['Shopify','E-commerce','shopify|myshopify\\.com'],
-  ['Wix','CMS','wix\\.com|wixsite\\.com'],
+  ['Wix','CMS','\\bwix\\.com\\b|\\bwixsite\\.com\\b'],
   ['Squarespace','CMS','squarespace\\.com|Static\\.SQUARESPACE'],
   ['Webflow','CMS','webflow\\.com|data-wf-site'],
-  ['Ghost','CMS','ghost\\.io|content\\.ghost\\.org'],
+  ['Ghost','CMS','\\bghost\\.io\\b|\\bcontent\\.ghost\\.org\\b'],
   ['React','JavaScript','react-dom|__REACT|data-reactroot'],
   ['Vue.js','JavaScript','__vue__|data-v-app'],
   ['Angular','JavaScript','ng-version|ng-app'],
@@ -322,9 +333,9 @@ async function scanTech(target: string) {
     }
   }
 
-  // Augment / fallback with live page analysis
+  // Augment / fallback with live page analysis — use validated hostname, not raw target
   try {
-    const url = /^https?:\/\//i.test(target) ? target : `https://${hostname}`;
+    const url = `https://${hostname}`;
     const res = await fetch(url, {
       signal: AbortSignal.timeout(10000), redirect: 'follow',
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OSIRIS-OSINT/1.0)' },
