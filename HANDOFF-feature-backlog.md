@@ -103,6 +103,20 @@ STRIKE_TERMS filter), and every place an article names is checked (news route no
 FRP-based **confidence** (low/med/high); low-confidence hits render without a glow to
 de-emphasize likely false positives. **Still not done:** raising hits into `LiveAlerts`.
 
+### 2.3b — Strike / advance classifier refinement  ·  Effort: S
+Thermal AOI and Captures layers are **hidden from the panel** (2026-06-05) pending
+classifier tuning. Too many false positives from `STRIKE_TERMS` / `ADVANCE_TERMS` /
+`isTerritorialAdvance()`. User will hand-pick example articles (both strike and
+capture/advance) to align on what counts as each.
+
+- **Touch points:**
+  - `src/app/api/strategic-thermal/route.ts` — `STRIKE_TERMS`, `ADVANCE_TERMS`,
+    `isStrikeRelated()`, `isTerritorialAdvance()`
+  - `src/app/api/captures/route.ts` — capture-detection logic (TBD)
+  - `src/components/LayerPanel.tsx` — re-add the two commented-out entries when ready
+- **To restore:** un-comment the two lines in `LAYER_GROUPS` (UA WAR section) in
+  `LayerPanel.tsx`; routes and map rendering are fully intact.
+
 ### 2.4 — Event timeline / playback  ·  Effort: L
 A time-scrubber to replay the last 24–72h of air raids, KAB threats, strikes, and
 geolocated news.
