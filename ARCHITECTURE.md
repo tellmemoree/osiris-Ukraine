@@ -190,9 +190,6 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
   smoke-tests `/api/health` on the local image, then pushes to GHCR
   (`ghcr.io/<repo>`). PRs build + smoke-test but do NOT push. `latest` tag tracks
   `osiris-Ukraine-merged`. Uses GHA build cache.
-- **`workflows/codeql.yml`** — JS/TS static security analysis (push/PR to
-  `master`/`osiris-Ukraine-merged` + weekly cron). Fits the SSRF-guarded, IP/host-input
-  surface (see SECURITY.md).
 - **`dependabot.yml`** — weekly npm (grouped minor/patch; `next` major ignored — pinned
   fork) + github-actions updates, targeting `osiris-Ukraine-merged`.
 
