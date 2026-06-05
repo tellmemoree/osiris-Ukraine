@@ -157,11 +157,13 @@ function isTerritorialAdvance(item: NewsItem): boolean {
 
 // Confidence from fire intensity + count. FRP (fire radiative power, MW) is the best single
 // discriminator: a struck depot/refinery burns hot (high FRP); a faint farm hotspot is low.
+// 'news' = no fire detected — shows as an unverified dim marker (no glow).
 function confidenceOf(fireCount: number, maxFrp: number): 'low' | 'med' | 'high' {
   if (maxFrp >= 20 || fireCount >= 4) return 'high';
   if (maxFrp >= 5 || fireCount >= 2) return 'med';
   return 'low';
 }
+type Confidence = 'low' | 'med' | 'high' | 'news';
 
 // Fires within `radiusKm` of (lat,lng) → aggregate hit stats.
 function fireHit(fires: Fire[], lat: number, lng: number, radiusKm: number) {
@@ -203,8 +205,8 @@ export async function GET(req: Request) {
     type Contributor = { source?: string; side?: string; link?: string; title?: string };
     type NewsAoi = {
       id: string; category: 'news'; name: string; source?: string; side?: string; link?: string;
-      lat: number; lng: number; hit: true; fireCount: number; maxFrp: number; latest: string;
-      confidence: 'low' | 'med' | 'high'; sources: Contributor[];
+      lat: number; lng: number; hit: boolean; fireCount: number; maxFrp: number; latest: string | null;
+      confidence: Confidence; sources: Contributor[];
     };
     const newsByCell = new Map<string, NewsAoi>();
     for (const n of news) {
@@ -219,10 +221,17 @@ export async function GET(req: Request) {
         if (seenThisArticle.has(key)) continue; // one article contributes one marker per place
         seenThisArticle.add(key);
         const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
-        if (!h) continue;
         const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120) };
         const existing = newsByCell.get(key);
         if (existing) {
+          // Upgrade news-only → fire-confirmed if this pass has a hit
+          if (h && !existing.hit) {
+            existing.hit = true;
+            existing.fireCount = h.count;
+            existing.maxFrp = h.maxFrp;
+            existing.latest = h.latest;
+            existing.confidence = confidenceOf(h.count, h.maxFrp);
+          }
           if (!existing.sources.some(s => s.source === contributor.source && s.title === contributor.title)) {
             existing.sources.push(contributor);
           }
@@ -231,8 +240,9 @@ export async function GET(req: Request) {
         newsByCell.set(key, {
           id: `news-${newsByCell.size + 1}`, category: 'news', name: contributor.title || 'News report',
           source: n.source, side: n.side, link: n.link, lat, lng,
-          hit: true, fireCount: h.count, maxFrp: h.maxFrp, latest: h.latest,
-          confidence: confidenceOf(h.count, h.maxFrp), sources: [contributor],
+          hit: !!h, fireCount: h?.count ?? 0, maxFrp: h?.maxFrp ?? 0, latest: h?.latest ?? null,
+          confidence: h ? confidenceOf(h.count, h.maxFrp) : 'news',
+          sources: [contributor],
         });
       }
     }

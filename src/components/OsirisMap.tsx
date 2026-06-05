@@ -1015,7 +1015,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       if (!p) return;
       const coords = e.features[0].geometry.coordinates.slice();
       const col = { airfield: '#FF3D3D', rail: '#FF9500', logistics: '#FFD500', oil: '#BA68C8', news: '#00E5FF' }[p.category as string] || '#FF5722';
-      const confColor = { high: '#FF3D3D', med: '#FF9500', low: '#8A8880' }[p.confidence as string] || '#8A8880';
+      const confColor = { high: '#FF3D3D', med: '#FF9500', low: '#8A8880', news: '#5C7AEA' }[p.confidence as string] || '#8A8880';
       const hitLine = p.hit
         ? `<div style="color:#FF6B00;font-size:9px;">🔥 ${p.fireCount} FIRMS fire(s) within range · max FRP ${p.maxFrp} · ${p.latest || ''}</div>
            <div style="font-size:9px;">confidence: <span style="color:${confColor};font-weight:700;">${String(p.confidence || '—').toUpperCase()}</span></div>`

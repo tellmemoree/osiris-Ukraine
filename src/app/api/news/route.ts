@@ -193,6 +193,14 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'toropets': [56.500, 31.633], 'торопец': [56.500, 31.633], 'торопц': [56.500, 31.633],
   'tikhoretsk': [45.856, 40.126], 'тихорецк': [45.856, 40.126],
   'dyagilevo': [54.643, 39.570], 'olenya': [68.152, 33.464],
+  // Maritime / sea areas (ships in Black/Azov Sea are frequent strike targets)
+  'black sea': [43.300, 33.800], 'чорне море': [43.300, 33.800], 'чёрное море': [43.300, 33.800],
+  'azov sea': [46.200, 37.500], 'azov': [46.200, 37.500],
+  'азовське море': [46.200, 37.500], 'азовское море': [46.200, 37.500],
+  // Romanian port — Ukrainian drone/ship incidents in Constanta area
+  'constanta': [44.175, 28.638], 'констанц': [44.175, 28.638],
+  // Occupied ports not yet in gazetteer
+  'berdiansk': [46.756, 36.790], 'бердіянськ': [46.756, 36.790],
 };
 
 function scoreRisk(text: string): number {
@@ -216,6 +224,7 @@ const BROAD_KEYS = new Set<string>([
   'ukraine', 'russia', 'israel', 'iran', 'lebanon', 'syria', 'yemen', 'china',
   'taiwan', 'united states', 'europe', 'middle east', 'crimea', 'transnistria',
   'россия', 'украина', 'крым',
+  'black sea', 'azov sea', 'azov', 'чорне море', 'чёрное море', 'азовське море', 'азовское море',
 ]);
 
 // A post counts as war/conflict news if it carries any English risk keyword OR
@@ -235,7 +244,9 @@ function isConflict(text: string): boolean {
 function keywordRegex(keyword: string): RegExp {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const isCyrillic = /[Ѐ-ӿ]/.test(keyword);
-  const tail = isCyrillic ? '\\p{L}{0,4}(?![\\p{L}\\p{N}])' : '(?![\\p{L}\\p{N}])';
+  // Ukrainian/Russian place adjectives can have 4–6 char endings: -ський/-ської/-ського.
+  // Latin stays strict (no case-suffix scanning needed).
+  const tail = isCyrillic ? '\\p{L}{0,6}(?![\\p{L}\\p{N}])' : '(?![\\p{L}\\p{N}])';
   return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}${tail}`, 'iu');
 }
 
@@ -417,9 +428,12 @@ export async function GET() {
     const conflictArticles = allArticles.filter(a => isConflict(`${a.title} ${a.description}`));
 
     const newsItems = conflictArticles.map(article => {
-      const riskScore = scoreRisk(article.description || article.title);
+      // Concatenate title + description so place names appearing only in the
+      // headline are not missed when description is present.
+      const searchText = `${article.title} ${article.description || ''}`;
+      const riskScore = scoreRisk(searchText);
       const id = crypto.createHash('md5').update((article.link || '') + (article.pubDate || '')).digest('hex');
-      const coords = findCoords(article.description || article.title);
+      const coords = findCoords(searchText);
       const placed = coords ? jitterAround(coords, id) : null;
 
       return {
@@ -433,7 +447,7 @@ export async function GET() {
         risk_score: riskScore,
         coords: placed,
         coords_default: !coords,
-        places: findAllCoords(article.description || article.title),
+        places: findAllCoords(searchText),
         machine_assessment: riskScore >= 8 ? "AI Analysis indicates elevated tactical priority based on OSINT stream patterns." : null,
       };
     });
