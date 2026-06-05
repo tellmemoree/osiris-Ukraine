@@ -273,12 +273,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
       // Strategic Thermal AOIs — FIRMS fires × airfields/rail/logistics/news.
       // Glow only on hits; dots colored by category and enlarged when a fire is near.
+      // Thermal AOI color: news-type AOIs use `side` (ua=blue, ru=red); site AOIs use category.
+      const thermalColor = ['case',
+        ['all', ['==', ['get', 'category'], 'news'], ['==', ['get', 'side'], 'ua']], '#2979FF',
+        ['all', ['==', ['get', 'category'], 'news'], ['==', ['get', 'side'], 'ru']], '#FF3D3D',
+        ['match', ['get', 'category'], 'airfield', '#FF3D3D', 'rail', '#FF9500', 'logistics', '#FFD500', 'oil', '#BA68C8', '#00E5FF'],
+      ] as maplibregl.ExpressionSpecification;
       map.addLayer({ id: 'thermal-glow', type: 'circle', source: 'thermal-aoi',
         filter: ['all', ['==', ['get', 'hit'], true], ['!=', ['get', 'confidence'], 'low']],
-        paint: { 'circle-radius': 18, 'circle-color': ['match', ['get', 'category'], 'airfield', '#FF3D3D', 'rail', '#FF9500', 'logistics', '#FFD500', 'oil', '#BA68C8', 'news', '#00E5FF', '#FF5722'], 'circle-opacity': 0.18, 'circle-blur': 1 }});
+        paint: { 'circle-radius': 18, 'circle-color': thermalColor, 'circle-opacity': 0.18, 'circle-blur': 1 }});
       map.addLayer({ id: 'thermal-dots', type: 'circle', source: 'thermal-aoi', paint: {
         'circle-radius': ['case', ['get', 'hit'], 7, 4],
-        'circle-color': ['match', ['get', 'category'], 'airfield', '#FF3D3D', 'rail', '#FF9500', 'logistics', '#FFD500', 'oil', '#BA68C8', 'news', '#00E5FF', '#FF5722'],
+        'circle-color': thermalColor,
         'circle-opacity': ['case', ['get', 'hit'], 0.95, 0.5],
         'circle-stroke-width': ['case', ['get', 'hit'], 1.5, 0.5], 'circle-stroke-color': 'rgba(0,0,0,0.6)' }});
       map.addLayer({ id: 'thermal-label', type: 'symbol', source: 'thermal-aoi', minzoom: 4,
