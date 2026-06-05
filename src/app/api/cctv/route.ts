@@ -298,17 +298,164 @@ async function fetchAsiaCameras(): Promise<Camera[]> {
   return cams;
 }
 
+// Compact city→coords lookup for insecam and other sources that only provide city names.
+const RU_CITY_COORDS: Record<string, [number, number]> = {
+  'moscow': [55.7558, 37.6173],
+  'москва': [55.7558, 37.6173],
+  'saint petersburg': [59.9311, 30.3609],
+  'st. petersburg': [59.9311, 30.3609],
+  'st petersburg': [59.9311, 30.3609],
+  'санкт-петербург': [59.9311, 30.3609],
+  'novosibirsk': [54.9893, 82.9182],
+  'новосибирск': [54.9893, 82.9182],
+  'yekaterinburg': [56.8389, 60.6057],
+  'екатеринбург': [56.8389, 60.6057],
+  'kazan': [55.7963, 49.1088],
+  'казань': [55.7963, 49.1088],
+  'nizhny novgorod': [56.2965, 43.9361],
+  'нижний новгород': [56.2965, 43.9361],
+  'chelyabinsk': [55.1644, 61.4368],
+  'челябинск': [55.1644, 61.4368],
+  'samara': [53.1959, 50.1801],
+  'самара': [53.1959, 50.1801],
+  'ufa': [54.7388, 55.9721],
+  'уфа': [54.7388, 55.9721],
+  'rostov-on-don': [47.2357, 39.7015],
+  'rostov': [47.2357, 39.7015],
+  'ростов-на-дону': [47.2357, 39.7015],
+  'omsk': [54.9885, 73.3242],
+  'омск': [54.9885, 73.3242],
+  'krasnoyarsk': [56.0184, 92.8672],
+  'красноярск': [56.0184, 92.8672],
+  'voronezh': [51.6720, 39.1843],
+  'воронеж': [51.6720, 39.1843],
+  'perm': [58.0105, 56.2502],
+  'пермь': [58.0105, 56.2502],
+  'volgograd': [48.7080, 44.5133],
+  'волгоград': [48.7080, 44.5133],
+  'krasnodar': [45.0360, 38.9754],
+  'краснодар': [45.0360, 38.9754],
+  'saratov': [51.5336, 46.0343],
+  'саратов': [51.5336, 46.0343],
+  'tyumen': [57.1530, 68.9685],
+  'тюмень': [57.1530, 68.9685],
+  'izhevsk': [56.8527, 53.2114],
+  'ижевск': [56.8527, 53.2114],
+  'ulyanovsk': [54.3282, 48.3866],
+  'ульяновск': [54.3282, 48.3866],
+  'vladivostok': [43.1155, 131.8855],
+  'владивосток': [43.1155, 131.8855],
+  'barnaul': [53.3606, 83.7636],
+  'барнаул': [53.3606, 83.7636],
+  'irkutsk': [52.2978, 104.2964],
+  'иркутск': [52.2978, 104.2964],
+  'khabarovsk': [48.4827, 135.0838],
+  'хабаровск': [48.4827, 135.0838],
+  'belgorod': [50.5957, 36.5879],
+  'белгород': [50.5957, 36.5879],
+  'kursk': [51.7373, 36.1874],
+  'курск': [51.7373, 36.1874],
+  'novorossiysk': [44.7236, 37.7700],
+  'новороссийск': [44.7236, 37.7700],
+  'sevastopol': [44.6166, 33.5254],
+  'севастополь': [44.6166, 33.5254],
+  'simferopol': [44.9521, 34.1024],
+  'симферополь': [44.9521, 34.1024],
+  'sochi': [43.5855, 39.7231],
+  'сочи': [43.5855, 39.7231],
+  'stavropol': [45.0440, 41.9690],
+  'ставрополь': [45.0440, 41.9690],
+  'bryansk': [53.2521, 34.3717],
+  'брянск': [53.2521, 34.3717],
+  'engels': [51.4985, 46.1263],
+  'энгельс': [51.4985, 46.1263],
+};
+
+// Windy webcam bbox fetcher — returns active webcams for the given bounding box.
+// Gated on WINDY_WEBCAM_KEY (free tier = 500 req/day, register at api.windy.com).
+async function fetchWindyCameras(
+  minLat: number, minLon: number, maxLat: number, maxLon: number,
+  regionPrefix: string,
+): Promise<Camera[]> {
+  const key = process.env.WINDY_WEBCAM_KEY;
+  if (!key) return [];
+  try {
+    const url = `https://api.windy.com/api/webcams/v2/list/bbox/${minLat},${minLon},${maxLat},${maxLon}?lang=en&show=webcams:location,image,player&key=${key}`;
+    const res = await stealthFetch(url, { signal: AbortSignal.timeout(12000) });
+    if (!res.ok) return [];
+    const data = await res.json() as {
+      result?: {
+        webcams?: {
+          id: string; status: string; title?: string;
+          location?: { city?: string; country?: string; latitude?: number; longitude?: number };
+          image?: { current?: { preview?: string } };
+          player?: { day?: { embed?: string } };
+        }[];
+      };
+    };
+    return (data?.result?.webcams || [])
+      .filter(w => w.status === 'active' && w.location?.latitude && w.location?.longitude)
+      .map(w => {
+        const embedUrl = w.player?.day?.embed;
+        return {
+          id: `windy-${regionPrefix}-${w.id}`,
+          lat: w.location!.latitude!,
+          lng: w.location!.longitude!,
+          name: w.title || `${w.location?.city ?? ''} Webcam`,
+          city: w.location?.city ?? '',
+          country: w.location?.country ?? '',
+          feed_url: w.image?.current?.preview || undefined,
+          stream_url: embedUrl || undefined,
+          stream_type: embedUrl ? ('iframe' as const) : ('jpg' as const),
+          source: 'Windy',
+        };
+      });
+  } catch { return []; }
+}
+
+// Parse insecam.org country page HTML into Camera entries.
+// Each camera block contains: <img id="imageN" src="http://ip:port/...">
+// and a nearby city label. Stream URLs are MJPEG endpoints served directly by the device.
+// Streams require a non-blocked egress — set RU_PROXY_URL to reach RU-geofenced IPs.
+function parseInsecamHtml(html: string, country: string, limit = 24): Camera[] {
+  const cams: Camera[] = [];
+  // Match camera blocks: img with id="imageN" and a src pointing to a device IP
+  const imgRe = /<img[^>]+id="image(\d+)"[^>]+src="(https?:\/\/[^"]+)"[^>]*>/gi;
+  // City label appears nearby as: <p ...>CityName</p> or >CityName<
+  const cityRe = /<p[^>]*>\s*([A-Za-zА-Яа-яёЁ][A-Za-zА-Яа-яёЁ\s\-]{1,40})\s*<\/p>/i;
+
+  let match: RegExpExecArray | null;
+  while ((match = imgRe.exec(html)) !== null && cams.length < limit) {
+    const [, id, src] = match;
+    // Look for city name in surrounding 800 chars
+    const window = html.slice(Math.max(0, match.index - 200), match.index + 600);
+    const cityMatch = cityRe.exec(window);
+    const cityRaw = (cityMatch?.[1] ?? '').trim();
+    const cityKey = cityRaw.toLowerCase();
+    const coords = RU_CITY_COORDS[cityKey] ?? null;
+    if (!coords) continue; // skip if we can't place it on the map
+
+    cams.push({
+      id: `insecam-${country.toLowerCase()}-${id}`,
+      lat: coords[0],
+      lng: coords[1],
+      name: `${cityRaw} — exposed cam`,
+      city: cityRaw,
+      country,
+      stream_url: src,
+      stream_type: 'mjpeg',
+      source: 'insecam',
+    });
+  }
+  return cams;
+}
+
 // Russia / Ukraine public webcams.
 //
-// Unlike the TfL/WSDOT/Caltrans gov APIs above, there is no keyless public RU/UA
-// traffic-cam JSON API that resolves reliably (regional portals are auth-gated or
-// geo-blocked). So these are curated pins to intentionally-public webcam
-// DIRECTORIES whose URLs are verified-reachable (HTTP 200) — each marker opens the
-// public cams for that city/country. To add direct image/MJPEG feeds or
-// exposed-camera discovery, see docs/CAMERA_SOURCES.md.
-//
-// insecam.org scraping (task 3.1): set RU_PROXY_URL to enable the probe;
-// parsing the discovered MJPEG feeds is wired below and marked TODO.
+// Base: curated pins to intentionally-public webcam directories.
+// Extended (when keys/proxy are set):
+//   WINDY_WEBCAM_KEY  → live Windy bbox fetch (hundreds of geocoded cams)
+//   RU_PROXY_URL      → insecam.org MJPEG scrape (exposed devices, stream_type=mjpeg)
 async function fetchRussiaCameras(): Promise<Camera[]> {
   const RU_DIR = 'https://www.skylinewebcams.com/en/webcam/russia.html';
   const cams: Camera[] = [
@@ -321,8 +468,11 @@ async function fetchRussiaCameras(): Promise<Camera[]> {
     { id: 'ru-cam-vladivostok', lat: 43.1155, lng: 131.8855, name: 'Vladivostok — public webcam directory', city: 'Vladivostok', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
   ];
 
-  // insecam.org RU probe — only attempted when proxy is configured (feeds need RU IP to stream).
-  // TODO(3.1): parse discovered <img id="imageN" src="http://ip:port/..."> rows + geo coords
+  // Windy webcams — live, geocoded, hundreds of RU cams when key is set
+  const windyCams = await fetchWindyCameras(41, 19, 82, 190, 'ru');
+  cams.push(...windyCams);
+
+  // insecam.org RU probe — only when proxy is configured (MJPEG streams need RU egress IP)
   if (process.env.RU_PROXY_URL) {
     try {
       const res = await ruFetch('http://www.insecam.org/en/bycountry/RU/', {
@@ -330,8 +480,8 @@ async function fetchRussiaCameras(): Promise<Camera[]> {
         signal: AbortSignal.timeout(8000),
       });
       if (res.ok) {
-        // Parsing wired in task 3.1 (CCTV expansion — insecam HTML scraper)
-        void await res.text();
+        const html = await res.text();
+        cams.push(...parseInsecamHtml(html, 'Russia'));
       }
     } catch { /* silent — static list always applies */ }
   }
@@ -341,13 +491,19 @@ async function fetchRussiaCameras(): Promise<Camera[]> {
 
 async function fetchUkraineCameras(): Promise<Camera[]> {
   const UA_DIR = 'https://www.skylinewebcams.com/en/webcam/ukraine.html';
-  return [
+  const cams: Camera[] = [
     { id: 'ua-cam-kyiv', lat: 50.4501, lng: 30.5234, name: 'Kyiv — live public cams', city: 'Kyiv', country: 'Ukraine', feed_url: 'https://www.earthcam.com/world/ukraine/kiev/', source: 'EarthCam' },
     { id: 'ua-cam-lviv', lat: 49.8397, lng: 24.0297, name: 'Lviv — public webcam directory', city: 'Lviv', country: 'Ukraine', feed_url: UA_DIR, source: 'Skyline (UA)' },
     { id: 'ua-cam-odesa', lat: 46.4825, lng: 30.7233, name: 'Odesa — public webcam directory', city: 'Odesa', country: 'Ukraine', feed_url: UA_DIR, source: 'Skyline (UA)' },
     { id: 'ua-cam-kharkiv', lat: 49.9935, lng: 36.2304, name: 'Kharkiv — public webcam directory', city: 'Kharkiv', country: 'Ukraine', feed_url: UA_DIR, source: 'Skyline (UA)' },
     { id: 'ua-cam-dnipro', lat: 48.4647, lng: 35.0462, name: 'Dnipro — public webcam directory', city: 'Dnipro', country: 'Ukraine', feed_url: UA_DIR, source: 'Skyline (UA)' },
   ];
+
+  // Windy webcams for Ukraine
+  const windyCams = await fetchWindyCameras(44, 21.5, 53, 41, 'ua');
+  cams.push(...windyCams);
+
+  return cams;
 }
 
 

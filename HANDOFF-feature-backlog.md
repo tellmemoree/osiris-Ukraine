@@ -113,16 +113,22 @@ geolocated news.
 
 ## Direction 3 — Recon / OSINT expansion (continues current thread)
 
-### 3.1 — Camera expansion  ·  Effort: M
-From HANDOFF-recon-toolkit.md Part 2:
-- **Windy webcam API** — bbox fetcher in `src/app/api/cctv/route.ts` gated on
-  `WINDY_WEBCAM_KEY` (free 500 req/day). RU bbox `41–82 / 19–190`.
-- **insecam.org** — scrape RU/UA exposed-cam MJPEG URLs; add `stream_type: 'mjpeg'`
-  support in the camera viewer (currently iframe/feed_url + the new Middle East
-  `stream_type: 'iframe'`).
-- **RU YouTube live channels** — add to `BUILTIN_FEEDS` in `LiveAlerts.tsx` with a
-  `category: 'propaganda'` flag for state TV.
-- **Deps:** Windy key; some RU portals need the proxy (3.2).
+### 3.1 — Camera expansion  ·  ✅ DONE (2026-06-05)
+**Shipped:**
+- **`stream_type: 'mjpeg'`** added to `CctvStreamType` (`types.ts`) and rendered
+  as a native `<img src={stream_url}>` in `CameraViewer.tsx` (browsers handle multipart
+  JPEG natively; shows "LIVE MJPEG" indicator).
+- **Windy webcam bbox fetcher** (`fetchWindyCameras()`) added to `cctv/route.ts`,
+  gated on `WINDY_WEBCAM_KEY` (free, 500 req/day). RU bbox 41–82/19–190 wired into
+  `fetchRussiaCameras()`; UA bbox 44–53/21.5–41 wired into `fetchUkraineCameras()`.
+  Returns active webcams with geocoords, snapshot previews, and player embeds (iframe).
+- **insecam.org MJPEG scraper** (`parseInsecamHtml()`) implemented: parses
+  `<img id="imageN" src="http://ip:port/...">` entries, resolves city names via a
+  54-city RU lookup table (`RU_CITY_COORDS`), emits `stream_type: 'mjpeg'` camera
+  entries. Only triggered when `RU_PROXY_URL` is set (streams need RU egress IP).
+- **RU YouTube TV channels NOT added** — user decided against (pure propaganda, no intel value).
+- **`.env.example`** updated with `WINDY_WEBCAM_KEY` comment.
+- **Deps:** Windy key (`WINDY_WEBCAM_KEY`); insecam scrape needs `RU_PROXY_URL` (3.2).
 
 ### 3.2 — ruFetch() proxy scaffold (#7b)  ·  ✅ DONE (2026-06-05)
 **Shipped:** `src/lib/ru-fetch.ts` — `ruFetch()` wraps undici's `ProxyAgent`, singleton
