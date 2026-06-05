@@ -56,9 +56,13 @@ jobs:
         run: npm run build
 
       - name: Deploy to Render (osiris-dev) — osiris-Ukraine branch
-        if: github.ref == 'refs/heads/osiris-Ukraine' && github.event_name == 'push' && secrets.RENDER_DEPLOY_HOOK_DEV != ''
-        run: curl -fsSL "${{ secrets.RENDER_DEPLOY_HOOK_DEV }}" -o /dev/null
+        if: github.ref == 'refs/heads/osiris-Ukraine' && github.event_name == 'push'
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_DEV }}
+        run: '[ -n "$HOOK" ] && curl -fsSL "$HOOK" -o /dev/null || echo "Deploy hook not configured, skipping."'
 
       - name: Deploy to Render (osiris) — osiris-Ukraine-merged branch
-        if: github.ref == 'refs/heads/osiris-Ukraine-merged' && github.event_name == 'push' && secrets.RENDER_DEPLOY_HOOK_PROD != ''
-        run: curl -fsSL "${{ secrets.RENDER_DEPLOY_HOOK_PROD }}" -o /dev/null
+        if: github.ref == 'refs/heads/osiris-Ukraine-merged' && github.event_name == 'push'
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PROD }}
+        run: '[ -n "$HOOK" ] && curl -fsSL "$HOOK" -o /dev/null || echo "Deploy hook not configured, skipping."'
