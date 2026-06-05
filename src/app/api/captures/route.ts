@@ -30,8 +30,20 @@ const ADVANCE_TERMS = [
   'освобод', 'под контроль', 'захват', 'продвин',     // RU: liberated / under control / seized / advanced
   'звільн', 'під контроль', 'захопл', 'просун',       // UA: liberated / under control / captured / advanced
 ];
+
+// Daily digest / roundup titles that contain territorial language but are summaries,
+// not individual capture claims. Checked against the title only (lowercased).
+const DIGEST_TITLE_RE = /^(главное за|сводка|зведення|дайджест|итоги дня|підсумки|обзор за|за сутки|за добу|morning brief|evening brief|daily (round|update|brief|wrap))/i;
+
+// A year in 2014–2021 appearing in the title signals a historical anniversary post,
+// not a current territorial change. The war-relevant range starts 2022.
+const HISTORICAL_YEAR_RE = /\b(201[4-9]|202[01])\b/;
+
 function isTerritorialAdvance(item: NewsItem): boolean {
-  const t = `${item.title || ''} ${item.description || ''}`.toLowerCase();
+  const title = (item.title || '').toLowerCase();
+  const t = `${title} ${(item.description || '').toLowerCase()}`;
+  if (DIGEST_TITLE_RE.test(title)) return false;
+  if (HISTORICAL_YEAR_RE.test(title)) return false;
   return ADVANCE_TERMS.some(w => t.includes(w));
 }
 
