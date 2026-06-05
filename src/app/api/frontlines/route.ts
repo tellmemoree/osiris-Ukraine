@@ -1,6 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { stealthFetch } from '@/lib/stealthFetch';
+import { fetchDeepState, extractFeatures, type GeoJSONFeatureCollection } from '@/lib/deepstate';
 
 /**
  * OSIRIS — Ukraine Frontline API
@@ -8,30 +9,6 @@ import { stealthFetch } from '@/lib/stealthFetch';
  * merging features from both sources into a single FeatureCollection.
  * Gracefully degrades to DeepState only if Militaryland is unavailable.
  */
-
-interface GeoJSONFeatureCollection {
-  type?: string;
-  features?: unknown[];
-  // DeepState's /history/last nests the FeatureCollection under `map`, not at top level.
-  map?: { features?: unknown[]; [key: string]: unknown };
-  [key: string]: unknown;
-}
-
-// DeepState returns { id, map: { features }, datetime }; Militaryland returns a
-// plain FeatureCollection. Pull features from wherever this source put them.
-function extractFeatures(d: GeoJSONFeatureCollection | undefined): unknown[] {
-  if (Array.isArray(d?.map?.features)) return d.map.features as unknown[];
-  if (Array.isArray(d?.features)) return d.features;
-  return [];
-}
-
-async function fetchDeepState(): Promise<GeoJSONFeatureCollection> {
-  const res = await stealthFetch('https://deepstatemap.live/api/history/last', {
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) throw new Error(`DeepState returned ${res.status}`);
-  return res.json();
-}
 
 async function fetchMilitaryland(): Promise<GeoJSONFeatureCollection> {
   const res = await stealthFetch('https://militaryland.net/ua/front-line/geojson', {

@@ -23,6 +23,15 @@ import { validateHost, isRateLimited, getClientIp } from '@/lib/ssrf-guard';
 const CENSYS_API_ID = process.env.CENSYS_API_ID || '';
 const CENSYS_API_SECRET = process.env.CENSYS_API_SECRET || '';
 
+interface GreyNoiseResult {
+  noise: boolean;
+  riot: boolean;
+  classification?: string;
+  name?: string;
+  link?: string;
+  last_seen?: string;
+}
+
 interface IpIntel {
   ip: string;
   asn?: number;
@@ -37,6 +46,7 @@ interface IpIntel {
   source: string;
   status?: string;
   cached?: boolean;
+  greynoise?: GreyNoiseResult;
 }
 
 // Minimal shape of the Censys v2 host response (only the fields we read).
@@ -80,12 +90,20 @@ function setCached(ip: string, data: IpIntel): void {
   cache.set(ip, { data, at: Date.now() });
 }
 
+// Build the Authorization header for Censys.
+// PATs (censys_* prefix) use Bearer; legacy api_id+api_secret pairs use Basic.
+function censysAuthHeader(): string {
+  if (CENSYS_API_ID.startsWith('censys_')) {
+    return `Bearer ${CENSYS_API_ID}`;
+  }
+  return `Basic ${Buffer.from(`${CENSYS_API_ID}:${CENSYS_API_SECRET}`).toString('base64')}`;
+}
+
 // Query Censys and normalize. Throws on hard upstream failure so transient
 // errors are not cached; a 404 (host not indexed) is a cacheable empty result.
 async function enrich(ip: string): Promise<IpIntel> {
-  const auth = Buffer.from(`${CENSYS_API_ID}:${CENSYS_API_SECRET}`).toString('base64');
   const res = await fetch(`https://search.censys.io/api/v2/hosts/${encodeURIComponent(ip)}`, {
-    headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+    headers: { Authorization: censysAuthHeader(), Accept: 'application/json' },
     signal: AbortSignal.timeout(9000),
     cache: 'no-store',
   });
@@ -94,7 +112,8 @@ async function enrich(ip: string): Promise<IpIntel> {
     return { ip, status: 'No Censys records found', services: [], certs: [], source: 'censys' };
   }
   if (res.status === 401 || res.status === 403) {
-    throw new Error(`Censys auth failed (HTTP ${res.status}) — check CENSYS_API_ID/SECRET`);
+    // Auth failed — silently fall back to free sources rather than hard-erroring.
+    return enrichFree(ip);
   }
   if (!res.ok) throw new Error(`Censys HTTP ${res.status}`);
 
@@ -108,6 +127,8 @@ async function enrich(ip: string): Promise<IpIntel> {
     new Set((r.services ?? []).map((s) => s.certificate).filter((c): c is string => !!c))
   ).slice(0, 25);
 
+  const greynoise = await fetchGreyNoise(ip).catch(() => undefined);
+
   return {
     ip: r.ip || ip,
     asn: r.autonomous_system?.asn,
@@ -119,18 +140,72 @@ async function enrich(ip: string): Promise<IpIntel> {
     services,
     certs,
     last_updated: r.last_updated_at,
-    source: 'censys',
+    greynoise,
+    source: 'censys + greynoise',
   };
 }
 
-export async function GET(req: Request) {
-  // 1. Require credentials (graceful until the key is pasted into .env).
-  if (!CENSYS_API_ID || !CENSYS_API_SECRET) {
-    return NextResponse.json(
-      { error: 'Censys not configured', hint: 'Set CENSYS_API_ID and CENSYS_API_SECRET in .env' },
-      { status: 503 }
-    );
+async function fetchGreyNoise(ip: string): Promise<GreyNoiseResult | undefined> {
+  try {
+    const res = await fetch(`https://api.greynoise.io/v3/community/${encodeURIComponent(ip)}`, {
+      signal: AbortSignal.timeout(5000),
+      cache: 'no-store',
+    });
+    if (!res.ok) return undefined;
+    const d = await res.json();
+    if (d.message && d.message !== 'Success') return undefined;
+    return { noise: d.noise, riot: d.riot, classification: d.classification, name: d.name, link: d.link, last_seen: d.last_seen };
+  } catch {
+    return undefined;
   }
+}
+
+// Free fallback: ipinfo.io (geo/ASN) + Shodan InternetDB (ports/services) + GreyNoise.
+// Used when Censys creds are absent or incomplete.
+async function enrichFree(ip: string): Promise<IpIntel> {
+  const [geoRes, shodanRes, gnRes] = await Promise.allSettled([
+    fetch(`https://ipinfo.io/${encodeURIComponent(ip)}/json`, {
+      signal: AbortSignal.timeout(6000), cache: 'no-store',
+    }),
+    fetch(`https://internetdb.shodan.io/${encodeURIComponent(ip)}`, {
+      signal: AbortSignal.timeout(6000), cache: 'no-store',
+    }),
+    fetchGreyNoise(ip),
+  ]);
+
+  let lat: number | undefined, lng: number | undefined, city: string | undefined,
+    country: string | undefined, asn: number | undefined, as_name: string | undefined;
+
+  if (geoRes.status === 'fulfilled' && geoRes.value.ok) {
+    const g = await geoRes.value.json();
+    [lat, lng] = (g.loc ?? '').split(',').map(Number);
+    city = g.city;
+    country = g.country;
+    if (g.org) {
+      const m = g.org.match(/^AS(\d+)\s+(.*)/);
+      if (m) { asn = parseInt(m[1], 10); as_name = m[2]; }
+    }
+  }
+
+  let services: IpIntel['services'] = [];
+  if (shodanRes.status === 'fulfilled' && shodanRes.value.ok) {
+    const s = await shodanRes.value.json();
+    services = (s.ports ?? []).map((p: number) => ({ port: p }));
+  }
+
+  const greynoise = gnRes.status === 'fulfilled' ? gnRes.value : undefined;
+
+  return { ip, asn, as_name, city, country, lat, lng, services, certs: [], greynoise, source: 'ipinfo.io + shodan + greynoise' };
+}
+
+// True when we have enough Censys credentials to attempt a query.
+// PAT: only CENSYS_API_ID needed (Bearer). Legacy: both ID + SECRET required.
+function censysConfigured(): boolean {
+  if (CENSYS_API_ID.startsWith('censys_')) return true;
+  return !!(CENSYS_API_ID && CENSYS_API_SECRET);
+}
+
+export async function GET(req: Request) {
 
   // 2. Validate the IP param.
   const { searchParams } = new URL(req.url);
@@ -167,7 +242,7 @@ export async function GET(req: Request) {
   // 6. Coalesce concurrent lookups for the same IP onto a single upstream request.
   let task = inflight.get(ip);
   if (!task) {
-    task = enrich(ip);
+    task = censysConfigured() ? enrich(ip) : enrichFree(ip);
     inflight.set(ip, task);
   }
 
@@ -177,7 +252,7 @@ export async function GET(req: Request) {
     return NextResponse.json(data, { headers: CACHE_HEADERS });
   } catch (error) {
     return NextResponse.json(
-      { error: 'Censys lookup failed', detail: error instanceof Error ? error.message : String(error) },
+      { error: 'IP intel lookup failed', detail: error instanceof Error ? error.message : String(error) },
       { status: 502 }
     );
   } finally {

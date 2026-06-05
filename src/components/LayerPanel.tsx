@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plane, Satellite, Activity, Sun, AlertTriangle, Camera, Flame, Target,
   CloudLightning, Radiation, Tv, Anchor, Ship, Newspaper,
-  Network, Share2, Radio, Siren, Bomb, Zap
+  Network, Share2, Radio, Siren, Bomb, Zap, Swords
 } from 'lucide-react';
 
 interface LayerPanelProps {
@@ -85,6 +85,7 @@ const LAYER_GROUPS = [
     color: '#FF1744',
     layers: [
       { key: 'frontlines', label: 'Frontline (DeepState)', icon: Target, color: '#FF3D3D', dataKey: 'frontlines' },
+      { key: 'captures', label: 'Captures / Advances', icon: Swords, color: '#FF3D3D', dataKey: 'captures' },
       { key: 'thermal_aoi', label: 'Thermal Strike AOIs', icon: Flame, color: '#FF5722', dataKey: 'thermal_aoi' },
       { key: 'air_raids', label: 'Air Raid Alerts', icon: Siren, color: '#FF1744', dataKey: 'air_raids' },
       { key: 'kab_threats', label: 'KAB / Glide-Bomb', icon: Bomb, color: '#FF6B00', dataKey: 'kab_threats' },

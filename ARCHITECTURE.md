@@ -78,11 +78,41 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
   call another route internally via `new URL('/api/news', req.url)` to correlate them
   (here: FIRMS fires × curated sites + geolocated news → "thermal hit" AOIs). Cache the
   combined result. Distance checks use a cheap equirectangular approx (≈111.32 km/deg).
+  A news item is a thermal lead only if `isStrikeRelated` AND **not** `isTerritorialAdvance`
+  — capture/liberation reports ("освободила"/"под контроль"/"liberated") sit in ambient
+  front-line FIRMS heat and carry combat verbs, so they were false positives; `ADVANCE_TERMS`
+  uses PRECISE stems (no bare "occupied"/`наступ`) so genuine strikes near occupied areas
+  survive. An article is cross-referenced at EVERY place `/api/news` `places[]` names, but
+  only places with a fire within `NEWS_RADIUS_KM` surface (region-level mentions whose
+  centroid has no nearby fire legitimately can't corroborate). Co-located corroborations
+  (same ~0.05°/~5 km cell — multiple channels or both sides reporting one event) MERGE into
+  ONE AOI carrying every contributing `sources[]` entry (not first-come-wins), surfaced in
+  the OsirisMap thermal popup as "+N more report(s) here".
   Note: `/api/news` returns a **war/conflict-filtered** set (`isConflict`) — bilingual
   (English `RISK_KEYWORDS` + Cyrillic `CONFLICT_TERMS_CYR` stems) so RU/UA milblogger
   posts survive; keeps all conflicts, drops channel ads/sport/weather. Cyrillic stems
   must avoid common-word collisions (e.g. bare `наступ` matches "наступний"/next — use
   `наступальн`/`контрнаступ`). This feeds IntelFeed, LiveAlerts, and the `news_intel` dots.
+  Geolocation is a hand-curated `KEYWORD_COORDS` gazetteer (Latin + Cyrillic UA/RU keys;
+  `BROAD_KEYS` = country/peninsula, only used when no city is named). `keywordRegex` only
+  APPENDS up to 4 case-suffix letters — it CANNOT swap a nominative's final vowel — so key
+  declinable -а/-ка/-е place names on their CONSONANT STEM (`костянтинівк`, `судж`,
+  `феодос`) to catch oblique cases. Two hazards when adding keys: (1) terminal-vowel
+  declension as above; (2) common-word collisions (`лиман`=estuary, `украинск`/`українськ`
+  =the adjective "Ukrainian", `орехов`=Moscow's Orekhovo) — validate every new key against
+  a declined probe AND a false-friend probe before committing (see the `keywordRegex`
+  harness pattern).
+- **Actor-classified news layer** (see `captures`): the flip-side of `strategic-thermal`
+  — where that route DROPS territorial-advance reports, `captures` SURFACES them as their
+  own layer (`UA WAR` group, key `captures`). It reuses the same `ADVANCE_TERMS` (keep the
+  two copies in sync) and classifies each item by the side that ADVANCED via `captureSide`
+  — NOT the reporting channel's `side` (a UA channel routinely reports a RU capture). Each
+  side's own euphemism is the signal: RU "освобод(ить)" → ru; UA "звільн"/"deoccupy"/
+  "recapture" → ua; hostile "окуп/захопл/seized" framing → ru; else fall back to the army
+  named. Plotted on the un-jittered raw centroid (recovered as the `places[]` entry nearest
+  to `/api/news`'s jittered `coords`) so the same town from multiple channels dedups by
+  place+side (count of corroborating reports); a town claimed by BOTH sides keeps two
+  markers. Map styling: RU red `#FF3D3D`, UA blue `#2979FF`, flag-prefixed labels.
 - **Snapshot/diff over time** (see `frontline-changes`): a route may persist a daily
   snapshot to `~/.osiris-data/<name>.json` (OUTSIDE the repo/`.next`, so it survives
   rebuilds) and return deltas. `frontline-changes` fetches `/api/frontlines`, sums all
@@ -112,7 +142,10 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
 - `SHODAN_API_KEY` (free oss tier: host lookup works, host *search* needs paid) →
   `osint/shodan`. `CENSYS_API_ID`/`CENSYS_API_SECRET` → `ip-intel` (503 until set).
 - `SCANNER_URL`/`SCANNER_KEY` → `scanner` (external active-scan backend; 503 until set).
-- `AIS_API_KEY` → maritime AIS. `RU_PROXY_URL` (planned) → RU geoblock bypass (#7b).
+- `AIS_API_KEY` → maritime AIS.
+- `RU_PROXY_URL` → RU geoblock bypass via `src/lib/ru-fetch.ts` (`ruFetch()` helper,
+  `undici` `ProxyAgent`). Unset = direct fetch, nothing breaks. Format: `http://user:pass@host:port`.
+  Wired into `fetchRussiaCameras` in `cctv/route.ts`; insecam.org HTML parsing is TODO (task 3.1).
 - Most feeds are keyless (aviation, fires, quakes, weather, news, air-raids, frontlines,
   air-quality via Open-Meteo).
 
@@ -146,6 +179,31 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
 - For one-off verification use a throwaway `next dev -p 3002` and tear it down; never
   disturb :3001. (Note: `next dev` writes into the shared `.next`, so rebuild before
   relying on :3001 again.)
+
+## CI/CD (`.github/`)
+- **`workflows/ci.yml`** — on push to `master`/`osiris-Ukraine`/`osiris-Ukraine-merged`
+  and all PRs: `npm ci` → `tsc --noEmit` (blocking) → `npm run lint` (advisory,
+  `continue-on-error` — inherited `no-explicit-any` debt is WON'T FIX) → `npm run build`
+  (blocking). Node 22, npm cache.
+- **`workflows/docker-publish.yml`** — on push to the deploy branch
+  `osiris-Ukraine-merged` (and `v*` tags): builds the standalone `Dockerfile`,
+  smoke-tests `/api/health` on the local image, then pushes to GHCR
+  (`ghcr.io/<repo>`). PRs build + smoke-test but do NOT push. `latest` tag tracks
+  `osiris-Ukraine-merged`. Uses GHA build cache.
+- **`dependabot.yml`** — weekly npm (grouped minor/patch; `next` major ignored — pinned
+  fork) + github-actions updates, targeting `osiris-Ukraine-merged`.
+
+## Render deployment (`render.yaml`)
+`render.yaml` (repo root) is a Render Blueprint. Connect the repo at
+`https://dashboard.render.com/` → New → Blueprint → point at this repo.
+Render builds from `Dockerfile` directly (free plan, region: oregon, port 3000).
+After deploy, set these env vars in the Render dashboard (marked `sync: false` in the
+blueprint so secrets are never committed):
+- `SHODAN_API_KEY`
+- `CENSYS_API_ID` (PAT or legacy id)
+- `CENSYS_API_SECRET` (leave blank for PAT)
+- `AISSTREAM_API_KEY`
+Health check: `/api/health`. Free tier sleeps after 15 min idle (30s cold start).
 
 ## Gotchas / known-dead upstreams (verify before trusting a "dark" route)
 - A route returning empty often means its UPSTREAM died, not that it's un-wired:

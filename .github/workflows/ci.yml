@@ -1,0 +1,68 @@
+name: CI
+
+# Lint (advisory) + type-check + production build.
+# Type-check & build are blocking; lint is advisory because the inherited
+# `no-explicit-any` debt is WON'T FIX (see ARCHITECTURE.md / HANDOFF.md #3).
+#
+# On success, calls a Render deploy hook so Render only deploys after CI passes.
+# Set these secrets in GitHub → Settings → Secrets → Actions:
+#   RENDER_DEPLOY_HOOK_DEV   — hook URL for the osiris-dev service (osiris-Ukraine branch)
+#   RENDER_DEPLOY_HOOK_PROD  — hook URL for the osiris service (osiris-Ukraine-merged branch)
+# Get each URL from Render dashboard → service → Settings → Deploy Hook.
+# Also disable Render's native "Auto-Deploy" for both services so only CI triggers deploys.
+
+on:
+  push:
+    branches: [master, osiris-Ukraine, osiris-Ukraine-merged]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same ref cancels the in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  build:
+    name: type-check · lint · build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (tsc --noEmit)
+        run: npx tsc --noEmit
+
+      - name: Lint (advisory)
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to Render (osiris-dev) — osiris-Ukraine branch
+        if: github.ref == 'refs/heads/osiris-Ukraine' && github.event_name == 'push'
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_DEV }}
+        run: '[ -n "$HOOK" ] && curl -fsSL "$HOOK" -o /dev/null || echo "Deploy hook not configured, skipping."'
+
+      - name: Deploy to Render (osiris) — osiris-Ukraine-merged branch
+        if: github.ref == 'refs/heads/osiris-Ukraine-merged' && github.event_name == 'push'
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PROD }}
+        run: '[ -n "$HOOK" ] && curl -fsSL "$HOOK" -o /dev/null || echo "Deploy hook not configured, skipping."'

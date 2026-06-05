@@ -55,10 +55,12 @@ label) in `OsirisMap`. 1h cache; verified 42 stations live, tsc clean.
 - **Extend later:** add more cities, or switch to a bbox/viewport query if you want
   denser coverage than the curated list.
 
-### 1.4 — Space-weather indicator  ·  Effort: S
-`/api/space-weather` is only lightly referenced. Surface Kp index / aurora / solar
-storm state as a HUD badge or a thin layer — also a plausible HF-comms / GPS-degradation
-context signal alongside the existing GPS-jamming layer.
+### 1.4 — Space-weather indicator  ·  ✅ DONE (2026-06-05)
+**Shipped:** added a compact `SOLAR Kp{X}` HUD badge to the mobile top-right status bar
+(next to the SUPPORT PROJECT button) in `page.tsx`. Badge border/background tints to the
+storm color; a pulsing dot appears at Kp ≥ 4 (G1+). Desktop already showed the Kp badge
+(`hidden lg:inline`). Mobile now has parity. Data from `/api/space-weather` (NOAA SWPC,
+keyless, already fetched on load).
 
 ---
 
@@ -122,11 +124,13 @@ From HANDOFF-recon-toolkit.md Part 2:
   `category: 'propaganda'` flag for state TV.
 - **Deps:** Windy key; some RU portals need the proxy (3.2).
 
-### 3.2 — ruFetch() proxy scaffold (#7b)  ·  Effort: S–M
-Add a `ruFetch()` helper using `undici`'s `ProxyAgent`, gated on `RU_PROXY_URL`
-(unset ⇒ direct fetch, nothing breaks). Wire into RU camera/portal fetchers so RU
-geoblocks can be defeated once a residential RU proxy (IPRoyal selected) is purchased.
-- **Deps:** proxy purchase to *activate*; scaffold lands without it.
+### 3.2 — ruFetch() proxy scaffold (#7b)  ·  ✅ DONE (2026-06-05)
+**Shipped:** `src/lib/ru-fetch.ts` — `ruFetch()` wraps undici's `ProxyAgent`, singleton
+per process, recreates if `RU_PROXY_URL` changes (dev hot-reload safe). Unset = direct
+`fetch`, nothing breaks. Wired into `fetchRussiaCameras()` in `cctv/route.ts`: when
+`RU_PROXY_URL` is set, probes `insecam.org/en/bycountry/RU/` via `ruFetch`; HTML parsing
+of discovered MJPEG feeds is the TODO for task 3.1. `.env.example` documents the var.
+ARCHITECTURE.md updated. Activate by pasting the IPRoyal proxy URL into `.env`.
 
 ### 3.3 — Scanner backend wiring (#7)  ·  Effort: ops
 `/api/scanner` is built and hardened (SSRF guard, scan allow-list) but returns 503
