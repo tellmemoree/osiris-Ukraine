@@ -152,11 +152,23 @@ per process, recreates if `RU_PROXY_URL` changes (dev hot-reload safe). Unset = 
 of discovered MJPEG feeds is the TODO for task 3.1. `.env.example` documents the var.
 ARCHITECTURE.md updated. Activate by pasting the IPRoyal proxy URL into `.env`.
 
-### 3.3 — Scanner backend wiring (#7)  ·  Effort: ops
-`/api/scanner` is built and hardened (SSRF guard, scan allow-list) but returns 503
-until `SCANNER_URL`/`SCANNER_KEY` point at a real scanner service.
-- **Deps:** stand the scanner up on the **separate prod machine** (keeps active-scan
-  off the home server); also a paid Shodan membership for host-search/discovery.
+### 3.3 — Scanner backend wiring (#7)  ·  ✅ DONE (2026-06-05)
+**Shipped:** route fully rewritten — no external `SCANNER_URL` service needed. All
+scan types run inline:
+- **quick** — Shodan host lookup (if `SHODAN_API_KEY` set) with TCP-probe fallback
+- **ssl** — Shodan TLS banner with live `tls.connect()` fallback
+- **headers** — Shodan HTTP banner with live `fetch()` fallback
+- **subdomains** — crt.sh (keyless)
+- **tech** — Shodan CPE/banners + live page signature matching
+- **vuln** — Shodan CVE data (requires `SHODAN_API_KEY`; returns empty list without)
+- **rdns** — Shodan `hostnames[]` + `dns.reverse()` fallback (keyless)
+- **whois** — RDAP (`rdap.org`, keyless) for IPs and domains; Shodan org augment
+- **geoloc** — Shodan lat/lng + `ip-api.com` fallback (keyless)
+- **traceroute** — local `mtr` via `spawn()` (no raw-socket root needed; 2 cycles/20 hops)
+
+SSRF guard + rate limiter (5/min) remain. `SHODAN_API_KEY` is optional — enriches
+quick/ssl/tech/vuln but nothing breaks without it. `SCANNER_URL`/`SCANNER_KEY` env
+vars are now unused and removed from `.env.example`.
 
 ---
 
