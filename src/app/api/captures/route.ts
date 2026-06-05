@@ -70,21 +70,12 @@ function captureSide(item: NewsItem): 'ru' | 'ua' | null {
   return null;
 }
 
-// /api/news jitters `coords` ~6 km per-article (anti-stacking), so the SAME captured
-// town reported by two channels lands in two cells and won't dedup. The raw, un-jittered
-// centroid is in `places[]` (coords = jitterAround(one of them)) — recover it as the
-// places entry nearest to `coords`, giving a stable position to plot AND dedup on.
-function rawCentroid(item: NewsItem): [number, number] | null {
-  if (!item.coords) return null;
-  const places = item.places || [];
-  if (!places.length) return item.coords;
-  let best = places[0], bd = Infinity;
-  for (const p of places) {
-    const dLat = p[0] - item.coords[0], dLng = p[1] - item.coords[1];
-    const d = dLat * dLat + dLng * dLng;
-    if (d < bd) { bd = d; best = p; }
-  }
-  return best;
+// Return all un-jittered place centroids for an article. `places[]` holds the raw
+// gazetteer coords; `coords` is one of them jittered for anti-stacking. When `places`
+// is empty fall back to the single jittered coord so older items still render.
+function allCentroids(item: NewsItem): [number, number][] {
+  if (item.places?.length) return item.places;
+  return item.coords ? [item.coords] : [];
 }
 
 async function fetchNews(req: Request): Promise<NewsItem[]> {
@@ -114,18 +105,19 @@ export async function GET(req: Request) {
       if (!item.coords || item.coords_default) continue; // need a real geolocation
       const side = captureSide(item);
       if (!side) continue;
-      const centroid = rawCentroid(item);
-      if (!centroid) continue;
-      const [lat, lng] = centroid;
-      if (lat < BBOX.latMin || lat > BBOX.latMax || lng < BBOX.lngMin || lng > BBOX.lngMax) continue;
-      const key = `${lat.toFixed(2)},${lng.toFixed(2)}|${side}`;
-      const existing = byCell.get(key);
-      if (existing) { existing.count++; continue; }
-      byCell.set(key, {
-        id: `cap-${++n}`, lat, lng, side,
-        name: (item.title || 'Territorial change').slice(0, 120),
-        source: item.source, side_reported: item.side, link: item.link, date: item.published, count: 1,
-      });
+      // Emit one marker per named place — a single article can mention 3 locations
+      // and should produce 3 markers, one at each.
+      for (const [lat, lng] of allCentroids(item)) {
+        if (lat < BBOX.latMin || lat > BBOX.latMax || lng < BBOX.lngMin || lng > BBOX.lngMax) continue;
+        const key = `${lat.toFixed(2)},${lng.toFixed(2)}|${side}`;
+        const existing = byCell.get(key);
+        if (existing) { existing.count++; continue; }
+        byCell.set(key, {
+          id: `cap-${++n}`, lat, lng, side,
+          name: (item.title || 'Territorial change').slice(0, 120),
+          source: item.source, side_reported: item.side, link: item.link, date: item.published, count: 1,
+        });
+      }
     }
 
     const captures = [...byCell.values()];
