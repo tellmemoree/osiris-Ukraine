@@ -445,11 +445,13 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
       );
     }
 
-    // ── CENSYS IP INTEL ──
+    // ── IP INTEL ──
     if (activeTab === 'ipintel') {
+      const gn = r.greynoise;
+      const gnColor = gn?.classification === 'malicious' ? '#FF3D3D' : gn?.classification === 'benign' ? '#00E676' : '#FF9500';
       return (
         <div>
-          <SectionHeader title="CENSYS IP INTELLIGENCE" icon={MapPin} color="#00BCD4" />
+          <SectionHeader title="IP INTELLIGENCE" icon={MapPin} color="#00BCD4" />
           <ResultRow label="Target IP" value={r.ip || query} color="#00BCD4" />
           {r.status && <ResultRow label="Status" value={r.status} color="#FF9500" />}
           {r.asn !== undefined && <ResultRow label="ASN" value={`AS${r.asn}${r.as_name ? ' — ' + r.as_name : ''}`} color="#00E5FF" />}
@@ -458,6 +460,35 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
           {r.services?.length > 0 && (
             <ResultRow label="Open Services" color="#00E5FF" value={r.services.map((sv: any) => `${sv.port}${sv.transport ? '/' + sv.transport : ''}${sv.name ? ' ' + sv.name : ''}`).join(', ')} />
           )}
+
+          {gn && (
+            <>
+              <SectionHeader title="GREYNOISE" icon={Shield} color={gnColor} />
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded" style={{ backgroundColor: `${gnColor}20`, color: gnColor, border: `1px solid ${gnColor}40` }}>
+                  {gn.classification?.toUpperCase() ?? 'UNKNOWN'}
+                </span>
+                {gn.noise && (
+                  <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 border border-orange-500/40">
+                    INTERNET SCANNER
+                  </span>
+                )}
+                {gn.riot && (
+                  <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/40">
+                    KNOWN SERVICE
+                  </span>
+                )}
+              </div>
+              {gn.name && gn.name !== 'unknown' && <ResultRow label="Actor" value={gn.name} color={gnColor} />}
+              {gn.last_seen && <ResultRow label="Last Seen" value={gn.last_seen} />}
+              {gn.link && (
+                <a href={gn.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[9px] font-mono text-[var(--text-muted)] hover:text-[#00BCD4] transition-colors mt-0.5">
+                  <ExternalLink className="w-2.5 h-2.5" /> View on GreyNoise
+                </a>
+              )}
+            </>
+          )}
+
           {r.certs?.length > 0 && (
             <div className="mt-2 p-2 border border-[#00BCD4]/30 bg-[#00BCD4]/10 rounded">
               <span className="text-[10px] font-mono text-[#00BCD4] font-bold mb-1 block">TLS CERTS ({r.certs.length})</span>
@@ -468,9 +499,9 @@ function OsintPanelInner({ isMobile, onSweepVisualize, onScanGeolocate }: OsintP
               </div>
             </div>
           )}
-          {r.last_updated && <ResultRow label="Last Seen" value={r.last_updated} />}
+          {r.last_updated && <ResultRow label="Last Seen (Censys)" value={r.last_updated} />}
           {r.cached && <ResultRow label="Cache" value="hit (≤6h)" color="#8A8880" />}
-          {renderFallbackExcluding(['ip','asn','as_name','city','country','lat','lng','services','certs','last_updated','source','status','cached'])}
+          {renderFallbackExcluding(['ip','asn','as_name','city','country','lat','lng','services','certs','last_updated','source','status','cached','greynoise'])}
         </div>
       );
     }

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: osiris
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      - key: SHODAN_API_KEY
+        sync: false
+      - key: CENSYS_API_ID
+        sync: false
+      - key: CENSYS_API_SECRET
+        sync: false
+      - key: AISSTREAM_API_KEY
+        sync: false

@@ -193,6 +193,18 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
 - **`dependabot.yml`** — weekly npm (grouped minor/patch; `next` major ignored — pinned
   fork) + github-actions updates, targeting `osiris-Ukraine-merged`.
 
+## Render deployment (`render.yaml`)
+`render.yaml` (repo root) is a Render Blueprint. Connect the repo at
+`https://dashboard.render.com/` → New → Blueprint → point at this repo.
+Render builds from `Dockerfile` directly (free plan, region: oregon, port 3000).
+After deploy, set these env vars in the Render dashboard (marked `sync: false` in the
+blueprint so secrets are never committed):
+- `SHODAN_API_KEY`
+- `CENSYS_API_ID` (PAT or legacy id)
+- `CENSYS_API_SECRET` (leave blank for PAT)
+- `AISSTREAM_API_KEY`
+Health check: `/api/health`. Free tier sleeps after 15 min idle (30s cold start).
+
 ## Gotchas / known-dead upstreams (verify before trusting a "dark" route)
 - A route returning empty often means its UPSTREAM died, not that it's un-wired:
   - **DeepState** (`frontlines`) nests features under `.map.features`, not `.features`.

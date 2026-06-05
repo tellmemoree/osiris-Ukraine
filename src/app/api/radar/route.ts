@@ -46,14 +46,23 @@ export async function GET() {
     const json = await res.json();
     const events = json.data || [];
 
-    const outages = events
-      .filter((e: any) => {
+    interface IodaEvent {
+      location?: string;
+      score?: number;
+      severity?: string;
+      start?: number;
+      duration?: number;
+      datasource?: string;
+    }
+
+    const outages = (events as IodaEvent[])
+      .filter((e) => {
         // IODA uses "location" field like "country/RW"
         const code = e.location?.split('/')[1];
         return code && COUNTRY_CENTROIDS[code];
       })
-      .map((e: any, i: number) => {
-        const code = e.location.split('/')[1];
+      .map((e, i) => {
+        const code = e.location!.split('/')[1];
         const [lng, lat] = COUNTRY_CENTROIDS[code];
         // Jitter so overlapping events don't stack
         const jLng = ((i * 137.5) % 200 - 100) / 100 * 2;
