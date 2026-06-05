@@ -142,7 +142,10 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
 - `SHODAN_API_KEY` (free oss tier: host lookup works, host *search* needs paid) →
   `osint/shodan`. `CENSYS_API_ID`/`CENSYS_API_SECRET` → `ip-intel` (503 until set).
 - `SCANNER_URL`/`SCANNER_KEY` → `scanner` (external active-scan backend; 503 until set).
-- `AIS_API_KEY` → maritime AIS. `RU_PROXY_URL` (planned) → RU geoblock bypass (#7b).
+- `AIS_API_KEY` → maritime AIS.
+- `RU_PROXY_URL` → RU geoblock bypass via `src/lib/ru-fetch.ts` (`ruFetch()` helper,
+  `undici` `ProxyAgent`). Unset = direct fetch, nothing breaks. Format: `http://user:pass@host:port`.
+  Wired into `fetchRussiaCameras` in `cctv/route.ts`; insecam.org HTML parsing is TODO (task 3.1).
 - Most feeds are keyless (aviation, fires, quakes, weather, news, air-raids, frontlines,
   air-quality via Open-Meteo).
 

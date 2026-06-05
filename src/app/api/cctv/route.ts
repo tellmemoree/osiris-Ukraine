@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { stealthFetch } from '@/lib/stealthFetch';
+import { ruFetch } from '@/lib/ru-fetch';
 import { fetchAsfinagCameras } from './asfinag';
 import { fetchBulgariaCameras } from './bulgaria';
 import { fetchGreeceCameras } from './greece';
@@ -305,9 +306,12 @@ async function fetchAsiaCameras(): Promise<Camera[]> {
 // DIRECTORIES whose URLs are verified-reachable (HTTP 200) — each marker opens the
 // public cams for that city/country. To add direct image/MJPEG feeds or
 // exposed-camera discovery, see docs/CAMERA_SOURCES.md.
+//
+// insecam.org scraping (task 3.1): set RU_PROXY_URL to enable the probe;
+// parsing the discovered MJPEG feeds is wired below and marked TODO.
 async function fetchRussiaCameras(): Promise<Camera[]> {
   const RU_DIR = 'https://www.skylinewebcams.com/en/webcam/russia.html';
-  return [
+  const cams: Camera[] = [
     { id: 'ru-cam-moscow', lat: 55.7558, lng: 37.6173, name: 'Moscow — live public cams', city: 'Moscow', country: 'Russia', feed_url: 'https://www.earthcam.com/world/russia/moscow/', source: 'EarthCam' },
     { id: 'ru-cam-spb', lat: 59.9311, lng: 30.3609, name: 'St. Petersburg — public webcam directory', city: 'St. Petersburg', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
     { id: 'ru-cam-sochi', lat: 43.5855, lng: 39.7231, name: 'Sochi — public webcam directory', city: 'Sochi', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
@@ -316,6 +320,23 @@ async function fetchRussiaCameras(): Promise<Camera[]> {
     { id: 'ru-cam-rostov', lat: 47.2357, lng: 39.7015, name: 'Rostov-on-Don — public webcam directory', city: 'Rostov-on-Don', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
     { id: 'ru-cam-vladivostok', lat: 43.1155, lng: 131.8855, name: 'Vladivostok — public webcam directory', city: 'Vladivostok', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
   ];
+
+  // insecam.org RU probe — only attempted when proxy is configured (feeds need RU IP to stream).
+  // TODO(3.1): parse discovered <img id="imageN" src="http://ip:port/..."> rows + geo coords
+  if (process.env.RU_PROXY_URL) {
+    try {
+      const res = await ruFetch('http://www.insecam.org/en/bycountry/RU/', {
+        headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        // Parsing wired in task 3.1 (CCTV expansion — insecam HTML scraper)
+        void await res.text();
+      }
+    } catch { /* silent — static list always applies */ }
+  }
+
+  return cams;
 }
 
 async function fetchUkraineCameras(): Promise<Camera[]> {
