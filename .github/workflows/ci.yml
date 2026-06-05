@@ -3,6 +3,13 @@ name: CI
 # Lint (advisory) + type-check + production build.
 # Type-check & build are blocking; lint is advisory because the inherited
 # `no-explicit-any` debt is WON'T FIX (see ARCHITECTURE.md / HANDOFF.md #3).
+#
+# On success, calls a Render deploy hook so Render only deploys after CI passes.
+# Set these secrets in GitHub → Settings → Secrets → Actions:
+#   RENDER_DEPLOY_HOOK_DEV   — hook URL for the osiris-dev service (osiris-Ukraine branch)
+#   RENDER_DEPLOY_HOOK_PROD  — hook URL for the osiris service (osiris-Ukraine-merged branch)
+# Get each URL from Render dashboard → service → Settings → Deploy Hook.
+# Also disable Render's native "Auto-Deploy" for both services so only CI triggers deploys.
 
 on:
   push:
@@ -47,3 +54,11 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Deploy to Render (osiris-dev) — osiris-Ukraine branch
+        if: github.ref == 'refs/heads/osiris-Ukraine' && github.event_name == 'push' && secrets.RENDER_DEPLOY_HOOK_DEV != ''
+        run: curl -fsSL "${{ secrets.RENDER_DEPLOY_HOOK_DEV }}" -o /dev/null
+
+      - name: Deploy to Render (osiris) — osiris-Ukraine-merged branch
+        if: github.ref == 'refs/heads/osiris-Ukraine-merged' && github.event_name == 'push' && secrets.RENDER_DEPLOY_HOOK_PROD != ''
+        run: curl -fsSL "${{ secrets.RENDER_DEPLOY_HOOK_PROD }}" -o /dev/null
