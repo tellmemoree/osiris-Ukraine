@@ -70,6 +70,11 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
       return;
     }
 
+    if (streamType === 'mjpeg' && camera.stream_url) {
+      setLoading(false);
+      return;
+    }
+
     // JPG fallback
     if (camera.feed_url) {
       const url = camera.feed_url.includes('?') ? `${camera.feed_url}&_t=${Date.now()}` : `${camera.feed_url}?_t=${Date.now()}`;
@@ -183,6 +188,12 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
                 allow="autoplay; fullscreen"
                 allowFullScreen
               />
+            ) : streamType === 'mjpeg' && camera.stream_url ? (
+              <img
+                src={camera.stream_url}
+                alt={camera.name}
+                className={`w-full ${fullscreen ? 'h-full object-contain' : 'h-full object-cover'}`}
+              />
             ) : imageUrl ? (
               <img
                 key={refreshKey}
@@ -199,7 +210,7 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
               <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/70 backdrop-blur-sm px-2 py-1 rounded">
                 <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-osiris-pulse" />
                 <span className="text-[7px] font-mono text-white tracking-widest">
-                  {streamType === 'jpg' ? 'LIVE SNAPSHOT' : 'LIVE VIDEO'}
+                  {streamType === 'jpg' ? 'LIVE SNAPSHOT' : streamType === 'mjpeg' ? 'LIVE MJPEG' : 'LIVE VIDEO'}
                 </span>
               </div>
             )}
