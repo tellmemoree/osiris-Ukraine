@@ -147,6 +147,7 @@ export default function Dashboard() {
   const [replayTime, setReplayTime] = useState<Date | null>(null);
   const [timelineRangeH, setTimelineRangeH] = useState(24);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showFrontlineTracker, setShowFrontlineTracker] = useState(false);
 
   const isMobile = useIsMobile();
   const startTime = useRef(Date.now());
@@ -1012,6 +1013,15 @@ export default function Dashboard() {
         >
           <Play className={`w-4 h-4 ${showTimeline ? 'text-[var(--cyan-primary)]' : 'text-white/60'}`} />
         </button>
+
+        {/* Frontline change tracker toggle */}
+        <button
+          onClick={() => setShowFrontlineTracker(t => !t)}
+          title="Frontline change tracker"
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showFrontlineTracker ? 'bg-[#FF3D3D]/20' : 'hover:bg-white/10'}`}
+        >
+          <Activity className={`w-4 h-4 ${showFrontlineTracker ? 'text-[#FF3D3D]' : 'text-white/60'}`} />
+        </button>
       </div>}
 
       {/* ── LIVE FEED VIEWER OVERLAY ── */}
@@ -1165,11 +1175,6 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <LayerPanel data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} />
-                      {activeLayers.frontlines && (
-                        <div className="mt-2">
-                          <FrontlineTracker isMobile />
-                        </div>
-                      )}
                       <div className="mt-2">
                         <ViewPresets onNavigate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMapView(v => ({ ...v, zoom })); setMobilePanel(null); }} />
                       </div>
@@ -1216,16 +1221,19 @@ export default function Dashboard() {
       )}
 
       {/* ── Frontline change tracker (desktop) ── */}
-      {!isMobile && activeLayers.frontlines && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="absolute bottom-6 right-4 z-[205] pointer-events-none"
-        >
-          <FrontlineTracker />
-        </motion.div>
-      )}
+      <AnimatePresence>
+        {!isMobile && showFrontlineTracker && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            transition={{ duration: 0.25 }}
+            className="absolute bottom-6 right-14 z-[205] pointer-events-none"
+          >
+            <FrontlineTracker />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Scale Bar (desktop) ── */}
       <div className="desktop-only absolute bottom-[4.5rem] left-[20rem] z-[201] pointer-events-none">
