@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -18,6 +18,9 @@ import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 import FrontlineTracker from '@/components/FrontlineTracker';
 import TimelineControl, { TimelineEvent } from '@/components/TimelineControl';
+import BriefingPanel from '@/components/BriefingPanel';
+import ThresholdToasts from '@/components/ThresholdToasts';
+import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
@@ -148,6 +151,8 @@ export default function Dashboard() {
   const [timelineRangeH, setTimelineRangeH] = useState(24);
   const [showTimeline, setShowTimeline] = useState(false);
   const [showFrontlineTracker, setShowFrontlineTracker] = useState(false);
+  const [showBriefing, setShowBriefing] = useState(false);
+  const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlert[]>([]);
 
   const isMobile = useIsMobile();
   const startTime = useRef(Date.now());
@@ -513,6 +518,18 @@ export default function Dashboard() {
 
   // CCTV: loaded once on layer toggle via layerFetchedRef (no viewport polling)
 
+  // ── THRESHOLD ALERTS — poll every 5 min ──
+  useEffect(() => {
+    const check = () =>
+      fetch('/api/threshold-alerts')
+        .then(r => r.ok ? r.json() : null)
+        .then(j => { if (j?.alerts) setThresholdAlerts(j.alerts); })
+        .catch(() => {});
+    check();
+    const iv = setInterval(check, 300_000);
+    return () => clearInterval(iv);
+  }, []);
+
   // Reactive layer fetch: handled by layerFetchedRef above (no duplicate)
 
   // ── OSIRIS SDK — Intelligence Fusion Layer ──
@@ -796,6 +813,12 @@ export default function Dashboard() {
 
 
 
+      {/* ── THRESHOLD ALERT TOASTS ── */}
+      <ThresholdToasts
+        alerts={thresholdAlerts}
+        onLocate={(lat, lng) => setFlyToLocation({ lat, lng, ts: Date.now() })}
+      />
+
       {/* ── MAP ── */}
       <ErrorBoundary name="Map">
         <OsirisMap 
@@ -1022,6 +1045,28 @@ export default function Dashboard() {
         >
           <Activity className={`w-4 h-4 ${showFrontlineTracker ? 'text-[#FF3D3D]' : 'text-white/60'}`} />
         </button>
+
+        {/* Intel digest / situation briefing */}
+        <div className="relative">
+          <button
+            onClick={() => setShowBriefing(t => !t)}
+            title="Intel digest"
+            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showBriefing ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`}
+          >
+            <FileText className={`w-4 h-4 ${showBriefing ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+          </button>
+          <AnimatePresence>
+            {showBriefing && (
+              <motion.div
+                initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.2 }}
+                className="absolute right-12 top-1/2 -translate-y-1/2"
+              >
+                <BriefingPanel />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>}
 
       {/* ── LIVE FEED VIEWER OVERLAY ── */}
