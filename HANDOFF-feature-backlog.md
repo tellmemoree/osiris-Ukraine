@@ -66,11 +66,16 @@ keyless, already fetched on load).
 
 ## Direction 2 — Conflict-intel depth (Ukraine / Russia)
 
-### 2.1 — Frontline change tracker  ·  Effort: L
-Snapshot `/api/frontlines` on a schedule, diff successive snapshots, and render
-advances/withdrawals (movement arrows or a "since yesterday" delta).
-- **Needs:** lightweight persistence for snapshots (flat JSON in `public/data/` or a
-  small store) + a diff routine. Builds on 1.1.
+### 2.1 — Frontline change tracker  ·  ✅ DONE (2026-06-06)
+**Shipped:** `/api/frontline-changes` snapshots DeepState polygon areas once per UTC
+day to `~/.osiris-data/frontline-history.json` (persists across rebuilds, capped at
+120 days). Returns `delta_1d`/`delta_7d` (growth = RU expansion, in km²). Deltas are
+`null` until a second UTC day is recorded — after that they fill automatically.
+`src/components/FrontlineTracker.tsx` — a glass card bottom-right on desktop and
+inline in the mobile layers drawer — polls hourly and renders the current footprint,
+24h delta, and 7d delta with red/green trend arrows. Gated on `activeLayers.frontlines`
+(appears automatically when the Frontline layer is toggled on).
+**Live:** 299,887 km² footprint, +6 km² over 7d as of first data (2026-06-03).
 
 ### 2.2 — RU rail / logistics layer  ·  ✅ DONE (folded into 2.3, 2026-06-03)
 **Shipped as part of the Thermal Strike AOIs layer (2.3):** rail hubs / marshalling
