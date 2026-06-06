@@ -191,9 +191,8 @@ A small rule engine that fires when conditions co-occur, e.g.:
 - a FIRMS hotspot appears near an RU airfield (ties to 2.3).
 - **Delivery:** in-app toast + optional webhook / Telegram.
 
-### 4.3 — Entity watchlist  ·  Effort: M–L
-Let the operator pin an entity (ship MMSI, airfield, unit) and track it over time —
-a per-entity sighting timeline. Builds on the existing entity search/index.
+### 4.3 — Entity watchlist  ·  🗑 REMOVED
+Scrapped — scope not worth the complexity for current use case.
 
 ---
 
