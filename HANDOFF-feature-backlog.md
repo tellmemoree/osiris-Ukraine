@@ -117,58 +117,58 @@ capture/advance) to align on what counts as each.
 - **To restore:** un-comment the two lines in `LAYER_GROUPS` (UA WAR section) in
   `LayerPanel.tsx`; routes and map rendering are fully intact.
 
-### 2.4 — Event timeline / playback  ·  Effort: L
-A time-scrubber to replay the last 24–72h of air raids, KAB threats, strikes, and
-geolocated news.
-- **Needs:** a timestamped event store (most routes already carry timestamps) + a
-  timeline control component + map state driven by the scrub position.
+### 2.4 — Event timeline / playback  ·  ✅ DONE (2026-06-06)
+**Shipped:** `src/components/TimelineControl.tsx` — a bottom-of-map scrubber bar (desktop
+only) toggled via the Play button in the right tool strip.
+- **Play/pause** with 1×/4×/12× speed; **range selector** 6h/12h/24h/48h; **LIVE** button.
+- **Density histogram** behind the scrubber bucketed by event type (cyan = news/intel,
+  orange = KAB threat, yellow = global incidents).
+- **Drag or click** anywhere on the track to jump to a time.
+- **Map filtering:** when scrubbing, `news_intel`, `kab_threats`, and `global_incidents`
+  layers filter to show only events ≤ scrub position (within the selected range window).
+  All three `useEffect`s in `OsirisMap.tsx` are replay-aware via the `replayTime` prop.
+- **Out of scope (Phase 2):** air-raid history (binary on/off, no per-event timestamps —
+  needs a background poller snapshotting state to `~/.osiris-data/`); thermal AOI (layer
+  still hidden pending 2.3b classifier tuning).
 
 ---
 
 ## Direction 3 — Recon / OSINT expansion (continues current thread)
 
-### 3.1 — Camera expansion  ·  ✅ DONE (2026-06-05)
-**Shipped:**
+### 3.1 — Camera expansion  ·  ✅ DONE (2026-06-05), RU portion scrapped (2026-06-06)
+**Shipped (Ukraine):**
 - **`stream_type: 'mjpeg'`** added to `CctvStreamType` (`types.ts`) and rendered
-  as a native `<img src={stream_url}>` in `CameraViewer.tsx` (browsers handle multipart
-  JPEG natively; shows "LIVE MJPEG" indicator).
-- **Windy webcam bbox fetcher** (`fetchWindyCameras()`) added to `cctv/route.ts`,
-  gated on `WINDY_WEBCAM_KEY` (free, 500 req/day). RU bbox 41–82/19–190 wired into
-  `fetchRussiaCameras()`; UA bbox 44–53/21.5–41 wired into `fetchUkraineCameras()`.
-  Returns active webcams with geocoords, snapshot previews, and player embeds (iframe).
-- **insecam.org MJPEG scraper** (`parseInsecamHtml()`) implemented: parses
-  `<img id="imageN" src="http://ip:port/...">` entries, resolves city names via a
-  54-city RU lookup table (`RU_CITY_COORDS`), emits `stream_type: 'mjpeg'` camera
-  entries. Only triggered when `RU_PROXY_URL` is set (streams need RU egress IP).
-- **RU YouTube TV channels NOT added** — user decided against (pure propaganda, no intel value).
-- **`.env.example`** updated with `WINDY_WEBCAM_KEY` comment.
-- **Deps:** Windy key (`WINDY_WEBCAM_KEY`); insecam scrape needs `RU_PROXY_URL` (3.2).
+  as a native `<img src={stream_url}>` in `CameraViewer.tsx`.
+- **Windy webcam bbox fetcher** (`fetchWindyCameras()`) in `cctv/route.ts`, gated on
+  `WINDY_WEBCAM_KEY` (free, 500 req/day). UA bbox 44–53/21.5–41 wired into
+  `fetchUkraineCameras()`.
 
-### 3.2 — ruFetch() proxy scaffold (#7b)  ·  ✅ DONE (2026-06-05)
-**Shipped:** `src/lib/ru-fetch.ts` — `ruFetch()` wraps undici's `ProxyAgent`, singleton
-per process, recreates if `RU_PROXY_URL` changes (dev hot-reload safe). Unset = direct
-`fetch`, nothing breaks. Wired into `fetchRussiaCameras()` in `cctv/route.ts`: when
-`RU_PROXY_URL` is set, probes `insecam.org/en/bycountry/RU/` via `ruFetch`; HTML parsing
-of discovered MJPEG feeds is the TODO for task 3.1. `.env.example` documents the var.
-ARCHITECTURE.md updated. Activate by pasting the IPRoyal proxy URL into `.env`.
+**RU expansion scrapped (2026-06-06):** MJPEG streams from RU devices are geoblocked
+at the browser level — a server-side relay would be needed, making the proxy cost
+prohibitive (GB-scale per session). All RU-specific code removed: `fetchRussiaCameras()`,
+`parseInsecamHtml()`, `RU_CITY_COORDS`, `ru-fetch.ts`, `undici` dep, `RU_PROXY_URL` env.
+
+### 3.2 — ruFetch() proxy scaffold  ·  🗑 REMOVED (2026-06-06)
+Scrapped along with the RU camera expansion. `src/lib/ru-fetch.ts` deleted.
 
 ### 3.3 — Scanner backend wiring (#7)  ·  ✅ DONE (2026-06-05)
-**Shipped:** route fully rewritten — no external `SCANNER_URL` service needed. All
-scan types run inline:
-- **quick** — Shodan host lookup (if `SHODAN_API_KEY` set) with TCP-probe fallback
-- **ssl** — Shodan TLS banner with live `tls.connect()` fallback
-- **headers** — Shodan HTTP banner with live `fetch()` fallback
-- **subdomains** — crt.sh (keyless)
-- **tech** — Shodan CPE/banners + live page signature matching
-- **vuln** — Shodan CVE data (requires `SHODAN_API_KEY`; returns empty list without)
-- **rdns** — Shodan `hostnames[]` + `dns.reverse()` fallback (keyless)
-- **whois** — RDAP (`rdap.org`, keyless) for IPs and domains; Shodan org augment
-- **geoloc** — Shodan lat/lng + `ip-api.com` fallback (keyless)
-- **traceroute** — local `mtr` via `spawn()` (no raw-socket root needed; 2 cycles/20 hops)
+**Shipped:** route fully rewritten — all scan types run inline with Shodan augmentation.
 
-SSRF guard + rate limiter (5/min) remain. `SHODAN_API_KEY` is optional — enriches
-quick/ssl/tech/vuln but nothing breaks without it. `SCANNER_URL`/`SCANNER_KEY` env
-vars are now unused and removed from `.env.example`.
+**⚠️ Superseded by 3.4:** active scan types (traceroute, port scan, SSL, headers, tech
+live-fetch, vuln/Nuclei) must move to an external scanner node for OPSEC — inline
+connections trace back to the Osiris server IP.
+
+### 3.4 — External scanner node  ·  Effort: M  ·  📄 [`HANDOFF-scanner-node.md`](./HANDOFF-scanner-node.md)
+Active probing tools need a separate VPS on a different provider/region. Full spec,
+infrastructure checklist, and Osiris-side changes are in `HANDOFF-scanner-node.md`.
+
+**Summary:**
+- Provision Hetzner/Vultr VPS (Ubuntu 22.04, 2 GB RAM)
+- Install mtr + Nuclei on the node
+- Write a small Fastify microservice that proxies scan requests
+- Restore `SCANNER_URL`/`SCANNER_KEY` env vars in Osiris
+- Active types proxy to node; passive types (subdomains/rdns/whois/geoloc) stay inline
+- `vuln` gets Nuclei on the node + NVD passive cross-reference as inline fallback
 
 ---
 

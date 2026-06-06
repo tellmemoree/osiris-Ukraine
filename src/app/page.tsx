@@ -17,6 +17,7 @@ import KeyboardShortcuts from '@/components/KeyboardShortcuts';
 import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 import FrontlineTracker from '@/components/FrontlineTracker';
+import TimelineControl, { TimelineEvent } from '@/components/TimelineControl';
 
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
@@ -111,6 +112,16 @@ export default function Dashboard() {
   const [highlight, setHighlight] = useState<{ lat: number; lng: number; ts: number } | null>(null);
   // Searchable index over every live entity array (rebuilt when data changes).
   const entityIndex = useMemo(() => buildEntityIndex(data), [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Timestamped events for the timeline density histogram.
+  const timelineEvents = useMemo((): TimelineEvent[] => {
+    const evs: TimelineEvent[] = [];
+    (data.news   || []).forEach((n: any) => n.published  && evs.push({ t: new Date(n.published).getTime(),  type: 'news'  }));
+    (data.kab_threats || []).forEach((k: any) => k.startedAt && evs.push({ t: new Date(k.startedAt).getTime(), type: 'kab'  }));
+    (data.gdelt  || []).forEach((e: any) => e.published  && evs.push({ t: new Date(e.published).getTime(),  type: 'gdelt' }));
+    return evs;
+  }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [globalStats, setGlobalStats] = useState<any>(null);
   const mouseCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const coordsDisplayRef = useRef<HTMLDivElement>(null);
@@ -133,6 +144,9 @@ export default function Dashboard() {
   const [sweepData, setSweepData] = useState<any>(null);
   const [scanTargets, setScanTargets] = useState<any[]>([]);
   const [demoMode, setDemoMode] = useState(false);
+  const [replayTime, setReplayTime] = useState<Date | null>(null);
+  const [timelineRangeH, setTimelineRangeH] = useState(24);
+  const [showTimeline, setShowTimeline] = useState(false);
 
   const isMobile = useIsMobile();
   const startTime = useRef(Date.now());
@@ -797,9 +811,29 @@ export default function Dashboard() {
           sweepData={sweepData}
           scanTargets={scanTargets}
           demoMode={demoMode}
+          replayTime={replayTime}
         />
       </ErrorBoundary>
 
+
+      {/* ── TIMELINE CONTROL (desktop only) ── */}
+      <AnimatePresence>
+        {showTimeline && !isMobile && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.2 }}
+            className="absolute bottom-[70px] left-[315px] right-[52px] z-[200]"
+          >
+            <TimelineControl
+              replayTime={replayTime}
+              timelineRangeH={timelineRangeH}
+              events={timelineEvents}
+              onScrub={setReplayTime}
+              onRangeChange={setTimelineRangeH}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── MAP VIEW CONTROLS (3D/2D + SATELLITE TOGGLE) ── */}
       <motion.div
@@ -969,6 +1003,15 @@ export default function Dashboard() {
             )}
           </AnimatePresence>
         </div>
+
+        {/* Timeline toggle */}
+        <button
+          onClick={() => setShowTimeline(t => !t)}
+          title="Event timeline / playback"
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showTimeline ? 'bg-[var(--cyan-primary)]/20' : 'hover:bg-white/10'}`}
+        >
+          <Play className={`w-4 h-4 ${showTimeline ? 'text-[var(--cyan-primary)]' : 'text-white/60'}`} />
+        </button>
       </div>}
 
       {/* ── LIVE FEED VIEWER OVERLAY ── */}
