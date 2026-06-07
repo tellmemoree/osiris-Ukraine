@@ -14,31 +14,14 @@ services:
         value: "3000"
       - key: NEXT_TELEMETRY_DISABLED
         value: "1"
-      # --- API keys (shared with dev unless rate limits become an issue) ---
+      # Required: features are meaningfully broken without these
+      - key: AIS_API_KEY
+        sync: false
       - key: SHODAN_API_KEY
         sync: false
       - key: CENSYS_API_ID
         sync: false
       - key: CENSYS_API_SECRET
-        sync: false
-      - key: AISSTREAM_API_KEY
-        sync: false
-      - key: AIS_API_KEY
-        sync: false
-      - key: SHADOW_FLEET_SOURCE_URL
-        sync: false
-      - key: WINDY_WEBCAM_KEY
-        sync: false
-      - key: UMAMI_WEBSITE_ID
-        sync: false
-      # --- Per-environment secrets (must differ from osiris-dev) ---
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
-      - key: GITHUB_WEBHOOK_SECRET
-        sync: false
-      - key: SDK_INGEST_KEY
         sync: false
 
   - type: web
@@ -56,29 +39,12 @@ services:
         value: "3000"
       - key: NEXT_TELEMETRY_DISABLED
         value: "1"
-      # --- API keys (shared with prod unless rate limits become an issue) ---
+      # Required: features are meaningfully broken without these
+      - key: AIS_API_KEY
+        sync: false
       - key: SHODAN_API_KEY
         sync: false
       - key: CENSYS_API_ID
         sync: false
       - key: CENSYS_API_SECRET
-        sync: false
-      - key: AISSTREAM_API_KEY
-        sync: false
-      - key: AIS_API_KEY
-        sync: false
-      - key: SHADOW_FLEET_SOURCE_URL
-        sync: false
-      - key: WINDY_WEBCAM_KEY
-        sync: false
-      - key: UMAMI_WEBSITE_ID
-        sync: false
-      # --- Per-environment secrets (must differ from osiris prod) ---
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
-      - key: GITHUB_WEBHOOK_SECRET
-        sync: false
-      - key: SDK_INGEST_KEY
         sync: false
