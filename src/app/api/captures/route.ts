@@ -97,6 +97,7 @@ export async function GET(req: Request) {
     type Capture = {
       id: string; lat: number; lng: number; side: 'ru' | 'ua'; name: string;
       source?: string; side_reported?: string; link?: string; date?: string; count: number;
+      description?: string;
     };
     // Dedup per place+side (~0.05°/~5 km). Same settlement claimed by the same side =
     // one marker (count the corroborating reports); a contested place claimed by BOTH
@@ -119,6 +120,7 @@ export async function GET(req: Request) {
           id: `cap-${++n}`, lat, lng, side,
           name: (item.title || 'Territorial change').slice(0, 120),
           source: item.source, side_reported: item.side, link: item.link, date: item.published, count: 1,
+          description: item.description?.slice(0, 220),
         });
       }
     }

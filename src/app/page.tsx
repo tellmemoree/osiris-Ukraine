@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText, Bell } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -21,6 +21,7 @@ import TimelineControl, { TimelineEvent } from '@/components/TimelineControl';
 import BriefingPanel from '@/components/BriefingPanel';
 import ThresholdToasts from '@/components/ThresholdToasts';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
+import NotificationDrawer, { type NotificationRecord } from '@/components/NotificationDrawer';
 
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
@@ -162,6 +163,9 @@ export default function Dashboard() {
   const [showFrontlineTracker, setShowFrontlineTracker] = useState(false);
   const [showBriefing, setShowBriefing] = useState(false);
   const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlert[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notificationLog, setNotificationLog] = useState<NotificationRecord[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const isMobile = useIsMobile();
   const startTime = useRef(Date.now());
@@ -542,6 +546,20 @@ export default function Dashboard() {
     return () => clearInterval(iv);
   }, []);
 
+  // ── NOTIFICATION LOG — accumulate from threshold alerts ──
+  useEffect(() => {
+    if (!thresholdAlerts.length) return;
+    setNotificationLog(prev => {
+      const existingIds = new Set(prev.map(n => n.id));
+      const fresh = thresholdAlerts
+        .filter(a => !existingIds.has(a.id))
+        .map(a => ({ ...a, seenAt: Date.now() }));
+      if (!fresh.length) return prev;
+      setUnreadCount(c => c + fresh.length);
+      return [...fresh, ...prev].slice(0, 200);
+    });
+  }, [thresholdAlerts]);
+
   // Reactive layer fetch: handled by layerFetchedRef above (no duplicate)
 
   // ── OSIRIS SDK — Intelligence Fusion Layer ──
@@ -829,6 +847,22 @@ export default function Dashboard() {
       <ThresholdToasts
         alerts={thresholdAlerts}
         onLocate={(lat, lng) => setFlyToLocation({ lat, lng, ts: Date.now() })}
+        onNewAlert={(alert) => {
+          setNotificationLog(prev => {
+            if (prev.some(n => n.id === alert.id)) return prev;
+            setUnreadCount(c => c + 1);
+            return [{ ...alert, seenAt: Date.now() }, ...prev].slice(0, 200);
+          });
+        }}
+      />
+
+      {/* ── NOTIFICATION DRAWER ── */}
+      <NotificationDrawer
+        isOpen={notifOpen}
+        onClose={() => setNotifOpen(false)}
+        notifications={notificationLog}
+        onClear={() => setNotificationLog([])}
+        onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setNotifOpen(false); }}
       />
 
       {/* ── MAP ── */}
@@ -922,6 +956,21 @@ export default function Dashboard() {
           </span>
         </div>
       </motion.div>
+
+      {/* ── NOTIFICATION BELL (desktop) ── */}
+      <motion.button
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3 }}
+        onClick={() => { setNotifOpen(true); setUnreadCount(0); }}
+        className="status-bar-desktop absolute top-3.5 right-[340px] z-[210] pointer-events-auto w-8 h-8 flex items-center justify-center rounded-lg glass-panel text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        title="Notification log"
+      >
+        <Bell className="w-3.5 h-3.5" />
+        {unreadCount > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#FF3D3D] text-white text-[8px] font-mono font-bold flex items-center justify-center">
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
+      </motion.button>
 
       {/* ── TOP-RIGHT STATUS (desktop) — C2 DISPLAY ── */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3 }} className="status-bar-desktop absolute top-4 right-6 z-[200] pointer-events-none flex items-center gap-4 text-[9px] font-mono tracking-widest text-[var(--text-muted)]">

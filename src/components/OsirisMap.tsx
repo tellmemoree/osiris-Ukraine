@@ -844,11 +844,17 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const catColor = { airfield: '#00E5FF', oil: '#FF9500', rail: '#FFD700', logistics: '#FFA500', naval: '#4FC3F7', power: '#FF6B00', ammo: '#FF3D3D', news: '#D4AF37' }[p.category as string] || '#FF6B00';
       const confColor = p.confidence === 'high' ? '#00E676' : p.confidence === 'med' ? '#FFD700' : p.confidence === 'low' ? '#888' : '#555';
       let sourcesHtml = '';
+      let snippetHtml = '';
       try {
         const srcs = JSON.parse(p.sources || '[]') as any[];
         if (srcs.length > 0) {
           const first = srcs[0];
-          sourcesHtml = `<div style="font-size:9px;color:#5C5A54;margin-top:6px;">${first.source ? `<a href="${first.link||'#'}" target="_blank" style="color:#D4AF37;text-decoration:none;">${first.source}</a>` : ''}${srcs.length > 1 ? ` <span style="color:#888;">+${srcs.length-1} more</span>` : ''}</div>`;
+          if (p.category !== 'news' && first.title) {
+            snippetHtml = `<div style="font-size:10px;color:#C0BEBA;line-height:1.45;margin-bottom:6px;font-style:italic;">"${first.title}"</div>`;
+          } else if (p.category === 'news' && first.description) {
+            snippetHtml = `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;">${first.description}</div>`;
+          }
+          sourcesHtml = `<div style="font-size:9px;color:#5C5A54;margin-top:4px;">${first.source ? `<a href="${first.link||'#'}" target="_blank" style="color:#D4AF37;text-decoration:none;">${first.source}</a>` : ''}${srcs.length > 1 ? ` <span style="color:#888;">+${srcs.length-1} more report${srcs.length > 2 ? 's' : ''}</span>` : ''}</div>`;
         }
       } catch { /* ignore */ }
       popup(coords, `<div style="${pStyle}border:1px solid ${catColor}40;">
@@ -857,6 +863,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           ${p.bilateral ? `<span style="color:#FFD700;font-size:9px;">· UA + RU sources</span>` : ''}
         </div>
         <div style="font-size:11px;color:#E8E6E0;margin-bottom:6px;">${p.name||'Unknown site'}</div>
+        ${snippetHtml}
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;font-size:9px;margin-bottom:6px;">
           <div><span style="color:#5C5A54;">CONFIDENCE</span><br/><span style="color:${confColor};">${(p.confidence||'—').toUpperCase()}</span></div>
           <div><span style="color:#5C5A54;">FIRES</span><br/><span style="color:#FF6B00;">${p.fireCount||0}</span></div>
@@ -882,6 +889,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           ${p.count > 1 ? `<span style="color:#888;font-size:9px;">${p.count} reports</span>` : ''}
         </div>
         <div style="font-size:11px;color:#E8E6E0;margin-bottom:6px;">${p.name||'Unknown location'}</div>
+        ${p.description ? `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;font-style:italic;">${p.description}</div>` : ''}
         ${p.link ? `<a href="${p.link}" target="_blank" style="${linkStyle}color:${sideColor};border:1px solid ${sideColor}40;background:${sideColor}11;">📡 SOURCE</a>` : ''}
         <div style="font-size:8px;color:#444;margin-top:6px;">milblogger claim — verify before acting</div>
       </div>`);
@@ -1131,7 +1139,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           <span style="color:${color};font-size:12px;font-weight:700;letter-spacing:0.1em;">🚢 ${p.name}</span>
           <span style="color:#aaa;font-size:11px;white-space:nowrap;">${flagStr}</span>
         </div>
-        ${isShadow ? `<div style="color:#E040FB;font-size:9px;font-weight:700;margin-bottom:6px;">⚠ SHADOW FLEET — sanctioned / dark vessel</div>` : ''}
+        ${isShadow ? `<div style="color:#E040FB;font-size:9px;font-weight:700;margin-bottom:4px;">⚠ SHADOW FLEET — sanctioned / dark vessel</div>${p.stale === true || p.stale === 'true' ? `<div style="color:#FF9500;font-size:9px;margin-bottom:6px;">📡 AIS-DARK · Last seen: <span style="color:#E8E6E0;">${p.last_position_at ? new Date(p.last_position_at).toUTCString().slice(5,22)+' UTC' : p.minutes_since_update+'m ago'}</span></div>` : ''}` : ''}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
           <div><span style="color:#5C5A54;">FLAG</span><br/><span style="color:#E8E6E0;">${flagStr}</span></div>
           <div><span style="color:#5C5A54;">TYPE</span><br/><span style="color:${color};">${shipType.toUpperCase()}</span></div>
@@ -1405,7 +1413,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (!mapReady) return;
     setGeo('maritime', activeLayers.maritime && data.maritime_ports ? data.maritime_ports.map((p: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] }, properties: { name: p.name, country: p.country, type: p.type, volume: p.volume, fleet: p.fleet, rank: p.rank } })) : []);
     setGeo('maritime-choke', activeLayers.maritime && data.maritime_chokepoints ? data.maritime_chokepoints.map((c: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: { name: c.name, traffic: c.traffic, risk: c.risk } })) : []);
-    setGeo('maritime-ships', (activeLayers.ships || activeLayers.shadow_fleet) && data.maritime_ships ? data.maritime_ships.filter((s: any) => Number.isFinite(s.lat) && Number.isFinite(s.lng) && Math.abs(s.lat) <= 90 && Math.abs(s.lng) <= 180 && !(s.lat === 0 && s.lng === 0)).map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, flag_emoji: s.flag_emoji, shadow_fleet: s.shadow_fleet === true, stale: s.stale === true, minutes_since_update: s.minutes_since_update } })) : []);
+    setGeo('maritime-ships', (activeLayers.ships || activeLayers.shadow_fleet) && data.maritime_ships ? data.maritime_ships.filter((s: any) => Number.isFinite(s.lat) && Number.isFinite(s.lng) && Math.abs(s.lat) <= 90 && Math.abs(s.lng) <= 180 && !(s.lat === 0 && s.lng === 0)).map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, flag_emoji: s.flag_emoji, shadow_fleet: s.shadow_fleet === true, stale: s.stale === true, minutes_since_update: s.minutes_since_update, last_position_at: s.last_position_at } })) : []);
   }, [mapReady, data.maritime_ports, data.maritime_chokepoints, data.maritime_ships, activeLayers.maritime, activeLayers.ships, activeLayers.shadow_fleet, setGeo]);
 
   useEffect(() => {

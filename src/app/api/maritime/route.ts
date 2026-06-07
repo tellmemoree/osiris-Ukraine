@@ -308,13 +308,10 @@ function connectAisStream() {
 // Start connection process asynchronously
 connectAisStream();
 
-// Regular vessels expire 10 min after their last AIS report. Shadow-fleet
-// vessels are kept far longer (12h): going AIS-dark is their signature evasion,
-// so their last-known position is itself intelligence and should not vanish the
-// moment they switch the transponder off. Stale shadow tracks are flagged
-// (`stale` / `minutes_since_update`) so the UI can show "AIS-dark Xh ago".
+// Regular vessels expire 10 min after their last AIS report. Shadow-fleet vessels
+// are kept indefinitely — going AIS-dark is their signature evasion; last-known
+// position is itself intelligence and should not expire until they transmit again.
 const STALE_MS = 10 * 60 * 1000;
-const SHADOW_RETAIN_MS = 12 * 60 * 60 * 1000;
 
 export async function GET() {
   const now = Date.now();
@@ -322,7 +319,7 @@ export async function GET() {
     // Use the live watchlist too, not just the stored flag, so a vessel learned
     // (via type-5 IMO) after its last position fix still gets the long retention.
     const isShadow = ship.shadow_fleet || shadowMmsi.has(mmsi);
-    if (now - ship.timestamp > (isShadow ? SHADOW_RETAIN_MS : STALE_MS)) {
+    if (!isShadow && now - ship.timestamp > STALE_MS) {
       shipsCache.delete(mmsi);
     }
   }
@@ -401,7 +398,8 @@ export async function GET() {
       flag: f ? f.iso : null,
       flag_emoji: f ? f.emoji : null,
       minutes_since_update: minutesSinceUpdate,
-      stale: minutesSinceUpdate > 10, // only shadow vessels survive past 10 min
+      last_position_at: new Date(s.timestamp).toISOString(),
+      stale: minutesSinceUpdate > 10,
     };
   });
 
