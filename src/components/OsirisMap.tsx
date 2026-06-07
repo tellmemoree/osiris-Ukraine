@@ -1302,8 +1302,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
-    const aois = activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi : [];
-    setGeo('thermal-aoi', aois.map((a: any) => ({
+    const cutoff = replayTime ?? new Date();
+    const cutoffMs = cutoff.getTime();
+    const all: any[] = activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi : [];
+    const visible = all.filter((a: any) => {
+      if (!a.latest) return a.category !== 'news'; // static unlit sites always show; news-only hide during replay
+      const parts = (a.latest as string).trim().split(' ');
+      if (parts.length < 2) return true;
+      const t4 = parts[1].padStart(4, '0');
+      const ts = new Date(`${parts[0]}T${t4.slice(0,2)}:${t4.slice(2,4)}:00Z`).getTime();
+      return ts <= cutoffMs && (cutoffMs - ts) < 86400000;
+    });
+    setGeo('thermal-aoi', visible.map((a: any) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
       properties: {
@@ -1314,17 +1324,24 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         sources: a.sources ? JSON.stringify(a.sources) : '[]',
       },
     })));
-  }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, setGeo]);
+  }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, setGeo, replayTime]);
 
   useEffect(() => {
     if (!mapReady) return;
-    const caps = activeLayers.captures && data.captures ? data.captures : [];
-    setGeo('captures', caps.map((c: any) => ({
+    const cutoff = replayTime ?? new Date();
+    const cutoffMs = cutoff.getTime();
+    const all: any[] = activeLayers.captures && data.captures ? data.captures : [];
+    const visible = all.filter((c: any) => {
+      if (!c.date) return true;
+      const t = new Date(c.date).getTime();
+      return t <= cutoffMs && (cutoffMs - t) < 86400000;
+    });
+    setGeo('captures', visible.map((c: any) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
       properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count },
     })));
-  }, [mapReady, data.captures, activeLayers.captures, setGeo]);
+  }, [mapReady, data.captures, activeLayers.captures, setGeo, replayTime]);
 
   // Air quality (Open-Meteo) — colored PM2.5 station dots.
   useEffect(() => {
