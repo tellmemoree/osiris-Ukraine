@@ -22,6 +22,7 @@ const LAYER_GROUPS = [
     color: '#1565C0',
     layers: [
       { key: 'sdk_sea', label: 'Maritime Lines', icon: Anchor, color: '#4FC3F7', dataKey: 'sdk_entities' },
+      { key: 'sdk_ransomware', label: 'Ransomware Feed', icon: AlertTriangle, color: '#FF3D3D', dataKey: 'sdk_entities' },
     ],
   },
   {
@@ -84,8 +85,7 @@ const LAYER_GROUPS = [
     color: '#FF1744',
     layers: [
       { key: 'frontlines', label: 'Frontline (DeepState)', icon: Target, color: '#FF3D3D', dataKey: 'frontlines' },
-      { key: 'thermal_aoi', label: 'Thermal Strike AOIs', icon: Flame, color: '#FF6B00', dataKey: 'thermal_aoi' },
-      { key: 'captures', label: 'Territorial Captures', icon: Target, color: '#FF3D3D', dataKey: 'captures' },
+      // captures + thermal_aoi hidden pending classifier refinement — re-add when ready
       { key: 'air_raids', label: 'Air Raid Alerts', icon: Siren, color: '#FF1744', dataKey: 'air_raids' },
       { key: 'kab_threats', label: 'KAB / Glide-Bomb', icon: Bomb, color: '#FF6B00', dataKey: 'kab_threats' },
       { key: 'power_outages', label: 'Power Outages', icon: Zap, color: '#FFD500', dataKey: 'power_outages' },
@@ -127,9 +127,9 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
   const toggle = (key: string) => setActiveLayers((prev: any) => ({ ...prev, [key]: !prev[key] }));
 
   // Toggle every layer in a group at once: if any are on, turn the whole group
-  // off; otherwise turn them all on.
+  // off; otherwise turn them all on. Skips sdk_ransomware (coming-soon stub).
   const toggleGroup = (group: { layers: { key: string }[] }) => {
-    const keys = group.layers.map(l => l.key);
+    const keys = group.layers.map(l => l.key).filter(k => k !== 'sdk_ransomware');
     setActiveLayers((prev: any) => {
       const anyOn = keys.some(k => prev[k]);
       const next = { ...prev };
@@ -194,7 +194,13 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
                 return (
                   <button
                     key={layer.key}
-                    onClick={() => toggle(layer.key)}
+                    onClick={() => {
+                      if (layer.key === 'sdk_ransomware') {
+                        alert('Ransomware Feed - Coming Soon');
+                      } else {
+                        toggle(layer.key);
+                      }
+                    }}
                     className={`flex items-center gap-2 px-2 py-2 rounded border transition-colors ${
                       isLayerActive 
                         ? 'bg-white/10 border-white/20' 
@@ -303,7 +309,13 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
                         return (
                           <button
                             key={layer.key}
-                            onClick={() => toggle(layer.key)}
+                            onClick={() => {
+                              if (layer.key === 'sdk_ransomware') {
+                                alert('Ransomware Feed - Coming Soon');
+                              } else {
+                                toggle(layer.key);
+                              }
+                            }}
                             className="w-full flex items-center gap-3 px-2 py-1.5 rounded bg-transparent hover:bg-white/5 transition-colors group"
                           >
                             <div 

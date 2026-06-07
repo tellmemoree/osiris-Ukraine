@@ -1,13 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 
-export const dynamic = 'force-dynamic';
-
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — shared by all consumers (strategic-thermal, captures, digest)
-let newsCache: unknown = null;
-let newsCachedAt = 0;
-let newsInflight: Promise<unknown> | null = null;
-
 /**
  * OSIRIS — Military-Grade Intelligence API
  * Fetches Telegram OSINT feeds directly, with a failsafe fallback 
@@ -26,7 +19,6 @@ const UA_CHANNELS = [
   // Ukrainian-language (Cyrillic)
   'suspilne_news', 'hromadske_ua', 'truexanewsua', 'serhii_flash',
   'operativnoZSU', 'butusovplus', 'Tsaplienko', 'lachentyt',
-  'ssternenko', 'informnapalm',
 ];
 
 // Russian milblogger / MoD channels — monitored for the adversary picture.
@@ -34,7 +26,7 @@ const UA_CHANNELS = [
 // it is dropped from the scrape list and kept only as a source link elsewhere).
 const RU_CHANNELS = [
   'milinfolive', 'wargonzo', 'epoddubny', 'sashakots', 'dva_majora',
-  'voenkorKotenok', 'rvvoenkor', 'colonelcassad', 'mod_russia',
+  'voenkorKotenok', 'rvvoenkor', 'grey_zone', 'mod_russia',
 ];
 
 const TELEGRAM_CHANNELS = [...UA_CHANNELS, ...RU_CHANNELS];
@@ -127,10 +119,6 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'tula': [54.193, 37.617], 'smolensk': [54.782, 32.040], 'lipetsk': [52.603, 39.571],
   'murmansk': [68.958, 33.083], 'kazan': [55.796, 49.109], 'samara': [53.196, 50.100],
   'dzhankoi': [45.709, 34.393], 'saky': [45.134, 33.599],
-  'kronstadt': [59.990, 29.760], 'кронштадт': [59.990, 29.760],
-  'ust-labinsk': [45.220, 39.710], 'усть-лабинск': [45.220, 39.710], 'усть-лабінськ': [45.220, 39.710],
-  'zugres': [48.010, 38.510], 'зугрес': [48.010, 38.510], 'зугрэс': [48.010, 38.510],
-  'зуївська тес': [48.010, 38.510],
   // Cyrillic — broad (country/peninsula; only used when no city is named)
   'россия': [61.524, 105.318], 'украина': [49.487, 31.272], 'крым': [44.952, 34.102],
   // Cyrillic — Russia
@@ -213,13 +201,6 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'constanta': [44.175, 28.638], 'констанц': [44.175, 28.638],
   // Occupied ports not yet in gazetteer
   'berdiansk': [46.756, 36.790], 'бердіянськ': [46.756, 36.790],
-  // Active frontline towns — Latin variants previously missing
-  'vuhledar': [47.779, 37.250],
-  // Active frontline towns — Cyrillic variants previously missing
-  'велика новосілка': [47.844, 36.797], 'велика новоселка': [47.844, 36.797],
-  'ліпці': [50.16, 36.49], 'lyptsi': [50.16, 36.49],
-  'білогорівка': [47.91, 38.09], 'bilohorivka': [47.91, 38.09],
-  'урожайне': [47.51, 36.98], 'urozhaine': [47.51, 36.98],
 };
 
 function scoreRisk(text: string): number {
@@ -404,9 +385,9 @@ function parseRSSItems(xml: string, sourceName: string): ParsedArticle[] {
   return items;
 }
 
-async function buildNews(): Promise<unknown> {
+export async function GET() {
   try {
-  const feedPromises = TELEGRAM_CHANNELS.map(async (channel) => {
+    const feedPromises = TELEGRAM_CHANNELS.map(async (channel) => {
       try {
         const res = await fetch(`https://t.me/s/${channel}`, { 
           signal: AbortSignal.timeout(8000), 
@@ -467,36 +448,22 @@ async function buildNews(): Promise<unknown> {
         coords: placed,
         coords_default: !coords,
         places: findAllCoords(searchText),
-        machine_assessment: null, // populated by 5.9 AI enrichment when GEMINI_API_KEY_* is set
+        machine_assessment: riskScore >= 8 ? "AI Analysis indicates elevated tactical priority based on OSINT stream patterns." : null,
       };
     });
 
     newsItems.sort((a, b) => new Date(b.published).getTime() - new Date(a.published).getTime());
 
-    return { news: newsItems, total: newsItems.length, timestamp: new Date().toISOString() };
-  } catch {
-    return { news: [], error: 'Failed to fetch intel', total: 0, timestamp: new Date().toISOString() };
-  }
-}
-
-export async function GET() {
-  const now = Date.now();
-  if (newsCache && now - newsCachedAt < CACHE_TTL_MS) {
-    return NextResponse.json(newsCache, { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } });
-  }
-  if (newsInflight) {
-    const data = await newsInflight;
-    return NextResponse.json(data, { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } });
-  }
-  newsInflight = buildNews();
-  try {
-    const data = await newsInflight;
-    newsCache = data;
-    newsCachedAt = Date.now();
-    return NextResponse.json(data, { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } });
+    return NextResponse.json({
+      news: newsItems,
+      total: newsItems.length,
+      timestamp: new Date().toISOString(),
+    }, {
+      headers: {
+        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
+      },
+    });
   } catch {
     return NextResponse.json({ news: [], error: 'Failed to fetch intel' }, { status: 500 });
-  } finally {
-    newsInflight = null;
   }
 }

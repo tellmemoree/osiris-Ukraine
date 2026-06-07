@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { stealthFetch } from '@/lib/stealthFetch';
+import { ruFetch } from '@/lib/ru-fetch';
 import { fetchAsfinagCameras } from './asfinag';
 import { fetchBulgariaCameras } from './bulgaria';
 import { fetchGreeceCameras } from './greece';
@@ -297,6 +298,79 @@ async function fetchAsiaCameras(): Promise<Camera[]> {
   return cams;
 }
 
+// Compact city→coords lookup for insecam and other sources that only provide city names.
+const RU_CITY_COORDS: Record<string, [number, number]> = {
+  'moscow': [55.7558, 37.6173],
+  'москва': [55.7558, 37.6173],
+  'saint petersburg': [59.9311, 30.3609],
+  'st. petersburg': [59.9311, 30.3609],
+  'st petersburg': [59.9311, 30.3609],
+  'санкт-петербург': [59.9311, 30.3609],
+  'novosibirsk': [54.9893, 82.9182],
+  'новосибирск': [54.9893, 82.9182],
+  'yekaterinburg': [56.8389, 60.6057],
+  'екатеринбург': [56.8389, 60.6057],
+  'kazan': [55.7963, 49.1088],
+  'казань': [55.7963, 49.1088],
+  'nizhny novgorod': [56.2965, 43.9361],
+  'нижний новгород': [56.2965, 43.9361],
+  'chelyabinsk': [55.1644, 61.4368],
+  'челябинск': [55.1644, 61.4368],
+  'samara': [53.1959, 50.1801],
+  'самара': [53.1959, 50.1801],
+  'ufa': [54.7388, 55.9721],
+  'уфа': [54.7388, 55.9721],
+  'rostov-on-don': [47.2357, 39.7015],
+  'rostov': [47.2357, 39.7015],
+  'ростов-на-дону': [47.2357, 39.7015],
+  'omsk': [54.9885, 73.3242],
+  'омск': [54.9885, 73.3242],
+  'krasnoyarsk': [56.0184, 92.8672],
+  'красноярск': [56.0184, 92.8672],
+  'voronezh': [51.6720, 39.1843],
+  'воронеж': [51.6720, 39.1843],
+  'perm': [58.0105, 56.2502],
+  'пермь': [58.0105, 56.2502],
+  'volgograd': [48.7080, 44.5133],
+  'волгоград': [48.7080, 44.5133],
+  'krasnodar': [45.0360, 38.9754],
+  'краснодар': [45.0360, 38.9754],
+  'saratov': [51.5336, 46.0343],
+  'саратов': [51.5336, 46.0343],
+  'tyumen': [57.1530, 68.9685],
+  'тюмень': [57.1530, 68.9685],
+  'izhevsk': [56.8527, 53.2114],
+  'ижевск': [56.8527, 53.2114],
+  'ulyanovsk': [54.3282, 48.3866],
+  'ульяновск': [54.3282, 48.3866],
+  'vladivostok': [43.1155, 131.8855],
+  'владивосток': [43.1155, 131.8855],
+  'barnaul': [53.3606, 83.7636],
+  'барнаул': [53.3606, 83.7636],
+  'irkutsk': [52.2978, 104.2964],
+  'иркутск': [52.2978, 104.2964],
+  'khabarovsk': [48.4827, 135.0838],
+  'хабаровск': [48.4827, 135.0838],
+  'belgorod': [50.5957, 36.5879],
+  'белгород': [50.5957, 36.5879],
+  'kursk': [51.7373, 36.1874],
+  'курск': [51.7373, 36.1874],
+  'novorossiysk': [44.7236, 37.7700],
+  'новороссийск': [44.7236, 37.7700],
+  'sevastopol': [44.6166, 33.5254],
+  'севастополь': [44.6166, 33.5254],
+  'simferopol': [44.9521, 34.1024],
+  'симферополь': [44.9521, 34.1024],
+  'sochi': [43.5855, 39.7231],
+  'сочи': [43.5855, 39.7231],
+  'stavropol': [45.0440, 41.9690],
+  'ставрополь': [45.0440, 41.9690],
+  'bryansk': [53.2521, 34.3717],
+  'брянск': [53.2521, 34.3717],
+  'engels': [51.4985, 46.1263],
+  'энгельс': [51.4985, 46.1263],
+};
+
 // Windy webcam bbox fetcher — returns active webcams for the given bounding box.
 // Gated on WINDY_WEBCAM_KEY (free tier = 500 req/day, register at api.windy.com).
 async function fetchWindyCameras(
@@ -337,6 +411,82 @@ async function fetchWindyCameras(
         };
       });
   } catch { return []; }
+}
+
+// Parse insecam.org country page HTML into Camera entries.
+// Each camera block contains: <img id="imageN" src="http://ip:port/...">
+// and a nearby city label. Stream URLs are MJPEG endpoints served directly by the device.
+// Streams require a non-blocked egress — set RU_PROXY_URL to reach RU-geofenced IPs.
+function parseInsecamHtml(html: string, country: string, limit = 24): Camera[] {
+  const cams: Camera[] = [];
+  // Match camera blocks: img with id="imageN" and a src pointing to a device IP
+  const imgRe = /<img[^>]+id="image(\d+)"[^>]+src="(https?:\/\/[^"]+)"[^>]*>/gi;
+  // City label appears nearby as: <p ...>CityName</p> or >CityName<
+  const cityRe = /<p[^>]*>\s*([A-Za-zА-Яа-яёЁ][A-Za-zА-Яа-яёЁ\s\-]{1,40})\s*<\/p>/i;
+
+  let match: RegExpExecArray | null;
+  while ((match = imgRe.exec(html)) !== null && cams.length < limit) {
+    const [, id, src] = match;
+    // Look for city name in surrounding 800 chars
+    const window = html.slice(Math.max(0, match.index - 200), match.index + 600);
+    const cityMatch = cityRe.exec(window);
+    const cityRaw = (cityMatch?.[1] ?? '').trim();
+    const cityKey = cityRaw.toLowerCase();
+    const coords = RU_CITY_COORDS[cityKey] ?? null;
+    if (!coords) continue; // skip if we can't place it on the map
+
+    cams.push({
+      id: `insecam-${country.toLowerCase()}-${id}`,
+      lat: coords[0],
+      lng: coords[1],
+      name: `${cityRaw} — exposed cam`,
+      city: cityRaw,
+      country,
+      stream_url: src,
+      stream_type: 'mjpeg',
+      source: 'insecam',
+    });
+  }
+  return cams;
+}
+
+// Russia / Ukraine public webcams.
+//
+// Base: curated pins to intentionally-public webcam directories.
+// Extended (when keys/proxy are set):
+//   WINDY_WEBCAM_KEY  → live Windy bbox fetch (hundreds of geocoded cams)
+//   RU_PROXY_URL      → insecam.org MJPEG scrape (exposed devices, stream_type=mjpeg)
+async function fetchRussiaCameras(): Promise<Camera[]> {
+  const RU_DIR = 'https://www.skylinewebcams.com/en/webcam/russia.html';
+  const cams: Camera[] = [
+    { id: 'ru-cam-moscow', lat: 55.7558, lng: 37.6173, name: 'Moscow — live public cams', city: 'Moscow', country: 'Russia', feed_url: 'https://www.earthcam.com/world/russia/moscow/', source: 'EarthCam' },
+    { id: 'ru-cam-spb', lat: 59.9311, lng: 30.3609, name: 'St. Petersburg — public webcam directory', city: 'St. Petersburg', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+    { id: 'ru-cam-sochi', lat: 43.5855, lng: 39.7231, name: 'Sochi — public webcam directory', city: 'Sochi', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+    { id: 'ru-cam-kazan', lat: 55.7963, lng: 49.1088, name: 'Kazan — public webcam directory', city: 'Kazan', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+    { id: 'ru-cam-ekb', lat: 56.8389, lng: 60.6057, name: 'Yekaterinburg — public webcam directory', city: 'Yekaterinburg', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+    { id: 'ru-cam-rostov', lat: 47.2357, lng: 39.7015, name: 'Rostov-on-Don — public webcam directory', city: 'Rostov-on-Don', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+    { id: 'ru-cam-vladivostok', lat: 43.1155, lng: 131.8855, name: 'Vladivostok — public webcam directory', city: 'Vladivostok', country: 'Russia', feed_url: RU_DIR, source: 'Skyline (RU)' },
+  ];
+
+  // Windy webcams — live, geocoded, hundreds of RU cams when key is set
+  const windyCams = await fetchWindyCameras(41, 19, 82, 190, 'ru');
+  cams.push(...windyCams);
+
+  // insecam.org RU probe — only when proxy is configured (MJPEG streams need RU egress IP)
+  if (process.env.RU_PROXY_URL) {
+    try {
+      const res = await ruFetch('http://www.insecam.org/en/bycountry/RU/', {
+        headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        const html = await res.text();
+        cams.push(...parseInsecamHtml(html, 'Russia'));
+      }
+    } catch { /* silent — static list always applies */ }
+  }
+
+  return cams;
 }
 
 async function fetchUkraineCameras(): Promise<Camera[]> {
@@ -404,6 +554,7 @@ async function fetchMiddleEastCameras(): Promise<Camera[]> {
 // ═══ REGION MAPPING ═══
 const REGION_FETCHERS: Record<string, () => Promise<Camera[]>> = {
   'middle-east': fetchMiddleEastCameras,
+  'russia': fetchRussiaCameras,
   'ukraine': fetchUkraineCameras,
   'uk': fetchTfLCameras,
   'us-west': async () => [...await fetchWSDOTCameras(), ...await fetchCaltransCameras()],
@@ -444,6 +595,8 @@ function getRegionsForBounds(lat: number, lng: number): string[] {
   if (lat > 42 && lat < 70 && lng > -141 && lng < -52) regions.push('canada');
   // Ukraine
   if (lat > 44 && lat < 53 && lng > 21.5 && lng < 41) regions.push('ukraine');
+  // Russia (western RU + occupied territories through to the Far East)
+  if (lat > 41 && lat < 78 && lng > 19 && lng < 180) regions.push('russia');
   // Middle East (Israel, Lebanon)
   if (lat > 29 && lat < 34.5 && lng > 34 && lng < 36.5) regions.push('middle-east');
   // Europe

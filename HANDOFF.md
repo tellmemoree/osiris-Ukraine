@@ -32,12 +32,6 @@ is **deleted entirely**, along with its `GET()` call. Port/chokepoint stats now
 reflect only real vessels. Commit `eda5ca8`.
 
 ### 2. ✅ DONE — KAB threat re-wired to Telegram OSINT (not the air-raid feed)
-### bomb_risk dead field — ✅ REMOVED (2026-06-06)
-`bomb_risk` in `flights/route.ts` was never consumed by any component. Removed the field
-and its helper functions (`isRussianMilitary`, `nearUkraineBorder`, the two KAB altitude
-constants). KAB signal is `/api/kab-threats` (Telegram-based).
-
-
 **The original plan's premise was wrong** and is corrected here: `/api/air-raids` is
 wired to `vadimklimenko.com/map/statuses.json`, which is **binary on/off per
 oblast/raion with no threat type** — NOT `alerts.com.ua`. And `alerts.in.ua`
@@ -181,13 +175,7 @@ The OsintPanel recon tools split into two tiers:
   authorized to scan. Gate the scanner backend (allow-list / auth) before exposing it;
   do not ship an open relay.
 
-### 7b. 🗑 REMOVED — RU proxy / camera expansion (2026-06-06)
-RU camera expansion scrapped: MJPEG streams are geoblocked at the browser too, requiring
-a server-side relay that makes proxy costs prohibitive. All related code deleted:
-`src/lib/ru-fetch.ts`, `fetchRussiaCameras()`, `parseInsecamHtml()`, `RU_CITY_COORDS`,
-`undici` dep, `RU_PROXY_URL` env var. Ukraine Windy cameras unaffected.
-
-~~### 7b. 🌐 Proxies — defeating the geoblock (RU/UA WAN)~~
+### 7b. 🌐 Proxies — defeating the geoblock (RU/UA WAN)
 RU regional cam portals (`is74.ru`, `webcamera.ru`, ЦОДД) and much of the RU WAN are
 **geo-fenced** — they return `000`/`403` from this host and from Vercel. Same risk in
 reverse for some UA sources. To reach them you need an **egress IP inside the target

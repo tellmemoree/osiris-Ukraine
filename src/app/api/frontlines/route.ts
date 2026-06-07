@@ -1,8 +1,7 @@
 
 import { NextResponse } from 'next/server';
+import { stealthFetch } from '@/lib/stealthFetch';
 import { fetchDeepState, extractFeatures, type GeoJSONFeatureCollection } from '@/lib/deepstate';
-
-export const dynamic = 'force-dynamic';
 
 /**
  * OSIRIS — Ukraine Frontline API
@@ -11,23 +10,42 @@ export const dynamic = 'force-dynamic';
  * Gracefully degrades to DeepState only if Militaryland is unavailable.
  */
 
-// Militaryland (militaryland.net/ua/front-line/geojson) returns 404 — endpoint is dead.
-// Removed to eliminate the 10s timeout on every frontline poll.
+async function fetchMilitaryland(): Promise<GeoJSONFeatureCollection> {
+  const res = await stealthFetch('https://militaryland.net/ua/front-line/geojson', {
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Militaryland returned ${res.status}`);
+  return res.json();
+}
 
 export async function GET() {
-  let deepStateData: GeoJSONFeatureCollection;
-  try {
-    deepStateData = await fetchDeepState();
-  } catch (reason) {
-    console.error('Frontlines fetch error (DeepState):', reason);
+  const [deepStateResult, militarylandResult] = await Promise.allSettled([
+    fetchDeepState(),
+    fetchMilitaryland(),
+  ]);
+
+  if (deepStateResult.status === 'rejected') {
+    console.error('Frontlines fetch error (DeepState):', deepStateResult.reason);
     return NextResponse.json(
       { frontlines: null, error: 'DeepState unavailable' },
       { status: 502 }
     );
   }
 
+  const deepStateData = deepStateResult.value;
   const sources: string[] = ['DeepState'];
-  const mergedFeatures: unknown[] = extractFeatures(deepStateData);
+
+  let mergedFeatures: unknown[] = extractFeatures(deepStateData);
+
+  if (militarylandResult.status === 'fulfilled') {
+    const mlFeatures = extractFeatures(militarylandResult.value);
+    if (mlFeatures.length) {
+      mergedFeatures = [...mergedFeatures, ...mlFeatures];
+      sources.push('Militaryland');
+    }
+  } else {
+    console.warn('Frontlines fetch warning (Militaryland):', militarylandResult.reason);
+  }
 
   // Build a clean FeatureCollection — don't spread deepStateData, which would
   // re-embed the entire nested `map` object and double the payload.

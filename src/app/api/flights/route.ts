@@ -71,6 +71,35 @@ interface AdsbAircraft {
   nac_p?: number;
 }
 
+// KAB/UMPK glide-bomb release envelope is roughly 6–14 km. adsb.lol reports
+// `alt_baro` in feet, so the metre thresholds are pre-converted here.
+const KAB_RELEASE_FLOOR_FT = 19685; // ~6,000 m
+const KAB_RELEASE_CEIL_FT = 45931;  // ~14,000 m
+
+// Best-effort Russian state/military signature for the KAB bomb-risk flag.
+// CAVEAT: this is inherently low-recall. Aircraft actually launching glide bombs
+// near the front fly with ADS-B transponders OFF, so adsb.lol almost never sees
+// them — a `true` here is the exception, not the rule. We therefore optimise for
+// precision: only the state-aircraft registration prefix RF- and unambiguous
+// military callsign prefixes. NOTE: RA- is the CIVILIAN Russian registry (Aeroflot
+// et al.) and is deliberately excluded to avoid flagging airliners.
+function isRussianMilitary(flight: AdsbAircraft): boolean {
+  const callsign = (flight.flight || '').trim().toUpperCase();
+  const reg = (flight.r || '').trim().toUpperCase();
+  return (
+    callsign.startsWith('RFF') ||
+    callsign.startsWith('RRF') ||
+    callsign.startsWith('CRIMEA') ||
+    callsign.startsWith('BARS') ||
+    reg.startsWith('RF-')
+  );
+}
+
+// Returns true if a position is within the Ukraine border threat bounding box
+function nearUkraineBorder(lat: number, lng: number): boolean {
+  return lat >= 44 && lat <= 52 && lng >= 22 && lng <= 42;
+}
+
 async function fetchRegion(region: typeof REGIONS[0]): Promise<AdsbAircraft[]> {
   try {
     const url = `https://api.adsb.lol/v2/lat/${region.lat}/lon/${region.lon}/dist/${region.dist}`;
@@ -141,6 +170,12 @@ function classifyFlight(f: AdsbAircraft) {
     grounded: isGrounded,
     nac_p: f.nac_p,
     type: 'flight',
+    bomb_risk:
+      isRussianMilitary(f) &&
+      nearUkraineBorder(classifiedLat, classifiedLng) &&
+      typeof altRaw === 'number' &&
+      altRaw > KAB_RELEASE_FLOOR_FT &&
+      altRaw < KAB_RELEASE_CEIL_FT,
   };
 }
 

@@ -4,13 +4,20 @@ import { validateHost, isRateLimited, getClientIp } from '@/lib/ssrf-guard';
 /**
  * OSIRIS — IP intelligence enrichment via Censys.
  *
- * Passive host enrichment (ASN, geo, open services, TLS certs) for a single IP.
- * Uses Censys Search v3 with a PAT (Personal Access Token, censys_* prefix).
- *   GET https://search.censys.io/api/v3/hosts/{ip}
- * Results are cached 6h to stay within the free monthly credit allowance.
+ * Passive host enrichment (ASN, geo, open services, TLS certs) for a single IP,
+ * complementing the Shodan lookup at /api/osint/shodan. This is NOT active
+ * scanning — we query Censys's index, we never connect to the target.
  *
- * Configure in .env:  CENSYS_API_ID=censys_...
- * Without it the route falls back to ipinfo.io + Shodan InternetDB (keyless).
+ * Auth: Censys legacy Search v2 host endpoint with HTTP Basic (API ID + secret).
+ *   GET https://search.censys.io/api/v2/hosts/{ip}
+ * The free Censys account includes a monthly credit allowance that covers
+ * occasional per-host lookups; results are cached 6h to stay well under it.
+ * (The newer Censys Platform PAT API is an alternative if you migrate creds.)
+ *
+ * Configure in .env:
+ *   CENSYS_API_ID=...
+ *   CENSYS_API_SECRET=...
+ * Until both are set this route returns 503 (mirrors /api/scanner).
  */
 
 const CENSYS_API_ID = process.env.CENSYS_API_ID || '';
@@ -42,8 +49,7 @@ interface IpIntel {
   greynoise?: GreyNoiseResult;
 }
 
-// Minimal shape of the Censys v3 host response (only the fields we read).
-// v3 keeps the same result envelope as v2 but uses Bearer (PAT) auth.
+// Minimal shape of the Censys v2 host response (only the fields we read).
 interface CensysService {
   port?: number;
   service_name?: string;
@@ -96,7 +102,7 @@ function censysAuthHeader(): string {
 // Query Censys and normalize. Throws on hard upstream failure so transient
 // errors are not cached; a 404 (host not indexed) is a cacheable empty result.
 async function enrich(ip: string): Promise<IpIntel> {
-  const res = await fetch(`https://search.censys.io/api/v3/hosts/${encodeURIComponent(ip)}`, {
+  const res = await fetch(`https://search.censys.io/api/v2/hosts/${encodeURIComponent(ip)}`, {
     headers: { Authorization: censysAuthHeader(), Accept: 'application/json' },
     signal: AbortSignal.timeout(9000),
     cache: 'no-store',
