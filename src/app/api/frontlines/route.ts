@@ -1,7 +1,8 @@
 
 import { NextResponse } from 'next/server';
-import { stealthFetch } from '@/lib/stealthFetch';
 import { fetchDeepState, extractFeatures, type GeoJSONFeatureCollection } from '@/lib/deepstate';
+
+export const dynamic = 'force-dynamic';
 
 /**
  * OSIRIS — Ukraine Frontline API
@@ -10,42 +11,23 @@ import { fetchDeepState, extractFeatures, type GeoJSONFeatureCollection } from '
  * Gracefully degrades to DeepState only if Militaryland is unavailable.
  */
 
-async function fetchMilitaryland(): Promise<GeoJSONFeatureCollection> {
-  const res = await stealthFetch('https://militaryland.net/ua/front-line/geojson', {
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) throw new Error(`Militaryland returned ${res.status}`);
-  return res.json();
-}
+// Militaryland (militaryland.net/ua/front-line/geojson) returns 404 — endpoint is dead.
+// Removed to eliminate the 10s timeout on every frontline poll.
 
 export async function GET() {
-  const [deepStateResult, militarylandResult] = await Promise.allSettled([
-    fetchDeepState(),
-    fetchMilitaryland(),
-  ]);
-
-  if (deepStateResult.status === 'rejected') {
-    console.error('Frontlines fetch error (DeepState):', deepStateResult.reason);
+  let deepStateData: GeoJSONFeatureCollection;
+  try {
+    deepStateData = await fetchDeepState();
+  } catch (reason) {
+    console.error('Frontlines fetch error (DeepState):', reason);
     return NextResponse.json(
       { frontlines: null, error: 'DeepState unavailable' },
       { status: 502 }
     );
   }
 
-  const deepStateData = deepStateResult.value;
   const sources: string[] = ['DeepState'];
-
-  let mergedFeatures: unknown[] = extractFeatures(deepStateData);
-
-  if (militarylandResult.status === 'fulfilled') {
-    const mlFeatures = extractFeatures(militarylandResult.value);
-    if (mlFeatures.length) {
-      mergedFeatures = [...mergedFeatures, ...mlFeatures];
-      sources.push('Militaryland');
-    }
-  } else {
-    console.warn('Frontlines fetch warning (Militaryland):', militarylandResult.reason);
-  }
+  const mergedFeatures: unknown[] = extractFeatures(deepStateData);
 
   // Build a clean FeatureCollection — don't spread deepStateData, which would
   // re-embed the entire nested `map` object and double the payload.

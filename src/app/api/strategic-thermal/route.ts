@@ -139,7 +139,7 @@ async function fetchNews(req: Request): Promise<NewsItem[]> {
 // a wildfire shouldn't read as a strike). Multilingual EN/UA/RU stems.
 const STRIKE_TERMS = [
   'strike', 'struck', 'explos', 'blast', 'drone', 'missile', 'shahed', 'uav', 'destroyed',
-  'burn', 'ablaze', 'depot', 'refiner', 'ammunition', 'shelling', 'detonat',
+  'burn', 'ablaze', 'depot', 'refiner', 'ammunition', 'shelling', 'detonat', 'підрив',
   'shipyard', 'naval base', 'naval facilit', 'arsenal', 'power station', 'power plant', 'oil terminal',
   'удар', 'вибух', 'дрон', 'ракет', 'шахед', 'бпла', 'знищ', 'пожеж', 'горить', 'склад',
   'нпз', 'нафтоба', 'нафтосховищ', 'обстріл', 'влучан', 'детонац', 'приліт', 'прилетіло',
@@ -150,7 +150,7 @@ const STRIKE_TERMS = [
 ];
 
 const DIGEST_TITLE_RE = /^(главное за|сводка|зведення|дайджест|итоги дня|підсумки|обзор за|за сутки|за добу|morning brief|evening brief|daily (round|update|brief|wrap))/i;
-const HISTORICAL_YEAR_RE = /\b(201[4-9]|202[01])\b/;
+const HISTORICAL_YEAR_RE = /\b(201[4-9]|202[0-4])\b/;
 
 function isStrikeRelated(item: NewsItem): boolean {
   const title = (item.title || '').toLowerCase();
@@ -172,7 +172,8 @@ const ADVANCE_TERMS = [
   'overrun', 'fallen to', 'fell to', 'seized by', 'stormed',
   'освобод', 'под контроль', 'захват', 'продвин', 'штурм', 'прорвали', 'наступают',
   'звільн', 'під контроль', 'захопл', 'просун',
-  'встановив контрол', 'встановлено контрол', 'зайняли', 'зайняв', 'відбили', 'штурмують',
+  'встановив контрол', 'встановлено контрол', 'зайняли', 'зайняв', 'штурмують',
+  'відійшли', 'залишили', 'ворог увійшов',
 ];
 function isTerritorialAdvance(item: NewsItem): boolean {
   const t = `${item.title || ''} ${item.description || ''}`.toLowerCase();

@@ -14,13 +14,14 @@ services:
         value: "3000"
       - key: NEXT_TELEMETRY_DISABLED
         value: "1"
+      # Required: features are meaningfully broken without these
+      - key: AIS_API_KEY
+        sync: false
       - key: SHODAN_API_KEY
         sync: false
       - key: CENSYS_API_ID
         sync: false
       - key: CENSYS_API_SECRET
-        sync: false
-      - key: AISSTREAM_API_KEY
         sync: false
 
   - type: web
@@ -38,11 +39,12 @@ services:
         value: "3000"
       - key: NEXT_TELEMETRY_DISABLED
         value: "1"
+      # Required: features are meaningfully broken without these
+      - key: AIS_API_KEY
+        sync: false
       - key: SHODAN_API_KEY
         sync: false
       - key: CENSYS_API_ID
         sync: false
       - key: CENSYS_API_SECRET
-        sync: false
-      - key: AISSTREAM_API_KEY
         sync: false

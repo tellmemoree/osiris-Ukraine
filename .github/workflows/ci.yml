@@ -13,8 +13,9 @@ name: CI
 
 on:
   push:
-    branches: [master, osiris-Ukraine, osiris-Ukraine-merged]
+    branches: [osiris-Ukraine, osiris-Ukraine-merged]
   pull_request:
+    branches: [osiris-Ukraine, osiris-Ukraine-merged]
   workflow_dispatch:
 
 permissions:
