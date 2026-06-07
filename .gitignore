@@ -43,6 +43,5 @@ next-env.d.ts
 .claude/settings.local.json
 .claude/worktrees/
 
-# Local backlog — never commit
-*backlog*
-*BACKLOG*
+# Local-only docs (backlog, handoff notes, camera sources — never commit)
+docs/
