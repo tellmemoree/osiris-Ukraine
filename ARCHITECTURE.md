@@ -140,7 +140,10 @@ Verify: `npx tsc --noEmit`, then `next dev -p 3002` and curl the route + load `/
 
 ## Env vars (gitignored `.env`; templates: `.env.example`, `.env.template`)
 - `SHODAN_API_KEY` (free oss tier: host lookup works, host *search* needs paid) →
-  `osint/shodan`. `CENSYS_API_ID`/`CENSYS_API_SECRET` → `ip-intel` (503 until set).
+  `osint/shodan`. `CENSYS_API_ID` → `ip-intel` (free fallback to ipinfo.io + Shodan
+  InternetDB without it). PAT (censys_* prefix) uses Bearer auth — secret not needed.
+  Legacy key+secret uses Basic auth — set both. Platform API endpoint:
+  `api.platform.censys.io/v3/global/asset/host/{ip}`. Response: `body.result.resource`.
 - `SCANNER_URL`/`SCANNER_KEY` → `scanner` (external active-scan backend; 503 until set).
 - `AIS_API_KEY` → maritime AIS.
 - Most feeds are keyless (aviation, fires, quakes, weather, news, air-raids, frontlines,
