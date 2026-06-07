@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic';
  * industrial heat all trip FIRMS). Treat as a lead, verify before acting.
  */
 
-type Category = 'airfield' | 'rail' | 'logistics' | 'oil' | 'news';
+type Category = 'airfield' | 'rail' | 'logistics' | 'oil' | 'naval' | 'power' | 'ammo' | 'news';
 interface Site { id: string; name: string; category: Exclude<Category, 'news'>; lat: number; lng: number; }
 
 // Theater bounding box — western RU + Ukraine + occupied + Crimea + Kola (Olenya).
@@ -72,6 +72,17 @@ const SITES: Site[] = [
   { id: 'oil-syzran', name: 'Syzran refinery', category: 'oil', lat: 53.16, lng: 48.47 },
   { id: 'oil-kstovo', name: 'Kstovo refinery (Nizhny Novgorod)', category: 'oil', lat: 56.15, lng: 44.20 },
   { id: 'oil-feodosia', name: 'Feodosia oil terminal (Crimea)', category: 'oil', lat: 45.04, lng: 35.38 },
+  // ── Naval ports (occupied + Baltic) ──
+  { id: 'naval-kronstadt', name: 'Kronstadt naval base (Baltic)', category: 'naval', lat: 59.99, lng: 29.76 },
+  { id: 'naval-berdyansk', name: 'Berdyansk port (occupied)', category: 'naval', lat: 46.75, lng: 36.80 },
+  { id: 'naval-mariupol', name: 'Mariupol port (occupied)', category: 'naval', lat: 47.10, lng: 37.57 },
+  // ── Power infrastructure ──
+  { id: 'pwr-zugres', name: 'Zuivska TPS — Zugres (Donetsk)', category: 'power', lat: 48.01, lng: 38.51 },
+  // ── Oil storage (bilateral-confirmed strikes) ──
+  { id: 'oil-ust-labinsk', name: 'Ust-Labinsk oil depot (Kuban)', category: 'oil', lat: 45.22, lng: 39.71 },
+  { id: 'oil-semykolod', name: 'Semykolodiaznaya oil depot (Crimea)', category: 'oil', lat: 45.20, lng: 33.78 },
+  // ── Ammunition / arsenal ──
+  { id: 'ammo-leningrad-arsenal', name: 'Leningrad Oblast naval arsenal', category: 'ammo', lat: 59.90, lng: 29.60 },
 ];
 
 interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; }
@@ -128,13 +139,24 @@ async function fetchNews(req: Request): Promise<NewsItem[]> {
 // a wildfire shouldn't read as a strike). Multilingual EN/UA/RU stems.
 const STRIKE_TERMS = [
   'strike', 'struck', 'explos', 'blast', 'drone', 'missile', 'shahed', 'uav', 'destroyed',
-  'burn', 'ablaze', 'depot', 'refiner', 'ammunition', 'shelling', 'detonat', 'wildfire',
+  'burn', 'ablaze', 'depot', 'refiner', 'ammunition', 'shelling', 'detonat',
+  'shipyard', 'naval base', 'naval facilit', 'arsenal', 'power station', 'power plant', 'oil terminal',
   'удар', 'вибух', 'дрон', 'ракет', 'шахед', 'бпла', 'знищ', 'пожеж', 'горить', 'склад',
-  'нпз', 'нафтоба', 'обстріл', 'влучан', 'детонац', 'приліт',
+  'нпз', 'нафтоба', 'нафтосховищ', 'обстріл', 'влучан', 'детонац', 'приліт', 'прилетіло',
+  'теплоелектростанц', 'електростанц', 'арсенал', 'атаковано', 'підпален',
   'взрыв', 'уничтож', 'пожар', 'горит', 'нефтеба', 'обстрел', 'прилет',
+  'корвет', 'фрегат', 'корабл', 'верф', 'атакован',
+  'теплоэлектростанц', 'электростанц',
 ];
+
+const DIGEST_TITLE_RE = /^(главное за|сводка|зведення|дайджест|итоги дня|підсумки|обзор за|за сутки|за добу|morning brief|evening brief|daily (round|update|brief|wrap))/i;
+const HISTORICAL_YEAR_RE = /\b(201[4-9]|202[01])\b/;
+
 function isStrikeRelated(item: NewsItem): boolean {
-  const t = `${item.title || ''} ${item.description || ''}`.toLowerCase();
+  const title = (item.title || '').toLowerCase();
+  if (DIGEST_TITLE_RE.test(title)) return false;
+  if (HISTORICAL_YEAR_RE.test(title)) return false;
+  const t = `${title} ${(item.description || '').toLowerCase()}`;
   return STRIKE_TERMS.some(w => t.includes(w));
 }
 
@@ -147,8 +169,10 @@ function isStrikeRelated(item: NewsItem): boolean {
 // the occupied Donetsk region") are NOT dropped.
 const ADVANCE_TERMS = [
   'liberat', 'recaptur', 'took control', 'under control', 'gained control', 'overran',
-  'освобод', 'под контроль', 'захват', 'продвин',     // RU: liberated / under control / seized / advanced
-  'звільн', 'під контроль', 'захопл', 'просун',       // UA: liberated / under control / captured / advanced
+  'overrun', 'fallen to', 'fell to', 'seized by', 'stormed',
+  'освобод', 'под контроль', 'захват', 'продвин', 'штурм', 'прорвали', 'наступают',
+  'звільн', 'під контроль', 'захопл', 'просун',
+  'встановив контрол', 'встановлено контрол', 'зайняли', 'зайняв', 'відбили', 'штурмують',
 ];
 function isTerritorialAdvance(item: NewsItem): boolean {
   const t = `${item.title || ''} ${item.description || ''}`.toLowerCase();
@@ -206,7 +230,7 @@ export async function GET(req: Request) {
     type NewsAoi = {
       id: string; category: 'news'; name: string; source?: string; side?: string; link?: string;
       lat: number; lng: number; hit: boolean; fireCount: number; maxFrp: number; latest: string | null;
-      confidence: Confidence; sources: Contributor[];
+      confidence: Confidence; sources: Contributor[]; bilateral: boolean;
     };
     const newsByCell = new Map<string, NewsAoi>();
     for (const n of news) {
@@ -235,6 +259,15 @@ export async function GET(req: Request) {
           if (!existing.sources.some(s => s.source === contributor.source && s.title === contributor.title)) {
             existing.sources.push(contributor);
           }
+          // Bilateral: both sides present in sources after adding this contributor
+          const bilateral = existing.sources.some(s => s.side === 'ua') && existing.sources.some(s => s.side === 'ru');
+          if (bilateral) {
+            existing.bilateral = true;
+            // Bump confidence one tier when both sides corroborate a fire
+            if (existing.hit && existing.confidence !== 'news') {
+              existing.confidence = existing.confidence === 'low' ? 'med' : 'high';
+            }
+          }
           continue;
         }
         newsByCell.set(key, {
@@ -242,7 +275,7 @@ export async function GET(req: Request) {
           source: n.source, side: n.side, link: n.link, lat, lng,
           hit: !!h, fireCount: h?.count ?? 0, maxFrp: h?.maxFrp ?? 0, latest: h?.latest ?? null,
           confidence: h ? confidenceOf(h.count, h.maxFrp) : 'news',
-          sources: [contributor],
+          sources: [contributor], bilateral: false,
         });
       }
     }

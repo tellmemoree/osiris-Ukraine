@@ -27,8 +27,10 @@ const BBOX = { latMin: 43, latMax: 71, lngMin: 19, lngMax: 66 };
 // stems only: no bare "occupied"/`наступ` (the latter collides with "наступний"/next).
 const ADVANCE_TERMS = [
   'liberat', 'recaptur', 'took control', 'under control', 'gained control', 'overran',
-  'освобод', 'под контроль', 'захват', 'продвин',     // RU: liberated / under control / seized / advanced
-  'звільн', 'під контроль', 'захопл', 'просун',       // UA: liberated / under control / captured / advanced
+  'overrun', 'fallen to', 'fell to', 'seized by', 'stormed',
+  'освобод', 'под контроль', 'захват', 'продвин', 'штурм', 'прорвали', 'наступают',
+  'звільн', 'під контроль', 'захопл', 'просун',
+  'встановив контрол', 'встановлено контрол', 'зайняли', 'зайняв', 'відбили', 'штурмують',
 ];
 
 // Daily digest / roundup titles that contain territorial language but are summaries,

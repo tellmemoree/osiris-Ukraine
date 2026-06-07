@@ -4,7 +4,7 @@ import { Play, Pause } from 'lucide-react';
 
 export interface TimelineEvent {
   t: number;   // Unix ms
-  type: 'news' | 'kab' | 'gdelt';
+  type: 'news' | 'kab' | 'gdelt' | 'thermal' | 'capture';
 }
 
 interface Props {
@@ -56,15 +56,17 @@ export default function TimelineControl({ replayTime, timelineRangeH, events, on
   const BUCKETS = Math.min(timelineRangeH, 48);
   const bucketMs = rangeMs / BUCKETS;
   const byType = {
-    news:  new Array(BUCKETS).fill(0) as number[],
-    kab:   new Array(BUCKETS).fill(0) as number[],
-    gdelt: new Array(BUCKETS).fill(0) as number[],
+    news:    new Array(BUCKETS).fill(0) as number[],
+    kab:     new Array(BUCKETS).fill(0) as number[],
+    gdelt:   new Array(BUCKETS).fill(0) as number[],
+    thermal: new Array(BUCKETS).fill(0) as number[],
+    capture: new Array(BUCKETS).fill(0) as number[],
   };
   for (const ev of events) {
     const idx = Math.floor((ev.t - rangeStart) / bucketMs);
     if (idx >= 0 && idx < BUCKETS) byType[ev.type][idx]++;
   }
-  const totals = Array.from({ length: BUCKETS }, (_, i) => byType.news[i] + byType.kab[i] + byType.gdelt[i]);
+  const totals = Array.from({ length: BUCKETS }, (_, i) => byType.news[i] + byType.kab[i] + byType.gdelt[i] + byType.thermal[i] + byType.capture[i]);
   const maxBucket = Math.max(...totals, 1);
 
   // ── Playback interval ──────────────────────────────────────────────────────
@@ -193,14 +195,18 @@ export default function TimelineControl({ replayTime, timelineRangeH, events, on
         <div className="absolute inset-0 flex items-end gap-px">
           {totals.map((count, i) => {
             const h = count === 0 ? 0 : Math.max(0.06, count / maxBucket);
-            const nF = byType.news[i]  / Math.max(count, 1);
-            const kF = byType.kab[i]   / Math.max(count, 1);
-            const gF = byType.gdelt[i] / Math.max(count, 1);
+            const nF = byType.news[i]    / Math.max(count, 1);
+            const kF = byType.kab[i]     / Math.max(count, 1);
+            const gF = byType.gdelt[i]   / Math.max(count, 1);
+            const tF = byType.thermal[i] / Math.max(count, 1);
+            const cF = byType.capture[i] / Math.max(count, 1);
             return (
               <div key={i} className="flex-1 flex flex-col-reverse" style={{ height: `${h * 100}%` }}>
                 {nF > 0 && <div style={{ flex: nF, background: 'rgba(34,211,238,0.35)' }} />}
                 {kF > 0 && <div style={{ flex: kF, background: 'rgba(251,146,60,0.35)' }} />}
                 {gF > 0 && <div style={{ flex: gF, background: 'rgba(250,204,21,0.35)' }} />}
+                {tF > 0 && <div style={{ flex: tF, background: 'rgba(255,80,40,0.45)' }} />}
+                {cF > 0 && <div style={{ flex: cF, background: 'rgba(180,80,255,0.40)' }} />}
               </div>
             );
           })}
@@ -246,6 +252,14 @@ export default function TimelineControl({ replayTime, timelineRangeH, events, on
         <span className="flex items-center gap-1">
           <span className="inline-block w-2 h-1 rounded-sm" style={{ background: 'rgba(250,204,21,0.6)' }} />
           GLOBAL INC.
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-1 rounded-sm" style={{ background: 'rgba(255,80,40,0.7)' }} />
+          THERMAL
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-1 rounded-sm" style={{ background: 'rgba(180,80,255,0.7)' }} />
+          CAPTURES
         </span>
       </div>
     </div>

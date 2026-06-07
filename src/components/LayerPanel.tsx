@@ -85,7 +85,8 @@ const LAYER_GROUPS = [
     color: '#FF1744',
     layers: [
       { key: 'frontlines', label: 'Frontline (DeepState)', icon: Target, color: '#FF3D3D', dataKey: 'frontlines' },
-      // captures + thermal_aoi hidden pending classifier refinement — re-add when ready
+      { key: 'thermal_aoi', label: 'Thermal Strike AOIs', icon: Flame, color: '#FF6B00', dataKey: 'thermal_aoi' },
+      { key: 'captures', label: 'Territorial Captures', icon: Target, color: '#FF3D3D', dataKey: 'captures' },
       { key: 'air_raids', label: 'Air Raid Alerts', icon: Siren, color: '#FF1744', dataKey: 'air_raids' },
       { key: 'kab_threats', label: 'KAB / Glide-Bomb', icon: Bomb, color: '#FF6B00', dataKey: 'kab_threats' },
       { key: 'power_outages', label: 'Power Outages', icon: Zap, color: '#FFD500', dataKey: 'power_outages' },

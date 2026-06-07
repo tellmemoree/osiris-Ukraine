@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText, Crosshair } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -19,6 +19,7 @@ import LiveAlerts from '@/components/LiveAlerts';
 import FrontlineTracker from '@/components/FrontlineTracker';
 import TimelineControl, { TimelineEvent } from '@/components/TimelineControl';
 import BriefingPanel from '@/components/BriefingPanel';
+import AxisBriefing from '@/components/AxisBriefing';
 import ThresholdToasts from '@/components/ThresholdToasts';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 
@@ -122,6 +123,15 @@ export default function Dashboard() {
     (data.news   || []).forEach((n: any) => n.published  && evs.push({ t: new Date(n.published).getTime(),  type: 'news'  }));
     (data.kab_threats || []).forEach((k: any) => k.startedAt && evs.push({ t: new Date(k.startedAt).getTime(), type: 'kab'  }));
     (data.gdelt  || []).forEach((e: any) => e.published  && evs.push({ t: new Date(e.published).getTime(),  type: 'gdelt' }));
+    (data.thermal_aoi || []).forEach((a: any) => {
+      if (!a.latest) return;
+      const parts = (a.latest as string).trim().split(' ');
+      if (parts.length < 2) return;
+      const t4 = parts[1].padStart(4, '0');
+      const ms = new Date(`${parts[0]}T${t4.slice(0,2)}:${t4.slice(2,4)}:00Z`).getTime();
+      if (!isNaN(ms)) evs.push({ t: ms, type: 'thermal' });
+    });
+    (data.captures || []).forEach((c: any) => c.date && evs.push({ t: new Date(c.date).getTime(), type: 'capture' }));
     return evs;
   }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -152,6 +162,7 @@ export default function Dashboard() {
   const [showTimeline, setShowTimeline] = useState(false);
   const [showFrontlineTracker, setShowFrontlineTracker] = useState(false);
   const [showBriefing, setShowBriefing] = useState(false);
+  const [showAxisBriefing, setShowAxisBriefing] = useState(false);
   const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlert[]>([]);
 
   const isMobile = useIsMobile();
@@ -1063,6 +1074,28 @@ export default function Dashboard() {
                 className="absolute right-12 top-1/2 -translate-y-1/2"
               >
                 <BriefingPanel />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Axis briefing */}
+        <div className="relative">
+          <button
+            onClick={() => setShowAxisBriefing(t => !t)}
+            title="Axis briefing"
+            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showAxisBriefing ? 'bg-[#FF3D3D]/20' : 'hover:bg-white/10'}`}
+          >
+            <Crosshair className={`w-4 h-4 ${showAxisBriefing ? 'text-[#FF3D3D]' : 'text-white/60'}`} />
+          </button>
+          <AnimatePresence>
+            {showAxisBriefing && (
+              <motion.div
+                initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.2 }}
+                className="absolute right-12 top-1/2 -translate-y-1/2"
+              >
+                <AxisBriefing />
               </motion.div>
             )}
           </AnimatePresence>
