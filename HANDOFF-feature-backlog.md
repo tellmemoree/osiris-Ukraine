@@ -179,20 +179,133 @@ infrastructure checklist, and Osiris-side changes are in `HANDOFF-scanner-node.m
 
 ## Direction 4 — AI & alerting
 
-### 4.1 — Auto situation briefings  ·  Effort: M
-Build on `/api/ai/briefing` + `/api/ai/analyze`: scheduled (e.g. hourly) digest
-summarizing active air raids, KAB threats, notable strikes/news, and shadow-fleet
-movements. Surface in a Briefing panel and/or push to Telegram.
+### 4.1 — Auto situation briefings  ·  ✅ DONE (2026-06-07)
+**Shipped:** intel digest with scheduled summaries of active air raids, KAB threats,
+notable strikes/news, and shadow-fleet movements. Pushed to Telegram.
 
-### 4.2 — Threshold alerts  ·  Effort: M–L
-A small rule engine that fires when conditions co-occur, e.g.:
-- air raid **and** KAB threat in the same oblast,
-- a shadow-fleet vessel enters a chokepoint,
-- a FIRMS hotspot appears near an RU airfield (ties to 2.3).
-- **Delivery:** in-app toast + optional webhook / Telegram.
+### 4.2 — Threshold alerts  ·  ✅ DONE (2026-06-07)
+**Shipped:** rule engine fires when conditions co-occur (air raid + KAB threat in same
+oblast; FIRMS hotspot near RU airfield). Delivery: Telegram push.
 
 ### 4.3 — Entity watchlist  ·  🗑 REMOVED
 Scrapped — scope not worth the complexity for current use case.
+
+---
+
+## Direction 5 — Groomed 2026-06-07 (osint-idea-groomer)
+
+### 5.1 — Oblast Pressure Index  ·  Effort: M
+Fuse air-raid frequency, KAB threat count, frontline proximity, and power-outage status into a per-oblast weighted score; render as a choropleth. All four feeds live — the join is missing. Needs UA oblast boundary GeoJSON asset + name-normalization table.
+
+### 5.2 — Air Raid History Playback  ·  Effort: S–M
+Background poller snapshots air-raid state every 5 min → `~/.osiris-data/air-raid-history.json`. Closes the explicit 2.4 Phase 2 gap. Extends timeline scrubber with a fourth histogram bucket. Same pattern as `frontline-history.json`.
+
+### 5.3 — ACLED Conflict Event Layer  ·  Effort: M
+Structured, actor-coded conflict events (battles, explosions, civilian targeting) as a toggleable layer. 24–48h lag. Requires free API key at acleddata.com (human step). Attribution required in popup.
+
+### 5.4 — Drone / UAV Incident Tracker  ·  Effort: S
+Extract Shahed/UAV swarm events from existing news feed via `DRONE_TERMS` filter (Cyrillic + Latin). Zero new infrastructure. Main work is term vocabulary + exclusion list to avoid false positives.
+
+### 5.5 — Shadow Fleet Movement Corridors  ·  Effort: M
+Persist AIS position history for shadow-fleet MMSIs → track polylines (dashed faint lines). Shows loitering vs. transit vs. rendezvous. Key risk: careful modification of the AIS WebSocket handler.
+
+### 5.6 — Axis Briefing  ·  ✅ DONE (2026-06-07)
+**Shipped:** `/api/axis-briefing/route.ts` + `src/components/AxisBriefing.tsx` + toolbar button (Crosshair icon). 8 named operational axes (Kharkiv → Kherson), each showing occupied area km² (DeepState polygon sum within bbox), up to 5 recent news headlines (from `/api/news` places[] filtering), and an optional one-sentence Gemini summary per axis when `GEMINI_API_KEY_N` is set. 30-min cache; `?force=1` busts it. tsc clean. Key bug fixed during build: DeepState uses 3D coords `[lng, lat, 0]` — centroid collector needed `arr.length >= 2` not `=== 2`.
+
+### 5.8 — Weapon-Type Enrichment for Air Raid Alerts  ·  Effort: S–M
+
+Extend the existing Telegram-scraping infrastructure (currently kab-threats only) to classify **all major Russian weapon types** targeting Ukrainian oblasts and surface them as per-oblast weapon tags on the air-raid layer.
+
+**Why it matters:** The air-raid layer (`/api/air-raids`) currently shows a binary alarm state with no threat context. The kab-threats route already detects KABs from `@war_monitor` and `@kpszsu` — those same channels report Kalibr, Kh-101, Shahed/Geran swarms, Iskander, Kinzhal, and S-300 surface-to-surface use. One pass over the same scraped messages can classify all of them.
+
+**Sources already scraped (in `UA_THREAT_CHANNELS` in kab-threats route):**
+- `@war_monitor` — reports inbound weapon types per region in near-real-time
+- `@kpszsu` — Air Force of Ukraine official channel; structured weapon-type announcements
+- `@GeneralStaffUA`, `@DeepStateUA`, `@UkraineWarReport`, `@ukraine_now`, `@ua_forces`, `@Militaryland`
+
+**Additional sources to add for weapon coverage:**
+- `@PovitryanaT` (Повітряні Сили ЗСУ) — UA Air Force, posts weapon-type breakdowns during attacks
+- `@operativnoZSU` — operational updates with threat characterization
+- `@khortytsia_ua` — Joint Forces command, detailed strike reports
+
+**Weapon taxonomy to detect (Cyrillic + Latin, with declensions):**
+
+| Weapon class | Key terms to match |
+|---|---|
+| KAB / glide bomb | Already in `KAB_PATTERNS` |
+| Cruise missile (Kalibr / Kh-101 / Kh-555) | калібр, x-101, х-101, kh-101, крилата ракета |
+| Ballistic (Iskander-M / -K) | іскандер, iskander, балістич |
+| Shahed / Geran drone | шахед, shahed, герань, geran, бпла, дрон-камікадзе |
+| Kinzhal hypersonic | кинджал, kinzhal, гіперзвук |
+| S-300 / S-400 surface-to-surface | с-300, с-400 (surface mode), зенітна ракета по наземн |
+| Kh-22 / Kh-32 anti-ship adapted | х-22, кh-22, х-32 |
+
+**Implementation sketch:**
+- Refactor `/api/kab-threats` → `/api/weapon-threats`: same Telegram scraping infrastructure, but match all weapon patterns per message and return `weaponType` (enum) instead of hardcoded `'KAB'`
+- Each threat item carries `weaponType`, `count`, `startedAt`, `sources`, `snippet`; one item per (oblast × weaponType) combination
+- `/api/air-raids` response stays unchanged — frontend fetches both and joins on oblast name to show weapon badges
+- Air-raid map popup (or hover tooltip) shows active alarm + weapon type chips: `[KAB] [SHAHED x3] [KALIBR]`
+- Alternatively, color-code alarm dots by most dangerous active threat (ballistic > cruise > KAB > drone)
+
+**Touch points:**
+- `src/app/api/kab-threats/route.ts` — rename + expand `WEAPON_PATTERNS`, change `alertType` to `weaponType`, update `KabThreat` type
+- `src/components/OsirisMap.tsx` — join weapon-threats onto air-raid markers for popup enrichment
+- `src/app/api/air-raids/route.ts` — `alertType` field currently hardcoded `'AIR'`; can stay as alarm state; weapon enrichment comes from the separate endpoint
+
+**Keeps backward compat:** the kab-threats endpoint is consumed by the KAB layer toggle — rename the route or keep the old path as an alias returning `weaponType === 'KAB'` items only.
+
+---
+
+### 5.7 — Russian Oblast Air Raid Alerts  ·  Effort: S–M
+
+Track Ukrainian drone/missile strikes triggering alerts in Russian border oblasts (Belgorod, Kursk, Bryansk, Voronezh, Rostov-on-Don, Krasnodar Krai, etc.) and surface them as a toggleable layer mirroring the existing UA air-raid feed.
+
+**Why it matters:** completes the situational picture — OSIRIS currently shows only Ukrainian alarms. Russian border oblast alerts are a leading indicator of UA cross-border operations, and comparing alarm density on both sides reveals operational patterns.
+
+**Data sources (no official API exists for RU territory — Telegram scraping required):**
+- `@bazabazon` (Baza) — Russian breaking news, reports drone incursions promptly
+- `@mashnews` (Mash) — breaking news aggregator, high-volume, reports RU oblast alerts
+- `@shot_shot` (Shot) — Russian news, focuses on Belgorod/Kursk/Bryansk activity
+- Regional channels: `@Molyar_Belgorod`, `@kursk_today`, `@voronezh_online` — oblast-specific alert posts, faster than national aggregators
+
+**Implementation sketch:**
+- New `/api/ru-air-raids` route; scrapes the above channels via `t.me/s/<channel>` (same pattern as `/api/news`); extracts oblast names from message text using a regex vocabulary (oblast names in Cyrillic + "дрон", "тревога", "БПЛА", "атака")
+- Returns `{ oblast, started_at, source, raw }[]` — no official on/off state, so each item is a discrete event not a toggle
+- Layer toggle under a new **RUSSIA** group in `LayerPanel.tsx`; renders as pulsing dot on RU oblast centroids (GeoJSON asset needed — RU oblast boundaries or just centroid coordinates for the ~10 border oblasts)
+- No history needed initially; show events from last 24h only
+
+**Gap vs. UA alarms:** UA side has a clean state API (`vadimklimenko`) with boolean on/off. RU side is event-based (no government alarm API) — surface as an event feed, not alarm state.
+
+**Weapon tracking for RU oblasts (same as 5.8, mirrored):**
+Ukrainian cross-border operations use a different weapon vocabulary: `Neptune`, `Storm Shadow / SCALP`, `ATACMS`, `HIMARS`, `дрон`, `БпЛА`, `безпілотник`. The same Telegram scraping pattern applies — extract weapon type from messages mentioning Russian oblast names + inbound weapon terms. Return one event per (RU oblast × weapon type) combination, surface as badges on the RU alert dots. Sources: `@bazabazon`, `@mashnews`, `@shot_shot` already list weapon types in their alerts.
+
+**Key risk:** `t.me/s/` scrape reliability for high-volume channels; may need to rate-limit or cache aggressively (15-min TTL suggested). Mash and Baza post hundreds of items/day — need tight keyword filtering to avoid noise.
+
+### 5.9 — OSINT Agent: AI News Enrichment  ·  Effort: S
+
+Enrich the existing SIGINT feed with real AI-generated analysis instead of the current hardcoded placeholder. No new panels, no new toasts — all improvements surface inside the existing `IntelFeed` item card.
+
+**What the agent does:**
+- After building `newsItems` in `/api/news`, batch the top 15 items (risk_score ≥ 5) into a **single Gemini call** per 5-min cache period
+- Per item the model returns: `assessment` (1–2 sentence tactical summary), `event_type` (strike/airstrike/advance/retreat/naval/cyber/logistics/diplomatic/null), `weapons` (string[] of weapon types named in the text)
+- Replaces the hardcoded `machine_assessment` placeholder with the real AI text; adds `event_type` and `weapons` as new fields on each enriched item
+- Un-enriched items (risk < 5 or Gemini unconfigured) get `machine_assessment: null` — no fake assessment
+
+**UI additions (IntelFeed.tsx only):**
+- `event_type` badge rendered in the item's top row (colored per type: strike=red, advance=blue, naval=cyan, cyber=purple, etc.)
+- `weapons` chips rendered below the title (orange tint)
+- `machine_assessment` block already exists and renders real text automatically once the route returns it
+
+**Server-side caching (new):**
+- Module-level 5-min cache on the news route (currently none — every request re-scrapes 30 Telegram channels)
+- `export const dynamic = 'force-dynamic'` required for module-level vars
+- Adds `Cache-Control: no-store` on the response (TTL is server-side, not CDN)
+
+**Touch points:**
+- `src/app/api/news/route.ts` — add cache + `batchEnrich()` using `@google/generative-ai` (already installed); `getGeminiKey()` same pattern as digest route; graceful fallback if Gemini fails or is unconfigured
+- `src/components/IntelFeed.tsx` — update `NewsItem` type + render `event_type` badge + `weapons` chips
+
+**Graceful degradation:** works with no Gemini key (just no enrichment fields); Gemini parse errors silently return empty Map (items stay unenriched, never crash).
 
 ---
 

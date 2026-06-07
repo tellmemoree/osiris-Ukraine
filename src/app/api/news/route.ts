@@ -19,6 +19,7 @@ const UA_CHANNELS = [
   // Ukrainian-language (Cyrillic)
   'suspilne_news', 'hromadske_ua', 'truexanewsua', 'serhii_flash',
   'operativnoZSU', 'butusovplus', 'Tsaplienko', 'lachentyt',
+  'ssternenko', 'informnapalm',
 ];
 
 // Russian milblogger / MoD channels — monitored for the adversary picture.
@@ -119,6 +120,10 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'tula': [54.193, 37.617], 'smolensk': [54.782, 32.040], 'lipetsk': [52.603, 39.571],
   'murmansk': [68.958, 33.083], 'kazan': [55.796, 49.109], 'samara': [53.196, 50.100],
   'dzhankoi': [45.709, 34.393], 'saky': [45.134, 33.599],
+  'kronstadt': [59.990, 29.760], 'кронштадт': [59.990, 29.760],
+  'ust-labinsk': [45.220, 39.710], 'усть-лабинск': [45.220, 39.710], 'усть-лабінськ': [45.220, 39.710],
+  'zugres': [48.010, 38.510], 'зугрес': [48.010, 38.510], 'зугрэс': [48.010, 38.510],
+  'зуївська тес': [48.010, 38.510],
   // Cyrillic — broad (country/peninsula; only used when no city is named)
   'россия': [61.524, 105.318], 'украина': [49.487, 31.272], 'крым': [44.952, 34.102],
   // Cyrillic — Russia
