@@ -71,10 +71,10 @@ keyless, already fetched on load).
 day to `~/.osiris-data/frontline-history.json` (persists across rebuilds, capped at
 120 days). Returns `delta_1d`/`delta_7d` (growth = RU expansion, in km²). Deltas are
 `null` until a second UTC day is recorded — after that they fill automatically.
-`src/components/FrontlineTracker.tsx` — a glass card bottom-right on desktop and
-inline in the mobile layers drawer — polls hourly and renders the current footprint,
-24h delta, and 7d delta with red/green trend arrows. Gated on `activeLayers.frontlines`
-(appears automatically when the Frontline layer is toggled on).
+`src/components/FrontlineTracker.tsx` — a glass card bottom-right on desktop —
+polls hourly and renders the current footprint, 24h delta, and 7d delta with red/green
+trend arrows. Toggled independently via the Activity button in the right toolbar
+(`showFrontlineTracker` state); no longer gated on `activeLayers.frontlines`.
 **Live:** 299,887 km² footprint, +6 km² over 7d as of first data (2026-06-03).
 
 ### 2.2 — RU rail / logistics layer  ·  ✅ DONE (folded into 2.3, 2026-06-03)
@@ -108,19 +108,18 @@ STRIKE_TERMS filter), and every place an article names is checked (news route no
 FRP-based **confidence** (low/med/high); low-confidence hits render without a glow to
 de-emphasize likely false positives. **Still not done:** raising hits into `LiveAlerts`.
 
-### 2.3b — Strike / advance classifier refinement  ·  Effort: S
-Thermal AOI and Captures layers are **hidden from the panel** (2026-06-05) pending
-classifier tuning. Too many false positives from `STRIKE_TERMS` / `ADVANCE_TERMS` /
-`isTerritorialAdvance()`. User will hand-pick example articles (both strike and
-capture/advance) to align on what counts as each.
-
-- **Touch points:**
-  - `src/app/api/strategic-thermal/route.ts` — `STRIKE_TERMS`, `ADVANCE_TERMS`,
-    `isStrikeRelated()`, `isTerritorialAdvance()`
-  - `src/app/api/captures/route.ts` — capture-detection logic (TBD)
-  - `src/components/LayerPanel.tsx` — re-add the two commented-out entries when ready
-- **To restore:** un-comment the two lines in `LAYER_GROUPS` (UA WAR section) in
-  `LayerPanel.tsx`; routes and map rendering are fully intact.
+### 2.3b — Strike / advance classifier refinement  ·  ✅ DONE (2026-06-07)
+**Shipped:** BA source research (docs/THERMAL-AOI-CLASSIFIER.md) identified 6 bilateral-confirmed
+strike targets missing from SITES and classifier gaps causing false positives. Changes:
+- `STRIKE_TERMS`: removed `wildfire`; added naval/shipyard/power/arsenal terms + attack-confirmation verbs
+- `ADVANCE_TERMS`: added `зайняли`, `штурм`, `прорвали`, `stormed`, `fallen to`, etc. (synced to both routes)
+- Added DIGEST/HISTORICAL guards to `isStrikeRelated` (daily roundup + pre-2022 titles excluded early)
+- 7 new SITES: Kronstadt, Berdyansk/Mariupol ports, Zuivska TPS, Ust-Labinsk oil depot,
+  Semykolodiaznaya (Crimea), Leningrad naval arsenal — with new `naval`/`power`/`ammo` categories
+- `bilateral` flag on NewsAoi: `true` when UA + RU sources cover same cell; confidence bumped + popup badge
+- Added `ssternenko` + `informnapalm` to UA_CHANNELS; gazetteer entries for Kronstadt/Ust-Labinsk/Zugres
+- OsirisMap fully wired: sources, addLayer (glow/dot/label), useEffects, popups
+- Layers re-exposed in LayerPanel. PR #12.
 
 ### 2.4 — Event timeline / playback  ·  ✅ DONE (2026-06-06)
 **Shipped:** `src/components/TimelineControl.tsx` — a bottom-of-map scrubber bar (desktop
@@ -209,8 +208,15 @@ Extract Shahed/UAV swarm events from existing news feed via `DRONE_TERMS` filter
 ### 5.5 — Shadow Fleet Movement Corridors  ·  Effort: M
 Persist AIS position history for shadow-fleet MMSIs → track polylines (dashed faint lines). Shows loitering vs. transit vs. rendezvous. Key risk: careful modification of the AIS WebSocket handler.
 
-### 5.6 — Axis Briefing  ·  ✅ DONE (2026-06-07)
-**Shipped:** `/api/axis-briefing/route.ts` + `src/components/AxisBriefing.tsx` + toolbar button (Crosshair icon). 8 named operational axes (Kharkiv → Kherson), each showing occupied area km² (DeepState polygon sum within bbox), up to 5 recent news headlines (from `/api/news` places[] filtering), and an optional one-sentence Gemini summary per axis when `GEMINI_API_KEY_N` is set. 30-min cache; `?force=1` busts it. tsc clean. Key bug fixed during build: DeepState uses 3D coords `[lng, lat, 0]` — centroid collector needed `arr.length >= 2` not `=== 2`.
+### 5.6 — Axis Briefing  ·  Effort: S–M
+8 named operational axes (Kharkiv → Kherson), each showing occupied area km² (DeepState polygon sum within bbox), up to 5 recent news headlines (from `/api/news` places[] filtering), and an optional one-sentence Gemini summary per axis when `GEMINI_API_KEY_N` is set. 30-min cache; `?force=1` busts it. Toolbar button (Crosshair icon) opens a glass panel.
+
+**Implementation notes (from prior build):**
+- Route: `fetchDeepState()` + `extractFeatures()` from `src/lib/deepstate.ts`; `createGeminiClient()` from `src/lib/ai-engine.ts`
+- DeepState uses 3D coords `[lng, lat, 0]` — centroid collector needs `arr.length >= 2` not `=== 2`
+- `places[]` in `/api/news` is `[lat, lng]` order (see line 70 of news/route.ts)
+- Prior build had `TrendArrow` hardcoded to `v={0}` — remove or replace with real heat indicator
+- Area formula: shoelace with `cos(avgLat)` correction × 111.32² — matches frontline-changes pattern
 
 ### 5.8 — Weapon-Type Enrichment for Air Raid Alerts  ·  Effort: S–M
 

@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText, Crosshair } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -19,7 +19,6 @@ import LiveAlerts from '@/components/LiveAlerts';
 import FrontlineTracker from '@/components/FrontlineTracker';
 import TimelineControl, { TimelineEvent } from '@/components/TimelineControl';
 import BriefingPanel from '@/components/BriefingPanel';
-import AxisBriefing from '@/components/AxisBriefing';
 import ThresholdToasts from '@/components/ThresholdToasts';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 
@@ -162,7 +161,6 @@ export default function Dashboard() {
   const [showTimeline, setShowTimeline] = useState(false);
   const [showFrontlineTracker, setShowFrontlineTracker] = useState(false);
   const [showBriefing, setShowBriefing] = useState(false);
-  const [showAxisBriefing, setShowAxisBriefing] = useState(false);
   const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlert[]>([]);
 
   const isMobile = useIsMobile();
@@ -191,13 +189,13 @@ export default function Dashboard() {
     radiation: false,
     infrastructure: false,
     global_incidents: true,
-    war_alerts: false,
     gps_jamming: false,
     day_night: true,
     cables: true,
     sdk_sea: true,
     sdk_air: true,
     sdk_naval: true,
+    sdk_ransomware: false,
     air_raids: false,
     power_outages: false,
     kab_threats: false,
@@ -523,6 +521,9 @@ export default function Dashboard() {
     }
     if (activeLayers.captures) {
       intervals.push(setInterval(() => fetchEndpoint('/api/captures', d => ({ captures: d.captures })), 300000)); // 5 min
+    }
+    if (activeLayers.global_incidents) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })), 300000)); // 5 min
     }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);
@@ -1079,27 +1080,6 @@ export default function Dashboard() {
           </AnimatePresence>
         </div>
 
-        {/* Axis briefing */}
-        <div className="relative">
-          <button
-            onClick={() => setShowAxisBriefing(t => !t)}
-            title="Axis briefing"
-            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showAxisBriefing ? 'bg-[#FF3D3D]/20' : 'hover:bg-white/10'}`}
-          >
-            <Crosshair className={`w-4 h-4 ${showAxisBriefing ? 'text-[#FF3D3D]' : 'text-white/60'}`} />
-          </button>
-          <AnimatePresence>
-            {showAxisBriefing && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
-                transition={{ duration: 0.2 }}
-                className="absolute right-12 top-1/2 -translate-y-1/2"
-              >
-                <AxisBriefing />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
       </div>}
 
       {/* ── LIVE FEED VIEWER OVERLAY ── */}

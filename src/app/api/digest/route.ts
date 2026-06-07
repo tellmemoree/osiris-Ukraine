@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic';
 const CACHE_TTL = 3_600_000; // 1 h
 let cache: { text: string; generatedAt: string; telegramSent: boolean } | null = null;
 let cacheTs = 0;
+let digestInflight: Promise<{ text: string; generatedAt: string; telegramSent: boolean }> | null = null;
 
 function getGeminiKey(): string | null {
   for (let i = 1; i <= 8; i++) {
@@ -117,14 +118,7 @@ function buildRawSummary(p: {
   return parts.join('\n');
 }
 
-export async function GET(req: NextRequest) {
-  const force = new URL(req.url).searchParams.has('force');
-  const now = Date.now();
-
-  if (!force && cache && now - cacheTs < CACHE_TTL) {
-    return NextResponse.json({ ...cache, fromCache: true });
-  }
-
+async function buildDigest(req: NextRequest): Promise<{ text: string; generatedAt: string; telegramSent: boolean }> {
   const base = new URL(req.url).origin;
   const toJson = (r: Response) => r.ok ? r.json() as Promise<Record<string, unknown>> : Promise.resolve({} as Record<string, unknown>);
   const [newsR, airR, kabR, maritimeR, frontlineR] = await Promise.allSettled([
@@ -189,10 +183,32 @@ export async function GET(req: NextRequest) {
   }
 
   const generatedAt = new Date().toISOString();
-  cache = { text, generatedAt, telegramSent };
-  cacheTs = now;
+  return { text, generatedAt, telegramSent };
+}
 
-  return NextResponse.json({ text, generatedAt, telegramSent, fromCache: false }, {
-    headers: { 'Cache-Control': 'no-store' },
-  });
+export async function GET(req: NextRequest) {
+  const force = new URL(req.url).searchParams.has('force');
+  const now = Date.now();
+
+  if (!force && cache && now - cacheTs < CACHE_TTL) {
+    return NextResponse.json({ ...cache, fromCache: true }, { headers: { 'Cache-Control': 'no-store' } });
+  }
+
+  if (!force && digestInflight) {
+    const result = await digestInflight;
+    return NextResponse.json({ ...result, fromCache: false }, { headers: { 'Cache-Control': 'no-store' } });
+  }
+
+  digestInflight = buildDigest(req);
+  try {
+    const result = await digestInflight;
+    cache = result;
+    cacheTs = Date.now();
+    return NextResponse.json({ ...result, fromCache: false }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (e) {
+    console.error('[OSIRIS] Digest error:', e instanceof Error ? e.message : e);
+    return NextResponse.json({ error: 'Digest generation failed' }, { status: 500 });
+  } finally {
+    digestInflight = null;
+  }
 }
