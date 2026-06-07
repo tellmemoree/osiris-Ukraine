@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -17,6 +17,10 @@ import KeyboardShortcuts from '@/components/KeyboardShortcuts';
 import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 import FrontlineTracker from '@/components/FrontlineTracker';
+import TimelineControl, { TimelineEvent } from '@/components/TimelineControl';
+import BriefingPanel from '@/components/BriefingPanel';
+import ThresholdToasts from '@/components/ThresholdToasts';
+import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
@@ -111,6 +115,25 @@ export default function Dashboard() {
   const [highlight, setHighlight] = useState<{ lat: number; lng: number; ts: number } | null>(null);
   // Searchable index over every live entity array (rebuilt when data changes).
   const entityIndex = useMemo(() => buildEntityIndex(data), [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Timestamped events for the timeline density histogram.
+  const timelineEvents = useMemo((): TimelineEvent[] => {
+    const evs: TimelineEvent[] = [];
+    (data.news   || []).forEach((n: any) => n.published  && evs.push({ t: new Date(n.published).getTime(),  type: 'news'  }));
+    (data.kab_threats || []).forEach((k: any) => k.startedAt && evs.push({ t: new Date(k.startedAt).getTime(), type: 'kab'  }));
+    (data.gdelt  || []).forEach((e: any) => e.published  && evs.push({ t: new Date(e.published).getTime(),  type: 'gdelt' }));
+    (data.thermal_aoi || []).forEach((a: any) => {
+      if (!a.latest) return;
+      const parts = (a.latest as string).trim().split(' ');
+      if (parts.length < 2) return;
+      const t4 = parts[1].padStart(4, '0');
+      const ms = new Date(`${parts[0]}T${t4.slice(0,2)}:${t4.slice(2,4)}:00Z`).getTime();
+      if (!isNaN(ms)) evs.push({ t: ms, type: 'thermal' });
+    });
+    (data.captures || []).forEach((c: any) => c.date && evs.push({ t: new Date(c.date).getTime(), type: 'capture' }));
+    return evs;
+  }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [globalStats, setGlobalStats] = useState<any>(null);
   const mouseCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const coordsDisplayRef = useRef<HTMLDivElement>(null);
@@ -133,6 +156,12 @@ export default function Dashboard() {
   const [sweepData, setSweepData] = useState<any>(null);
   const [scanTargets, setScanTargets] = useState<any[]>([]);
   const [demoMode, setDemoMode] = useState(false);
+  const [replayTime, setReplayTime] = useState<Date | null>(null);
+  const [timelineRangeH, setTimelineRangeH] = useState(24);
+  const [showTimeline, setShowTimeline] = useState(false);
+  const [showFrontlineTracker, setShowFrontlineTracker] = useState(false);
+  const [showBriefing, setShowBriefing] = useState(false);
+  const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlert[]>([]);
 
   const isMobile = useIsMobile();
   const startTime = useRef(Date.now());
@@ -160,13 +189,13 @@ export default function Dashboard() {
     radiation: false,
     infrastructure: false,
     global_incidents: true,
-    war_alerts: false,
     gps_jamming: false,
     day_night: true,
     cables: true,
     sdk_sea: true,
     sdk_air: true,
     sdk_naval: true,
+    sdk_ransomware: false,
     air_raids: false,
     power_outages: false,
     kab_threats: false,
@@ -493,10 +522,25 @@ export default function Dashboard() {
     if (activeLayers.captures) {
       intervals.push(setInterval(() => fetchEndpoint('/api/captures', d => ({ captures: d.captures })), 300000)); // 5 min
     }
+    if (activeLayers.global_incidents) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })), 300000)); // 5 min
+    }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);
 
   // CCTV: loaded once on layer toggle via layerFetchedRef (no viewport polling)
+
+  // ── THRESHOLD ALERTS — poll every 5 min ──
+  useEffect(() => {
+    const check = () =>
+      fetch('/api/threshold-alerts')
+        .then(r => r.ok ? r.json() : null)
+        .then(j => { if (j?.alerts) setThresholdAlerts(j.alerts); })
+        .catch(() => {});
+    check();
+    const iv = setInterval(check, 300_000);
+    return () => clearInterval(iv);
+  }, []);
 
   // Reactive layer fetch: handled by layerFetchedRef above (no duplicate)
 
@@ -781,6 +825,12 @@ export default function Dashboard() {
 
 
 
+      {/* ── THRESHOLD ALERT TOASTS ── */}
+      <ThresholdToasts
+        alerts={thresholdAlerts}
+        onLocate={(lat, lng) => setFlyToLocation({ lat, lng, ts: Date.now() })}
+      />
+
       {/* ── MAP ── */}
       <ErrorBoundary name="Map">
         <OsirisMap 
@@ -797,9 +847,29 @@ export default function Dashboard() {
           sweepData={sweepData}
           scanTargets={scanTargets}
           demoMode={demoMode}
+          replayTime={replayTime}
         />
       </ErrorBoundary>
 
+
+      {/* ── TIMELINE CONTROL (desktop only) ── */}
+      <AnimatePresence>
+        {showTimeline && !isMobile && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.2 }}
+            className="absolute bottom-[70px] left-[315px] right-[52px] z-[200]"
+          >
+            <TimelineControl
+              replayTime={replayTime}
+              timelineRangeH={timelineRangeH}
+              events={timelineEvents}
+              onScrub={setReplayTime}
+              onRangeChange={setTimelineRangeH}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── MAP VIEW CONTROLS (3D/2D + SATELLITE TOGGLE) ── */}
       <motion.div
@@ -969,6 +1039,47 @@ export default function Dashboard() {
             )}
           </AnimatePresence>
         </div>
+
+        {/* Timeline toggle */}
+        <button
+          onClick={() => setShowTimeline(t => !t)}
+          title="Event timeline / playback"
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showTimeline ? 'bg-[var(--cyan-primary)]/20' : 'hover:bg-white/10'}`}
+        >
+          <Play className={`w-4 h-4 ${showTimeline ? 'text-[var(--cyan-primary)]' : 'text-white/60'}`} />
+        </button>
+
+        {/* Frontline change tracker toggle */}
+        <button
+          onClick={() => setShowFrontlineTracker(t => !t)}
+          title="Frontline change tracker"
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showFrontlineTracker ? 'bg-[#FF3D3D]/20' : 'hover:bg-white/10'}`}
+        >
+          <Activity className={`w-4 h-4 ${showFrontlineTracker ? 'text-[#FF3D3D]' : 'text-white/60'}`} />
+        </button>
+
+        {/* Intel digest / situation briefing */}
+        <div className="relative">
+          <button
+            onClick={() => setShowBriefing(t => !t)}
+            title="Intel digest"
+            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showBriefing ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`}
+          >
+            <FileText className={`w-4 h-4 ${showBriefing ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+          </button>
+          <AnimatePresence>
+            {showBriefing && (
+              <motion.div
+                initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.2 }}
+                className="absolute right-12 top-1/2 -translate-y-1/2"
+              >
+                <BriefingPanel />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
       </div>}
 
       {/* ── LIVE FEED VIEWER OVERLAY ── */}
@@ -1122,11 +1233,6 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <LayerPanel data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} />
-                      {activeLayers.frontlines && (
-                        <div className="mt-2">
-                          <FrontlineTracker isMobile />
-                        </div>
-                      )}
                       <div className="mt-2">
                         <ViewPresets onNavigate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMapView(v => ({ ...v, zoom })); setMobilePanel(null); }} />
                       </div>
@@ -1173,16 +1279,19 @@ export default function Dashboard() {
       )}
 
       {/* ── Frontline change tracker (desktop) ── */}
-      {!isMobile && activeLayers.frontlines && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="absolute bottom-6 right-4 z-[205] pointer-events-none"
-        >
-          <FrontlineTracker />
-        </motion.div>
-      )}
+      <AnimatePresence>
+        {!isMobile && showFrontlineTracker && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            transition={{ duration: 0.25 }}
+            className="absolute bottom-6 right-14 z-[205] pointer-events-none"
+          >
+            <FrontlineTracker />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Scale Bar (desktop) ── */}
       <div className="desktop-only absolute bottom-[4.5rem] left-[20rem] z-[201] pointer-events-none">

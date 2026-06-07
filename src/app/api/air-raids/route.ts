@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import { stealthFetch } from '@/lib/stealthFetch';
 import { DISTRICT_COORDS } from './district-coords';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * OSIRIS — Ukrainian Air Raid Alerts API
  * Source: vadimklimenko.com/map/statuses.json (keyless, no token required).
@@ -43,7 +45,7 @@ const OBLAST_INFO: Record<string, { coords: [number, number]; en: string }> = {
   'Чернівецька область': { coords: [25.940, 48.292], en: 'Chernivtsi oblast' },
   'Чернігівська область': { coords: [31.285, 51.498], en: 'Chernihiv oblast' },
   'АР Крим': { coords: [34.102, 44.952], en: 'Crimea' },
-  "Севастополь'": { coords: [33.522, 44.616], en: 'Sevastopol' },
+  'Севастополь': { coords: [33.522, 44.616], en: 'Sevastopol' },
 };
 
 // Raw shape from vadimklimenko.com/map/statuses.json
@@ -76,7 +78,7 @@ export async function GET() {
 
     if (!res.ok) {
       console.error(`[OSIRIS] vadimklimenko responded with ${res.status}`);
-      return NextResponse.json({ alerts: [], total: 0, error: `air-alert source returned ${res.status}` });
+      return NextResponse.json({ alerts: [], total: 0, error: `air-alert source returned ${res.status}` }, { status: 502 });
     }
 
     const data: RawStatuses = await res.json();

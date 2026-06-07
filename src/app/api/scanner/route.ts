@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { validateHost, isRateLimited, getClientIp } from '@/lib/ssrf-guard';
+import { spawn } from 'node:child_process';
 import * as dns from 'node:dns/promises';
 import * as net from 'node:net';
 import * as tls from 'node:tls';
@@ -399,9 +400,143 @@ async function scanSubdomains(domain: string) {
   return { domain: clean, subdomains: sorted.slice(0, 200), total: sorted.length, source: 'crt.sh' };
 }
 
-// REMOVED from public access: deep, ports, banner, traceroute (DDoS-amplifier risk)
-const BLOCKED_TYPES = new Set(['deep', 'ports', 'banner', 'traceroute']);
-const ALLOWED_TYPES = new Set(['quick', 'ssl', 'headers', 'subdomains', 'tech', 'vuln', 'rdns', 'whois', 'geoloc']);
+async function scanRdns(target: string) {
+  const hostname = target.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+  const ip = await resolveIp(hostname);
+  const host = SHODAN_KEY ? await fetchShodanHost(ip) : null;
+
+  let ptrs: string[] = host?.hostnames ?? [];
+  let source = ptrs.length > 0 ? 'shodan' : 'dns';
+
+  if (ptrs.length === 0) {
+    try { ptrs = await dns.reverse(ip); } catch { ptrs = []; }
+    if (ptrs.length === 0) source = 'none';
+  }
+
+  return { host: hostname, ip, ptr_records: ptrs, source };
+}
+
+async function scanWhois(target: string) {
+  const hostname = target.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+  const isIp = net.isIP(hostname) > 0;
+  const ip = isIp ? hostname : await resolveIp(hostname);
+  const host = SHODAN_KEY ? await fetchShodanHost(ip) : null;
+
+  const rdapTarget = isIp ? ip : hostname;
+  const rdapType = isIp ? 'ip' : 'domain';
+  const rdapRes = await fetch(
+    `https://rdap.org/${rdapType}/${encodeURIComponent(rdapTarget)}`,
+    { signal: AbortSignal.timeout(12000), headers: { Accept: 'application/rdap+json' } }
+  );
+  if (!rdapRes.ok) throw new Error(`RDAP returned ${rdapRes.status}`);
+  const r = await rdapRes.json() as Record<string, unknown>;
+
+  const entities = (r.entities as Record<string, unknown>[] | undefined) ?? [];
+  const vcardName = (e: Record<string, unknown>) => {
+    const arr = (e.vcardArray as unknown[][])?.[1] as unknown[][] | undefined;
+    return (arr?.find(v => v[0] === 'fn') as unknown[] | undefined)?.[3] as string | undefined;
+  };
+  const registrar  = entities.find(e => (e.roles as string[])?.includes('registrar'));
+  const registrant = entities.find(e => (e.roles as string[])?.includes('registrant'));
+
+  if (isIp) {
+    const cidrs = r.cidr0_cidrs as { v4prefix?: string; v6prefix?: string; length?: number }[] | undefined;
+    const cidr = cidrs?.[0]
+      ? `${cidrs[0].v4prefix ?? cidrs[0].v6prefix}/${cidrs[0].length}`
+      : undefined;
+    return {
+      host: hostname, ip,
+      network_name: r.name,
+      network_handle: r.handle,
+      start_address: r.startAddress,
+      end_address: r.endAddress,
+      cidr,
+      country: r.country,
+      isp: host?.isp ?? host?.org,
+      events: (r.events as { eventAction: string; eventDate: string }[] | undefined)
+        ?.map(e => ({ action: e.eventAction, date: e.eventDate })),
+      source: 'rdap' + (host ? '+shodan' : ''),
+    };
+  }
+
+  const events = r.events as { eventAction: string; eventDate: string }[] | undefined;
+  return {
+    host: hostname, ip,
+    domain: r.ldhName ?? hostname,
+    status: r.status ?? [],
+    registrar: registrar ? vcardName(registrar) : undefined,
+    registrant: registrant ? vcardName(registrant) : undefined,
+    registered: events?.find(e => e.eventAction === 'registration')?.eventDate,
+    expires: events?.find(e => e.eventAction === 'expiration')?.eventDate,
+    nameservers: (r.nameservers as { ldhName: string }[] | undefined)?.map(ns => ns.ldhName),
+    source: 'rdap',
+  };
+}
+
+async function scanGeoloc(target: string) {
+  const hostname = target.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+  const ip = await resolveIp(hostname);
+  const host = SHODAN_KEY ? await fetchShodanHost(ip) : null;
+
+  if (host?.latitude != null) {
+    return {
+      host: hostname, ip,
+      latitude: host.latitude, longitude: host.longitude,
+      country: host.country_name, city: host.city,
+      isp: host.isp, org: host.org,
+      source: 'shodan',
+    };
+  }
+
+  const res = await fetch(
+    `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,country,regionName,city,lat,lon,isp,org,as,timezone`,
+    { signal: AbortSignal.timeout(8000) }
+  );
+  if (!res.ok) throw new Error('geoloc lookup failed');
+  const d = await res.json() as Record<string, unknown>;
+  if (d.status !== 'success') throw new Error((d.message as string) || 'geoloc lookup failed');
+  return {
+    host: hostname, ip,
+    latitude: d.lat, longitude: d.lon,
+    country: d.country, region: d.regionName, city: d.city,
+    timezone: d.timezone, isp: d.isp, org: d.org, asn: d.as,
+    source: 'ip-api',
+  };
+}
+
+// SSRF guard already validated the hostname before this is called. spawn() is used
+// (not shell exec) so there is no injection risk from the hostname argument.
+async function scanTraceroute(target: string): Promise<Record<string, unknown>> {
+  const hostname = target.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+  return new Promise((resolve, reject) => {
+    // 2 cycles, 20 hops max, numeric output — typically completes in 15-25s
+    const proc = spawn('mtr', ['--report', '--report-cycles', '2', '--no-dns', '--max-ttl', '20', hostname]);
+    let out = '', err = '';
+    const timer = setTimeout(() => { proc.kill(); reject(new Error('traceroute timed out after 30s')); }, 30000);
+
+    proc.stdout.on('data', (d: Buffer) => { out += d.toString(); });
+    proc.stderr.on('data', (d: Buffer) => { err += d.toString(); });
+    proc.on('error', (e) => { clearTimeout(timer); reject(e); });
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0 && !out) return reject(new Error(err.trim() || `mtr exited ${code}`));
+
+      // MTR report format: "  1.|-- 1.2.3.4   0.0%   2   1.1   1.0   0.9   1.1   0.0"
+      //   fields:           hop  host         loss%  snt last  avg   best  wrst  stdev
+      const hops: { hop: number; hostname: string; loss: string; avg: string; best: string; worst: string }[] = [];
+      for (const line of out.split('\n')) {
+        const m = line.match(/^\s*(\d+)\.\|--\s+(\S+)\s+([\d.]+%)\s+\d+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+        if (m) hops.push({ hop: +m[1], hostname: m[2], loss: m[3], avg: `${m[4]}ms`, best: `${m[5]}ms`, worst: `${m[6]}ms` });
+      }
+      resolve({ host: hostname, hops, hop_count: hops.length, raw: out, source: 'mtr' });
+    });
+  });
+}
+
+// deep/ports/banner remain blocked (active scan DDoS-amplifier risk).
+// traceroute is now permitted — runs on hackertarget infra, not locally.
+const BLOCKED_TYPES = new Set(['deep', 'ports', 'banner']);
+const ALLOWED_TYPES = new Set(['quick', 'ssl', 'headers', 'subdomains', 'tech', 'vuln', 'rdns', 'whois', 'geoloc', 'traceroute']);
 
 export async function GET(req: Request) {
   const clientIp = getClientIp(req);
@@ -436,6 +571,10 @@ export async function GET(req: Request) {
       case 'subdomains': result = await scanSubdomains(target); break;
       case 'tech':       result = await scanTech(target); break;
       case 'vuln':       result = await scanVuln(target); break;
+      case 'rdns':       result = await scanRdns(target); break;
+      case 'whois':      result = await scanWhois(target); break;
+      case 'geoloc':     result = await scanGeoloc(target); break;
+      case 'traceroute': result = await scanTraceroute(target); break;
       default:
         return NextResponse.json({ error: `Scan type "${scanType}" not yet implemented` }, { status: 501 });
     }

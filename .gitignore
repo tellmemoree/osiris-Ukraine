@@ -34,12 +34,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Scanner backend (API key in env, not in git)
-scanner/
-.vercel
-
-# Security - prevent accidental backup commits
-scanner_backend_backup.js
 
 # Security - Prevent accidental manual leaks
 *Manual*.md
