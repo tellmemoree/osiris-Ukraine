@@ -15,7 +15,7 @@ on:
   push:
     branches: [osiris-Ukraine, osiris-Ukraine-merged]
   pull_request:
-    branches: [osiris-Ukraine]
+    branches: [osiris-Ukraine, osiris-Ukraine-merged]
   workflow_dispatch:
 
 permissions:
