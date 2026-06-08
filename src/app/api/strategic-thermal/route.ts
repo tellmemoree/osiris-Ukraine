@@ -227,7 +227,7 @@ export async function GET(req: Request) {
     // /~5 km cell — different channels, or one strike reported by both sides) MERGE into a
     // single AOI that carries EVERY contributing source, instead of whichever article was
     // processed first silently winning (and mis-attributing) the marker.
-    type Contributor = { source?: string; side?: string; link?: string; title?: string };
+    type Contributor = { source?: string; side?: string; link?: string; title?: string; description?: string };
     type NewsAoi = {
       id: string; category: 'news'; name: string; source?: string; side?: string; link?: string;
       lat: number; lng: number; hit: boolean; fireCount: number; maxFrp: number; latest: string | null;
@@ -246,7 +246,7 @@ export async function GET(req: Request) {
         if (seenThisArticle.has(key)) continue; // one article contributes one marker per place
         seenThisArticle.add(key);
         const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
-        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120) };
+        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220) };
         const existing = newsByCell.get(key);
         if (existing) {
           // Upgrade news-only → fire-confirmed if this pass has a hit
