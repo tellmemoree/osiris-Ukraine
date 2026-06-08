@@ -861,6 +861,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
           <span style="background:${catColor}22;color:${catColor};font-size:9px;padding:2px 5px;border-radius:2px;letter-spacing:0.08em;">${catLabel}</span>
           ${p.bilateral ? `<span style="color:#FFD700;font-size:9px;">· UA + RU sources</span>` : ''}
+          ${p.videoConfirmed ? `<span style="color:#00E5FF;font-size:9px;">· 🎥 VIDEO</span>` : ''}
         </div>
         <div style="font-size:11px;color:#E8E6E0;margin-bottom:6px;">${p.name||'Unknown site'}</div>
         ${snippetHtml}
@@ -1329,6 +1330,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         hit: a.hit, fireCount: a.fireCount, maxFrp: a.maxFrp,
         confidence: a.confidence, latest: a.latest,
         bilateral: a.bilateral ?? false,
+        videoConfirmed: a.videoConfirmed ?? false,
         sources: a.sources ? JSON.stringify(a.sources) : '[]',
       },
     })));

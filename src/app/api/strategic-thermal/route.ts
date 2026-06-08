@@ -86,7 +86,7 @@ const SITES: Site[] = [
 ];
 
 interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; }
-interface NewsItem { title?: string; description?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; places?: [number, number][]; }
+interface NewsItem { title?: string; description?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; places?: [number, number][]; hasVideo?: boolean; }
 
 // Equirectangular distance (km) — accurate enough at this scale, cheap in a hot loop.
 function distKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
@@ -227,11 +227,11 @@ export async function GET(req: Request) {
     // /~5 km cell — different channels, or one strike reported by both sides) MERGE into a
     // single AOI that carries EVERY contributing source, instead of whichever article was
     // processed first silently winning (and mis-attributing) the marker.
-    type Contributor = { source?: string; side?: string; link?: string; title?: string; description?: string };
+    type Contributor = { source?: string; side?: string; link?: string; title?: string; description?: string; hasVideo?: boolean };
     type NewsAoi = {
       id: string; category: 'news'; name: string; source?: string; side?: string; link?: string;
       lat: number; lng: number; hit: boolean; fireCount: number; maxFrp: number; latest: string | null;
-      confidence: Confidence; sources: Contributor[]; bilateral: boolean;
+      confidence: Confidence; sources: Contributor[]; bilateral: boolean; videoConfirmed: boolean;
     };
     const newsByCell = new Map<string, NewsAoi>();
     for (const n of news) {
@@ -246,7 +246,7 @@ export async function GET(req: Request) {
         if (seenThisArticle.has(key)) continue; // one article contributes one marker per place
         seenThisArticle.add(key);
         const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
-        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220) };
+        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220), hasVideo: n.hasVideo };
         const existing = newsByCell.get(key);
         if (existing) {
           // Upgrade news-only → fire-confirmed if this pass has a hit
@@ -260,6 +260,11 @@ export async function GET(req: Request) {
           if (!existing.sources.some(s => s.source === contributor.source && s.title === contributor.title)) {
             existing.sources.push(contributor);
           }
+          if (contributor.hasVideo && !existing.videoConfirmed) {
+            existing.videoConfirmed = true;
+            // Video is corroborating evidence — upgrade unverified 'news' to 'low'
+            if (existing.confidence === 'news') existing.confidence = 'low';
+          }
           // Bilateral: both sides present in sources after adding this contributor
           const bilateral = existing.sources.some(s => s.side === 'ua') && existing.sources.some(s => s.side === 'ru');
           if (bilateral) {
@@ -271,12 +276,14 @@ export async function GET(req: Request) {
           }
           continue;
         }
+        const initVideo = !!n.hasVideo;
+        const initConf: Confidence = h ? confidenceOf(h.count, h.maxFrp) : (initVideo ? 'low' : 'news');
         newsByCell.set(key, {
           id: `news-${newsByCell.size + 1}`, category: 'news', name: contributor.title || 'News report',
           source: n.source, side: n.side, link: n.link, lat, lng,
           hit: !!h, fireCount: h?.count ?? 0, maxFrp: h?.maxFrp ?? 0, latest: h?.latest ?? null,
-          confidence: h ? confidenceOf(h.count, h.maxFrp) : 'news',
-          sources: [contributor], bilateral: false,
+          confidence: initConf,
+          sources: [contributor], bilateral: false, videoConfirmed: initVideo,
         });
       }
     }
