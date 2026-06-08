@@ -467,7 +467,6 @@ async function buildNews(): Promise<unknown> {
         coords: placed,
         coords_default: !coords,
         places: findAllCoords(searchText),
-        machine_assessment: null, // populated by 5.9 AI enrichment when GEMINI_API_KEY_* is set
       };
     });
 

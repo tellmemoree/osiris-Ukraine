@@ -7,6 +7,7 @@ import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 interface Props {
   alerts: ThresholdAlert[];
   onLocate?: (lat: number, lng: number) => void;
+  onNewAlert?: (alert: ThresholdAlert) => void;
 }
 
 const SEV_COLOR: Record<string, string> = {
@@ -89,8 +90,18 @@ function Toast({ alert, onDismiss, onLocate }: {
   );
 }
 
-export default function ThresholdToasts({ alerts, onLocate }: Props) {
+export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const seenRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    for (const alert of alerts) {
+      if (!dismissed.has(alert.id) && !seenRef.current.has(alert.id)) {
+        seenRef.current.add(alert.id);
+        onNewAlert?.(alert);
+      }
+    }
+  }, [alerts, dismissed, onNewAlert]);
 
   const visible = alerts.filter(a => !dismissed.has(a.id)).slice(0, 5);
   if (!visible.length) return null;
