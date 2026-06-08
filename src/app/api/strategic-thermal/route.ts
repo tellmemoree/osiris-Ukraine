@@ -287,7 +287,7 @@ export async function GET(req: Request) {
     const highConf = aois.filter(a => a.hit && a.confidence === 'high').length;
     return NextResponse.json(
       { aois, counts: { sites: SITES.length, site_hits: siteHits, news_hits: newsHits, high_confidence: highConf, fires_in_theater: fires.length }, timestamp: new Date().toISOString() },
-      { headers: { 'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=1200' } }
+      { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=7200' } }
     );
   } catch (error) {
     console.error('Strategic-thermal error:', error);

@@ -23,7 +23,7 @@ architect            ← file-by-file plan: touches, sequencing, env vars, risk 
 ```
 
 ### From backlog item
-> Feature already exists in HANDOFF-feature-backlog.md and is being picked up for implementation.
+> Feature exists in `docs/BACKLOG.md` and is being picked up for implementation.
 
 ```
 [backlog item]
