@@ -180,6 +180,22 @@ function isTerritorialAdvance(item: NewsItem): boolean {
   return ADVANCE_TERMS.some(w => t.includes(w));
 }
 
+// Weapon type inferred from article text. Priority: specific systems → generic class.
+// Returns a short display label or null when nothing matches.
+const WEAPON_PATTERNS: [string, string[]][] = [
+  ['SHAHED', ['shahed', 'шахед', 'geranium', 'герань', 'lancet', 'ланцет', 'fpv', 'фпв', 'бпла', 'uav', 'drone', 'дрон']],
+  ['MISSILE', ['kalibr', 'калибр', 'калібр', 'iskander', 'іскандер', 'искандер', 'kh-10', 'х-10', 'kinzhal', 'кинжал', 'neptune', 'нептун', 'storm shadow', 'scalp', 'atacms', 'cruise missile', 'балістичн', 'ballistic', 'missile', 'ракет']],
+  ['GLIDE BOMB', ['kab', 'fab-', 'фаб-', 'glide bomb']],
+  ['ARTILLERY', ['обстріл', 'обстрел', 'shelling', 'артилер', 'артиллер', 'снаряд']],
+];
+function detectWeapon(text: string): string | null {
+  const t = text.toLowerCase();
+  for (const [label, terms] of WEAPON_PATTERNS) {
+    if (terms.some(w => t.includes(w))) return label;
+  }
+  return null;
+}
+
 // Confidence from fire intensity + count. FRP (fire radiative power, MW) is the best single
 // discriminator: a struck depot/refinery burns hot (high FRP); a faint farm hotspot is low.
 // 'news' = no fire detected — shows as an unverified dim marker (no glow).
@@ -227,11 +243,11 @@ export async function GET(req: Request) {
     // /~5 km cell — different channels, or one strike reported by both sides) MERGE into a
     // single AOI that carries EVERY contributing source, instead of whichever article was
     // processed first silently winning (and mis-attributing) the marker.
-    type Contributor = { source?: string; side?: string; link?: string; title?: string; description?: string; hasVideo?: boolean };
+    type Contributor = { source?: string; side?: string; link?: string; title?: string; description?: string; hasVideo?: boolean; weapon?: string };
     type NewsAoi = {
       id: string; category: 'news'; name: string; source?: string; side?: string; link?: string;
       lat: number; lng: number; hit: boolean; fireCount: number; maxFrp: number; latest: string | null;
-      confidence: Confidence; sources: Contributor[]; bilateral: boolean; videoConfirmed: boolean;
+      confidence: Confidence; sources: Contributor[]; bilateral: boolean; videoConfirmed: boolean; weapon?: string;
     };
     const newsByCell = new Map<string, NewsAoi>();
     for (const n of news) {
@@ -246,7 +262,8 @@ export async function GET(req: Request) {
         if (seenThisArticle.has(key)) continue; // one article contributes one marker per place
         seenThisArticle.add(key);
         const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
-        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220), hasVideo: n.hasVideo };
+        const articleText = `${n.title || ''} ${n.description || ''}`;
+        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220), hasVideo: n.hasVideo, weapon: detectWeapon(articleText) ?? undefined };
         const existing = newsByCell.get(key);
         if (existing) {
           // Upgrade news-only → fire-confirmed if this pass has a hit
@@ -260,6 +277,7 @@ export async function GET(req: Request) {
           if (!existing.sources.some(s => s.source === contributor.source && s.title === contributor.title)) {
             existing.sources.push(contributor);
           }
+          if (contributor.weapon && !existing.weapon) existing.weapon = contributor.weapon;
           if (contributor.hasVideo && !existing.videoConfirmed) {
             existing.videoConfirmed = true;
             // Video is corroborating evidence — upgrade unverified 'news' to 'low'
@@ -283,7 +301,7 @@ export async function GET(req: Request) {
           source: n.source, side: n.side, link: n.link, lat, lng,
           hit: !!h, fireCount: h?.count ?? 0, maxFrp: h?.maxFrp ?? 0, latest: h?.latest ?? null,
           confidence: initConf,
-          sources: [contributor], bilateral: false, videoConfirmed: initVideo,
+          sources: [contributor], bilateral: false, videoConfirmed: initVideo, weapon: contributor.weapon,
         });
       }
     }

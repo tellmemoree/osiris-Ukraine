@@ -843,36 +843,41 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const catLabel = (p.category || 'site').toUpperCase();
       const catColor = { airfield: '#00E5FF', oil: '#FF9500', rail: '#FFD700', logistics: '#FFA500', naval: '#4FC3F7', power: '#FF6B00', ammo: '#FF3D3D', news: '#D4AF37' }[p.category as string] || '#FF6B00';
       const confColor = p.confidence === 'high' ? '#00E676' : p.confidence === 'med' ? '#FFD700' : p.confidence === 'low' ? '#888' : '#555';
+      const weapon = p.weapon || '';
+      const weaponColor = weapon === 'MISSILE' ? '#FF4444' : weapon === 'SHAHED' ? '#FF9500' : weapon === 'GLIDE BOMB' ? '#FF6B00' : weapon === 'ARTILLERY' ? '#FFD700' : '';
+      const isNews = p.category === 'news';
       let sourcesHtml = '';
       let snippetHtml = '';
       try {
         const srcs = JSON.parse(p.sources || '[]') as any[];
         if (srcs.length > 0) {
           const first = srcs[0];
-          if (p.category !== 'news' && first.title) {
-            snippetHtml = `<div style="font-size:10px;color:#C0BEBA;line-height:1.45;margin-bottom:6px;font-style:italic;">"${first.title}"</div>`;
-          } else if (p.category === 'news' && first.description) {
-            snippetHtml = `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;">${first.description}</div>`;
+          if (!isNews && first.title) {
+            snippetHtml = `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;font-style:italic;">"${(first.title as string).slice(0, 100)}"</div>`;
           }
-          sourcesHtml = `<div style="font-size:9px;color:#5C5A54;margin-top:4px;">${first.source ? `<a href="${first.link||'#'}" target="_blank" style="color:#D4AF37;text-decoration:none;">${first.source}</a>` : ''}${srcs.length > 1 ? ` <span style="color:#888;">+${srcs.length-1} more report${srcs.length > 2 ? 's' : ''}</span>` : ''}</div>`;
+          sourcesHtml = `<div style="font-size:9px;color:#5C5A54;margin-top:6px;">${first.source ? `<a href="${first.link||'#'}" target="_blank" style="color:#D4AF37;text-decoration:none;">${first.source}</a>` : ''}${srcs.length > 1 ? ` <span style="color:#888;">+${srcs.length-1} more report${srcs.length > 2 ? 's' : ''}</span>` : ''}</div>`;
         }
       } catch { /* ignore */ }
       popup(coords, `<div style="${pStyle}border:1px solid ${catColor}40;">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
           <span style="background:${catColor}22;color:${catColor};font-size:9px;padding:2px 5px;border-radius:2px;letter-spacing:0.08em;">${catLabel}</span>
-          ${p.bilateral ? `<span style="color:#FFD700;font-size:9px;">· UA + RU sources</span>` : ''}
+          ${p.bilateral ? `<span style="color:#FFD700;font-size:9px;">· UA+RU</span>` : ''}
           ${p.videoConfirmed ? `<span style="color:#00E5FF;font-size:9px;">· 🎥 VIDEO</span>` : ''}
         </div>
-        <div style="font-size:11px;color:#E8E6E0;margin-bottom:6px;">${p.name||'Unknown site'}</div>
+        ${weapon ? `<div style="margin-bottom:8px;"><span style="background:${weaponColor}22;color:${weaponColor};font-size:9px;padding:2px 7px;border-radius:2px;letter-spacing:0.1em;font-weight:600;">${weapon}</span></div>` : ''}
+        <div style="font-size:8px;color:#5C5A54;letter-spacing:0.08em;margin-bottom:3px;">${isNews ? 'REPORT' : 'TARGET'}</div>
+        <div style="font-size:${isNews ? '10' : '12'}px;color:#E8E6E0;${isNews ? 'line-height:1.4;' : 'font-weight:600;'}margin-bottom:8px;">${p.name||'Unknown'}</div>
         ${snippetHtml}
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;font-size:9px;margin-bottom:6px;">
-          <div><span style="color:#5C5A54;">CONFIDENCE</span><br/><span style="color:${confColor};">${(p.confidence||'—').toUpperCase()}</span></div>
-          <div><span style="color:#5C5A54;">FIRES</span><br/><span style="color:#FF6B00;">${p.fireCount||0}</span></div>
-          <div><span style="color:#5C5A54;">MAX FRP</span><br/><span style="color:#FF9500;">${p.maxFrp||0} MW</span></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:9px;margin-bottom:6px;flex-wrap:wrap;">
+          <span style="color:#5C5A54;">CONF</span><span style="color:${confColor};">${(p.confidence||'—').toUpperCase()}</span>
+          <span style="color:#3A3832;">·</span>
+          <span style="color:#5C5A54;">FIRES</span><span style="color:#FF6B00;">${p.fireCount||0}</span>
+          <span style="color:#3A3832;">·</span>
+          <span style="color:#FF9500;">${p.maxFrp||0} MW</span>
         </div>
-        ${p.latest ? `<div style="font-size:9px;color:#5C5A54;">LATEST DETECTION: <span style="color:#E8E6E0;">${p.latest}</span></div>` : ''}
+        ${p.latest ? `<div style="font-size:9px;color:#5C5A54;margin-bottom:4px;">LATEST <span style="color:#E8E6E0;">${p.latest}</span></div>` : ''}
         ${sourcesHtml}
-        <div style="font-size:8px;color:#444;margin-top:6px;">heuristic — verify before acting</div>
+        <div style="font-size:8px;color:#3A3832;margin-top:8px;">heuristic — verify before acting</div>
       </div>`);
     });
 
@@ -1331,6 +1336,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         confidence: a.confidence, latest: a.latest,
         bilateral: a.bilateral ?? false,
         videoConfirmed: a.videoConfirmed ?? false,
+        weapon: a.weapon ?? '',
         sources: a.sources ? JSON.stringify(a.sources) : '[]',
       },
     })));
