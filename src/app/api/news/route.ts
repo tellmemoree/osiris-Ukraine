@@ -348,6 +348,7 @@ interface ParsedArticle {
   link: string;
   pubDate: string;
   source: string;
+  hasVideo: boolean;
 }
 
 function parseTelegramHTML(html: string, channel: string): ParsedArticle[] {
@@ -372,8 +373,9 @@ function parseTelegramHTML(html: string, channel: string): ParsedArticle[] {
     const pubDate = dateMatch ? dateMatch[2] : new Date().toISOString();
 
     const title = text.split('\n')[0].substring(0, 100);
+    const hasVideo = /tgme_widget_message_video|tgme_widget_message_roundvideo|<video[\s>]/i.test(blockHtml);
 
-    items.push({ title, description: text, link, pubDate, source: `t.me/${channel}` });
+    items.push({ title, description: text, link, pubDate, source: `t.me/${channel}`, hasVideo });
   }
   return items;
 }
@@ -398,7 +400,8 @@ function parseRSSItems(xml: string, sourceName: string): ParsedArticle[] {
       description: desc,
       link: getTag('link'),
       pubDate: getTag('pubDate') || new Date().toISOString(),
-      source: sourceName
+      source: sourceName,
+      hasVideo: false,
     });
   }
   return items;
@@ -467,6 +470,7 @@ async function buildNews(): Promise<unknown> {
         coords: placed,
         coords_default: !coords,
         places: findAllCoords(searchText),
+        hasVideo: article.hasVideo,
       };
     });
 
