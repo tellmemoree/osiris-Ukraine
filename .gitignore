@@ -43,3 +43,6 @@ next-env.d.ts
 
 # Local-only docs (backlog, handoff notes, camera sources — never commit)
 docs/
+
+# Architecture map is machine-local — agents keep it current; don't commit churn
+ARCHITECTURE.md
