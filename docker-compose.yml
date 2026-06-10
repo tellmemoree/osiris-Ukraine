@@ -26,7 +26,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ~/.osiris-data:/root/.osiris-data
+      - ~/.osiris-data:/home/nextjs/.osiris-data
     restart: unless-stopped
     networks:
       - default
