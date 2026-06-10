@@ -411,6 +411,23 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-offset': [0, 1.9], 'text-allow-overlap': false,
       }, paint: { 'text-color': '#CE93D8', 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
+      // RU Oblast Alerts — red (Russian border oblast drone/strike incursions).
+      // Note: 'ru-air-raids' is NOT in the sources array above — registered explicitly here.
+      map.addSource('ru-air-raids', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({ id: 'ru-raid-glow', type: 'circle', source: 'ru-air-raids', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 14, 5, 24, 10, 36],
+        'circle-color': '#EF5350', 'circle-opacity': 0.11, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'ru-raid-dots', type: 'circle', source: 'ru-air-raids', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 5, 5, 9, 10, 13],
+        'circle-color': '#EF5350', 'circle-opacity': 0.85,
+        'circle-stroke-width': 2, 'circle-stroke-color': '#FF1744', 'circle-stroke-opacity': 0.5,
+      }});
+      map.addLayer({ id: 'ru-raid-label', type: 'symbol', source: 'ru-air-raids', minzoom: 4, layout: {
+        'text-field': ['concat', 'RU ALERT: ', ['get','oblast']], 'text-size': 9, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.9], 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#EF5350', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
       // Power Outages — amber/yellow grid-down indicators
       map.addLayer({ id: 'outage-glow', type: 'circle', source: 'power-outages', paint: {
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,10, 5,16, 10,24],
@@ -1020,6 +1037,24 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
+    // ── RU Oblast Alerts (Russian border oblast drone/strike incursions) ──
+    map.on('click', 'ru-raid-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      popup(coords, `<div style="${pStyle}border:1px solid rgba(239,83,80,0.4);max-width:300px;">
+        <div style="color:#EF5350;font-size:13px;font-weight:700;margin-bottom:6px;">🇷🇺 RU OBLAST ALERT</div>
+        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${p.oblast||'Unknown oblast'}</div>
+        <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">Border oblast drone/strike incursion · 24h window</div>
+        <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid rgba(239,83,80,0.4);padding-left:6px;">${(p.snippet||'').replace(/</g,'&lt;')}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
+          <div><span style="color:#5C5A54;">REPORTED</span><br/><span style="color:#E8E6E0;">${p.started_at ? new Date(p.started_at).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
+          <div><span style="color:#5C5A54;">SOURCE</span><br/><span style="color:#E8E6E0;font-size:8px;">${p.source||'—'}</span></div>
+        </div>
+        <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Heuristic text signal — verify before acting.</div>
+      </div>`);
+    });
+
     // ── Power Outages ──
     map.on('click', 'outage-dots', e => {
       if (!e.features?.length) return;
@@ -1110,7 +1145,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Generic hover for clickables ──
-    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-sea-atmo','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo','raid-dots','outage-dots','kab-dots','drone-dots'].forEach(layer => {
+    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-sea-atmo','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo','raid-dots','outage-dots','kab-dots','drone-dots','ru-raid-dots'].forEach(layer => {
       map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
     });
@@ -1616,6 +1651,17 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     })));
   }, [mapReady, data.drone_threats, activeLayers.drone_threats, setGeo]);
 
+  // RU Oblast Alerts (Russian border oblast drone/strike incursions).
+  useEffect(() => {
+    if (!mapReady) return;
+    const events = activeLayers.ru_air_raids && data.ru_air_raids ? data.ru_air_raids : [];
+    setGeo('ru-air-raids', events.map((e: any) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [e.lng, e.lat] },
+      properties: { oblast: e.oblast, started_at: e.started_at, source: e.source, snippet: e.snippet },
+    })));
+  }, [mapReady, data.ru_air_raids, activeLayers.ru_air_raids, setGeo]);
+
   useEffect(() => {
     if (!mapReady) return;
     const outages = activeLayers.power_outages && data.power_outages ? data.power_outages : [];
@@ -1720,6 +1766,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['outage-oblast-fill','outage-oblast-outline','outage-glow','outage-dots','outage-label'], activeLayers.power_outages);
     setVis(['kab-glow','kab-dots','kab-label'], activeLayers.kab_threats);
     setVis(['drone-glow','drone-dots','drone-label'], activeLayers.drone_threats);
+    setVis(['ru-raid-glow','ru-raid-dots','ru-raid-label'], activeLayers.ru_air_raids);
     setVis(['thermal-aoi-glow','thermal-aoi-dots','thermal-aoi-label'], activeLayers.thermal_aoi);
     setVis(['capture-glow','capture-dots'], activeLayers.captures);
     setVis(['frontline-fill','frontline-line'], activeLayers.frontlines);
