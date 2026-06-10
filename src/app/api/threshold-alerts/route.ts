@@ -103,6 +103,59 @@ function ruleFirmsAirfield(aois: Record<string, unknown>[]): ThresholdAlert[] {
     }));
 }
 
+// Rule 4: FIRMS fire confirmation on any non-airfield strategic site or news AOI.
+// Airfields are already covered by ruleFirmsAirfield; this fills every other category.
+// Confidence 'news' = no fire data yet (just a news mention) — excluded.
+function ruleFirmsStrikeConfirmed(aois: Record<string, unknown>[]): ThresholdAlert[] {
+  const CAT_SEV: Record<string, ThresholdAlert['severity']> = {
+    oil:       'HIGH',
+    naval:     'HIGH',
+    ammo:      'HIGH',
+    power:     'HIGH',
+    logistics: 'ELEVATED',
+    rail:      'ELEVATED',
+    news:      'ELEVATED',
+  };
+
+  return aois
+    .filter(a =>
+      a.hit &&
+      a.category !== 'airfield' &&
+      a.confidence !== 'news' &&
+      a.confidence !== 'low' &&
+      a.confidence !== null
+    )
+    .map(a => {
+      const cat = String(a.category ?? '');
+      const base: ThresholdAlert['severity'] = CAT_SEV[cat] ?? 'ELEVATED';
+      const videoConf = Boolean(a.videoConfirmed);
+      const bilateral = Boolean(a.bilateral);
+
+      const sev: ThresholdAlert['severity'] =
+        bilateral ? 'CRITICAL'
+        : videoConf && base !== 'HIGH' ? 'HIGH'
+        : base;
+
+      const tags = [
+        a.confidence ? `${String(a.confidence).toUpperCase()} confidence` : null,
+        videoConf ? 'VIDEO CONFIRMED' : null,
+        bilateral ? 'BILATERAL' : null,
+        a.weapon ? `Weapon: ${a.weapon}` : null,
+      ].filter(Boolean).join(' · ');
+
+      return {
+        id: `strike-${cat}-${String(a.id ?? a.name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+        rule: 'Strike Confirmation',
+        title: `Strike confirmed: ${a.name}`,
+        description: `${a.fireCount} FIRMS detection(s) at ${a.name} (${cat.toUpperCase()})${tags ? ' · ' + tags : ''}. Max FRP: ${a.maxFrp} MW. Heuristic — verify independently.`,
+        severity: sev,
+        lat: a.lat as number | undefined,
+        lng: a.lng as number | undefined,
+        timestamp: new Date().toISOString(),
+      };
+    });
+}
+
 async function telegramAlert(alert: ThresholdAlert): Promise<void> {
   if (!telegramConfigured() || sentIds.has(alert.id)) return;
   sentIds.add(alert.id);
@@ -135,6 +188,7 @@ export async function GET(req: NextRequest) {
     ...ruleAirRaidPlusKab(airRaids, kabThreats),
     ...ruleShadowFleetChokepoint(ships),
     ...ruleFirmsAirfield(aois),
+    ...ruleFirmsStrikeConfirmed(aois),
   ];
 
   // Push new alerts to Telegram (fire-and-forget)

@@ -4,6 +4,37 @@ import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
+// Maps power-outage canonical region names (from /api/power-outages) to the
+// name_en values used in ukraine-oblasts.geojson for polygon highlighting.
+// Kyiv City and Kyiv Oblast are intentionally separate entries.
+const OUTAGE_REGION_TO_GEOJSON: Record<string, string> = {
+  'Vinnytska Oblast':        'Vinnytsia oblast',
+  'Volynska Oblast':         'Volyn oblast',
+  'Dnipropetrovska Oblast':  'Dnipropetrovsk oblast',
+  'Donetska Oblast':         'Donetsk oblast',
+  'Zhytomyrska Oblast':      'Zhytomyr oblast',
+  'Zakarpatska Oblast':      'Zakarpattia oblast',
+  'Zaporizka Oblast':        'Zaporizhzhia oblast',
+  'Ivano-Frankivska Oblast': 'Ivano-Frankivsk oblast',
+  'Kyivska Oblast':          'Kyiv oblast',
+  'Kyiv City':               'Kyiv',
+  'Kirovohradska Oblast':    'Kirovohrad oblast',
+  'Luhanska Oblast':         'Luhansk oblast',
+  'Lvivska Oblast':          'Lviv oblast',
+  'Mykolaivska Oblast':      'Mykolaiv oblast',
+  'Odeska Oblast':           'Odesa oblast',
+  'Poltavska Oblast':        'Poltava oblast',
+  'Rivnenska Oblast':        'Rivne oblast',
+  'Sumska Oblast':           'Sumy oblast',
+  'Ternopilska Oblast':      'Ternopil oblast',
+  'Kharkivska Oblast':       'Kharkiv oblast',
+  'Khersonska Oblast':       'Kherson oblast',
+  'Khmelnytska Oblast':      'Khmelnytskyi oblast',
+  'Cherkaska Oblast':        'Cherkasy oblast',
+  'Chernivtetska Oblast':    'Chernivtsi oblast',
+  'Chernihivska Oblast':     'Chernihiv oblast',
+};
+
 interface OsirisMapProps {
   data: any;
   activeLayers: Record<string, boolean>;
@@ -250,6 +281,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       map.addLayer({ id: 'raid-district-outline', type: 'line', source: 'ukraine-district-fill',
         filter: ['in', ['get', 'name_ua'], ['literal', []]],
         paint: { 'line-color': '#FF1744', 'line-width': 1, 'line-opacity': 0.6 }
+      });
+
+      // Power outage region fills — amber/yellow, same oblast source as raid fills.
+      // Kyiv City ('Kyiv') and Kyiv Oblast ('Kyiv oblast') are separate features in
+      // ukraine-oblasts.geojson so both can be highlighted independently.
+      map.addLayer({ id: 'outage-oblast-fill', type: 'fill', source: 'ukraine-oblast-fill',
+        filter: ['in', ['get', 'name_en'], ['literal', []]],
+        paint: { 'fill-color': '#FFD500', 'fill-opacity': 0.16 }
+      });
+      map.addLayer({ id: 'outage-oblast-outline', type: 'line', source: 'ukraine-oblast-fill',
+        filter: ['in', ['get', 'name_en'], ['literal', []]],
+        paint: { 'line-color': '#FFD500', 'line-width': 1.5, 'line-opacity': 0.50 }
       });
 
       // Frontline (DeepState/Militaryland) — occupied-zone fills + outlines. Uses
@@ -1323,7 +1366,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     const cutoffMs = cutoff.getTime();
     const all: any[] = activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi : [];
     const visible = all.filter((a: any) => {
-      if (!a.latest) return a.category !== 'news'; // static unlit sites always show; news-only hide during replay
+      if (!a.latest) {
+        if (a.category === 'news') return replayTime === null; // news-only: visible in live mode, hidden in replay (no timestamp to filter against)
+        return true; // non-news sites (airfield/oil/etc.) always show
+      }
       const parts = (a.latest as string).trim().split(' ');
       if (parts.length < 2) return true;
       const t4 = parts[1].padStart(4, '0');
@@ -1527,12 +1573,19 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
-    setGeo('power-outages', activeLayers.power_outages && data.power_outages
-      ? data.power_outages.filter((o: any) => o.lat && o.lng).map((o: any) => ({
-          type: 'Feature', geometry: { type: 'Point', coordinates: [o.lng, o.lat] },
-          properties: { regionName: o.regionName, type: o.type, severity: o.severity, schedule: o.schedule, source: o.source },
-        }))
-      : []);
+    const outages = activeLayers.power_outages && data.power_outages ? data.power_outages : [];
+    setGeo('power-outages', outages.filter((o: any) => o.lat && o.lng).map((o: any) => ({
+      type: 'Feature', geometry: { type: 'Point', coordinates: [o.lng, o.lat] },
+      properties: { regionName: o.regionName, type: o.type, severity: o.severity, schedule: o.schedule, source: o.source },
+    })));
+    const map = mapRef.current;
+    if (map?.getLayer('outage-oblast-fill')) {
+      const names = outages
+        .map((o: any) => OUTAGE_REGION_TO_GEOJSON[o.regionName as string] || '')
+        .filter(Boolean);
+      map.setFilter('outage-oblast-fill',   ['in', ['get', 'name_en'], ['literal', names]]);
+      map.setFilter('outage-oblast-outline', ['in', ['get', 'name_en'], ['literal', names]]);
+    }
   }, [mapReady, data.power_outages, activeLayers.power_outages, setGeo]);
 
   useEffect(() => {
@@ -1619,7 +1672,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     // Sweep layers always visible when data is present (controlled by useEffect)
     setVis(['sweep-connections','sweep-pulse-ring','sweep-device-glow','sweep-device-dots','sweep-device-labels'], true);
     setVis(['raid-oblast-fill','raid-oblast-outline','raid-district-fill','raid-district-outline','raid-glow','raid-dots','raid-label'], activeLayers.air_raids);
-    setVis(['outage-glow','outage-dots','outage-label'], activeLayers.power_outages);
+    setVis(['outage-oblast-fill','outage-oblast-outline','outage-glow','outage-dots','outage-label'], activeLayers.power_outages);
     setVis(['kab-glow','kab-dots','kab-label'], activeLayers.kab_threats);
     setVis(['thermal-aoi-glow','thermal-aoi-dots','thermal-aoi-label'], activeLayers.thermal_aoi);
     setVis(['capture-glow','capture-dots'], activeLayers.captures);

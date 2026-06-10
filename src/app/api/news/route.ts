@@ -307,14 +307,17 @@ function findCoords(text: string): [number, number] | null {
   return best ? best.coords : null;
 }
 
-// Every distinct place a story names (raw gazetteer centroids, un-jittered). Used by
-// cross-reference consumers (e.g. /api/strategic-thermal) that must check ALL mentioned
-// locations, not just the single primary one findCoords returns.
+// Every distinct SPECIFIC place a story names (raw gazetteer centroids, un-jittered).
+// Used by cross-reference consumers (e.g. /api/strategic-thermal) that must check ALL
+// mentioned locations for fire correlation. Deliberately excludes broad country/sea
+// centroids (rank=1): those coordinates have low precision and cause false-positive
+// thermal AOIs whenever there happens to be a FIRMS fire near a country centroid.
 function findAllCoords(text: string): [number, number][] {
   const lower = text.toLowerCase();
   const seen = new Set<string>();
   const out: [number, number][] = [];
-  for (const { re, coords } of COMPILED_GAZETTEER) {
+  for (const { re, coords, rank } of COMPILED_GAZETTEER) {
+    if (rank < 2) continue; // skip country/sea-level centroids
     const key = `${coords[0]},${coords[1]}`;
     if (!seen.has(key) && re.test(lower)) { seen.add(key); out.push(coords); }
   }
@@ -467,7 +470,12 @@ async function buildNews(): Promise<unknown> {
       const riskScore = scoreRisk(searchText);
       const id = crypto.createHash('md5').update((article.link || '') + (article.pubDate || '')).digest('hex');
       const coords = findCoords(searchText);
+      const allCoords = findAllCoords(searchText); // specific places only (no country centroids)
       const placed = coords ? jitterAround(coords, id) : null;
+      // coords_default = true when there are no SPECIFIC place matches. A country/sea
+      // centroid as the only match is too imprecise to use as a thermal fire candidate —
+      // it just means "this story is about Russia/Ukraine" not "strike happened here".
+      const coordsDefault = !coords || allCoords.length === 0;
 
       return {
         id,
@@ -479,8 +487,8 @@ async function buildNews(): Promise<unknown> {
         side: sideForSource(article.source),
         risk_score: riskScore,
         coords: placed,
-        coords_default: !coords,
-        places: findAllCoords(searchText),
+        coords_default: coordsDefault,
+        places: allCoords,
         hasVideo: article.hasVideo,
       };
     });
