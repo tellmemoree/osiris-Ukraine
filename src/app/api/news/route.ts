@@ -72,6 +72,7 @@ const CONFLICT_TERMS_CYR = [
   'мобіліз', 'мобилиз', 'війн', 'войн', 'бій', 'бой', 'взрыв', 'вибух', 'пво',
   'ппо', 'хаймарс', 'авіаудар', 'авиаудар', 'оборон', 'загарбник', 'загиб',
   'поранен', 'танк', 'артилер', 'артиллер', 'бойов', 'боев', 'атак',
+  'хлопк',  // Russian informal "bang" (хлопок/хлопка) — common euphemism for explosion in ru state/milblog posts
 ];
 
 // NOTE: tuples are [lat, lng] here — the OPPOSITE of gdelt/route.ts's GEO_DICT.
@@ -128,6 +129,16 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'murmansk': [68.958, 33.083], 'kazan': [55.796, 49.109], 'samara': [53.196, 50.100],
   'dzhankoi': [45.709, 34.393], 'saky': [45.134, 33.599],
   'kronstadt': [59.990, 29.760], 'кронштадт': [59.990, 29.760],
+  // Ukrainian / slang spellings of Russian cities seen in UA-language posts
+  'пітер': [59.931, 30.361],   // Rus slang for Saint Petersburg
+  'пітєр': [59.931, 30.361],   // Ukrainian є-spelling of Piter
+  'новоросійськ': [44.724, 37.768], // Ukrainian spelling of Novorossiysk
+  // Russian cities absent from gazetteer (new UA strike targets)
+  'кизилюрт': [43.209, 46.868],  // Kizlyurt, Dagestan
+  'чебоксар': [56.144, 47.249],  // Cheboksary (incl. declined Чебоксарах)
+  'самар': [53.196, 50.100],     // Samara declined forms (Самарі, Самарою)
+  'владімірськ': [56.130, 40.411], // Vladimir Oblast — Ukrainian adjectival stem
+  'владимирск': [56.130, 40.411], // Vladimir Oblast — Russian adjectival stem
   'ust-labinsk': [45.220, 39.710], 'усть-лабинск': [45.220, 39.710], 'усть-лабінськ': [45.220, 39.710],
   'zugres': [48.010, 38.510], 'зугрес': [48.010, 38.510], 'зугрэс': [48.010, 38.510],
   'зуївська тес': [48.010, 38.510],
@@ -417,7 +428,7 @@ async function buildNews(): Promise<unknown> {
         });
         if (!res.ok) return [];
         const html = await res.text();
-        return parseTelegramHTML(html, channel).slice(-8);
+        return parseTelegramHTML(html, channel).slice(-15);
       } catch { return []; }
     });
 
