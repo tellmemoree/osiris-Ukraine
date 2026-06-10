@@ -476,6 +476,19 @@ export default function Dashboard() {
     if (activeLayers.thermal_aoi) loadOnce('thermal_aoi');
   }, [activeLayers, loadOnce]);
 
+  // Background pre-fetch: populate LayerPanel counts for every layer
+  // regardless of whether the user has toggled it on. Runs once, 3 s after
+  // mount (after priority-1 loads settle). loadOnce() skips keys already fetched.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      ['flights', 'air_raids', 'kab_threats', 'power_outages',
+       'frontlines', 'captures', 'thermal_aoi', 'satellites',
+       'fires', 'weather', 'infrastructure', 'gdelt',
+       'maritime', 'radiation', 'live_news', 'cctv'].forEach(loadOnce);
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [loadOnce]);
+
   // Submarine Cables (UI overhaul) — static dataset, fetched once on toggle.
   useEffect(() => {
     if (activeLayers.cables && !layerFetchedRef.current.has('cables')) {
