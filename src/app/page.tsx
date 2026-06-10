@@ -210,6 +210,22 @@ export default function Dashboard() {
     internet_outages: false,
     malware: false,
   });
+  // Persist active layer toggles across restarts — read on mount, write on every change.
+  // Skip the first write (count=1, initial defaults) so we don't overwrite saved state
+  // with defaults before the restore effect has a chance to apply saved values.
+  const layerPersistCountRef = useRef(0);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('osiris-layers');
+      if (saved) setActiveLayers(prev => ({ ...prev, ...JSON.parse(saved) }));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    layerPersistCountRef.current++;
+    if (layerPersistCountRef.current < 2) return;
+    try { localStorage.setItem('osiris-layers', JSON.stringify(activeLayers)); } catch {}
+  }, [activeLayers]);
+
   const [liveFeedUrl, setLiveFeedUrl] = useState<string | null>(null);
   const [liveFeedName, setLiveFeedName] = useState('');
   const [liveFeedEmbedAllowed, setLiveFeedEmbedAllowed] = useState(true);
