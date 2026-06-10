@@ -276,7 +276,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const thermalCatColor: any = ['match', ['get', 'category'],
         'airfield', '#00E5FF', 'oil', '#FF9500', 'rail', '#FFD700',
         'logistics', '#FFA500', 'naval', '#4FC3F7', 'power', '#FF6B00',
-        'ammo', '#FF3D3D', '#FF6B00'];
+        'ammo', '#FF3D3D', 'news', '#D4AF37', '#FF6B00'];
       map.addLayer({ id: 'thermal-aoi-glow', type: 'circle', source: 'thermal-aoi', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 16, 10, 24] as any,
         'circle-color': thermalCatColor,
@@ -855,7 +855,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           if (!isNews && first.title) {
             snippetHtml = `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;font-style:italic;">"${(first.title as string).slice(0, 100)}"</div>`;
           }
-          sourcesHtml = `<div style="font-size:9px;color:#5C5A54;margin-top:6px;">${first.source ? `<a href="${first.link||'#'}" target="_blank" style="color:#D4AF37;text-decoration:none;">${first.source}</a>` : ''}${srcs.length > 1 ? ` <span style="color:#888;">+${srcs.length-1} more report${srcs.length > 2 ? 's' : ''}</span>` : ''}</div>`;
+          const linkRows = srcs.filter((s: any) => s.link || s.source).map((s: any) =>
+            `<div style="margin-bottom:3px;line-height:1.4;">${s.link ? `<a href="${s.link}" target="_blank" style="color:#D4AF37;text-decoration:none;">${s.source||'source'}</a>` : `<span style="color:#D4AF37;">${s.source}</span>`}${isNews && s.title ? `<span style="color:#666;font-size:8px;"> — ${(s.title as string).slice(0,80)}</span>` : ''}</div>`
+          ).join('');
+          sourcesHtml = linkRows ? `<div style="font-size:9px;margin-top:6px;">${linkRows}</div>` : '';
         }
       } catch { /* ignore */ }
       popup(coords, `<div style="${pStyle}border:1px solid ${catColor}40;">

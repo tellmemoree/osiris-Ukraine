@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText, Bell } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText, Bell, MoreHorizontal } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -151,7 +151,7 @@ export default function Dashboard() {
   const [showIntel, setShowIntel] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|null>(null);
+  const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|'more'|'timeline'|'frontline'|'briefing'|null>(null);
   const [mapProjection, setMapProjection] = useState<'globe'|'mercator'>('globe');
   const [mapStyle, setMapStyle] = useState<'dark'|'satellite'>('dark');
   const [sweepData, setSweepData] = useState<any>(null);
@@ -1012,6 +1012,18 @@ export default function Dashboard() {
             <div className="w-1 h-1 rounded-full bg-[var(--gold-primary)] animate-osiris-pulse" />
             <span className="text-[var(--gold-primary)] font-bold">SUPPORT PROJECT</span>
           </a>
+          <button
+            onClick={() => { setNotifOpen(true); setUnreadCount(0); }}
+            className="glass-panel p-1.5 flex items-center justify-center relative"
+            aria-label="Notifications"
+          >
+            <Bell className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-[#FF3D3D] text-white flex items-center justify-center text-[6px] font-bold">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </button>
         </motion.div>
       )}
 
@@ -1232,6 +1244,7 @@ export default function Dashboard() {
                 { id: 'intel' as const, icon: Newspaper, label: 'INTEL' },
                 { id: 'recon' as const, icon: Radar, label: 'RECON' },
                 { id: 'search' as const, icon: Search, label: 'SEARCH' },
+                { id: 'more' as const, icon: MoreHorizontal, label: 'MORE' },
               ].map(tab => (
                 <button key={tab.id} onClick={() => setMobilePanel(mobilePanel === tab.id ? null : tab.id)}
                   className={`mobile-nav-btn ${mobilePanel === tab.id ? 'active' : ''}`}>
@@ -1266,7 +1279,7 @@ export default function Dashboard() {
                 <div className="px-3 pb-3">
                   <div className="flex items-center justify-between mb-2">
                     <span className="hud-text text-[9px] text-[var(--text-primary)]">
-                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'OSIRIS RECON' : 'SEARCH'}
+                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'OSIRIS RECON' : mobilePanel === 'more' ? 'MORE TOOLS' : mobilePanel === 'timeline' ? 'TIMELINE' : mobilePanel === 'frontline' ? 'FRONTLINE CHANGES' : mobilePanel === 'briefing' ? 'INTEL DIGEST' : 'SEARCH'}
                     </span>
                     <button onClick={() => setMobilePanel(null)} className="text-[var(--text-muted)] p-1"><X className="w-4 h-4" /></button>
                   </div>
@@ -1299,6 +1312,33 @@ export default function Dashboard() {
                     <div className="space-y-2">
                       <OsintPanel isOpen={true} onClose={() => setMobilePanel(null)} isMobile={true} onSweepVisualize={setSweepData} />
                     </div>
+                  )}
+                  {mobilePanel === 'more' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        { id: 'timeline' as const, icon: Play, label: 'TIMELINE', color: 'var(--cyan-primary)' },
+                        { id: 'frontline' as const, icon: Activity, label: 'FRONTLINE', color: '#FF3D3D' },
+                        { id: 'briefing' as const, icon: FileText, label: 'INTEL DIGEST', color: 'var(--text-primary)' },
+                      ] as const).map(item => (
+                        <button
+                          key={item.id}
+                          onClick={() => setMobilePanel(item.id)}
+                          className="glass-panel-sm flex flex-col items-center gap-2 py-4 hover:bg-white/5 transition-colors rounded-lg"
+                        >
+                          <item.icon className="w-5 h-5" style={{ color: item.color }} />
+                          <span className="hud-text text-[8px]" style={{ color: item.color }}>{item.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {mobilePanel === 'timeline' && (
+                    <TimelineControl replayTime={replayTime} timelineRangeH={timelineRangeH} events={timelineEvents} onScrub={setReplayTime} onRangeChange={setTimelineRangeH} />
+                  )}
+                  {mobilePanel === 'frontline' && (
+                    <FrontlineTracker />
+                  )}
+                  {mobilePanel === 'briefing' && (
+                    <BriefingPanel />
                   )}
                 </div>
               </motion.div>
