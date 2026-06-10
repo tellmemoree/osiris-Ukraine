@@ -393,6 +393,24 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-offset': [0, 1.9], 'text-allow-overlap': false,
       }, paint: { 'text-color': '#FF8C00', 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
+      // Drone / UAV Swarms — purple (Telegram-derived, oblast-level).
+      // Note: 'drone-threats' is NOT in the sources array above — it is registered
+      // via explicit addSource() here (with its own initial data shape).
+      map.addSource('drone-threats', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({ id: 'drone-glow', type: 'circle', source: 'drone-threats', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 12, 5, 20, 10, 30],
+        'circle-color': '#CE93D8', 'circle-opacity': 0.13, 'circle-blur': 1,
+      }});
+      map.addLayer({ id: 'drone-dots', type: 'circle', source: 'drone-threats', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 5, 5, 8, 10, 12],
+        'circle-color': '#CE93D8', 'circle-opacity': 0.88,
+        'circle-stroke-width': 2, 'circle-stroke-color': '#E040FB', 'circle-stroke-opacity': 0.6,
+      }});
+      map.addLayer({ id: 'drone-label', type: 'symbol', source: 'drone-threats', minzoom: 4, layout: {
+        'text-field': ['concat', 'DRONE ', ['get','regionName']], 'text-size': 9, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.9], 'text-allow-overlap': false,
+      }, paint: { 'text-color': '#CE93D8', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
       // Power Outages — amber/yellow grid-down indicators
       map.addLayer({ id: 'outage-glow', type: 'circle', source: 'power-outages', paint: {
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,10, 5,16, 10,24],
@@ -985,6 +1003,23 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
+    // ── Drone / UAV Swarms (Telegram-derived) ──
+    map.on('click', 'drone-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      popup(coords, `<div style="${pStyle}border:1px solid rgba(206,147,216,0.45);max-width:300px;">
+        <div style="color:#CE93D8;font-size:13px;font-weight:700;margin-bottom:6px;">🚁 DRONE / UAV SWARM</div>
+        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${p.regionName||'Unknown region'}</div>
+        <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">${p.count||1} mention(s) · last 1.5h · OSINT Telegram</div>
+        <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid rgba(206,147,216,0.4);padding-left:6px;">${(p.text||'').replace(/</g,'&lt;')}</div>
+        <div style="display:grid;grid-template-columns:1fr;gap:4px;font-size:9px;">
+          <div><span style="color:#5C5A54;">LAST SEEN</span><br/><span style="color:#E8E6E0;">${p.startedAt ? new Date(p.startedAt).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
+        </div>
+        <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Heuristic text signal — verify before acting.</div>
+      </div>`);
+    });
+
     // ── Power Outages ──
     map.on('click', 'outage-dots', e => {
       if (!e.features?.length) return;
@@ -1075,7 +1110,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Generic hover for clickables ──
-    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-sea-atmo','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo','raid-dots','outage-dots','kab-dots'].forEach(layer => {
+    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-sea-atmo','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo','raid-dots','outage-dots','kab-dots','drone-dots'].forEach(layer => {
       map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
     });
@@ -1570,6 +1605,17 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     })));
   }, [mapReady, data.kab_threats, activeLayers.kab_threats, setGeo]);
 
+  // Drone / UAV Swarms (Telegram-derived, oblast-level point markers).
+  useEffect(() => {
+    if (!mapReady) return;
+    const threats = activeLayers.drone_threats && data.drone_threats ? data.drone_threats : [];
+    setGeo('drone-threats', threats.map((t: any) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [t.lng, t.lat] },
+      properties: { regionName: t.regionName, count: t.count, startedAt: t.startedAt, text: t.text },
+    })));
+  }, [mapReady, data.drone_threats, activeLayers.drone_threats, setGeo]);
+
   useEffect(() => {
     if (!mapReady) return;
     const outages = activeLayers.power_outages && data.power_outages ? data.power_outages : [];
@@ -1673,6 +1719,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['raid-oblast-fill','raid-oblast-outline','raid-district-fill','raid-district-outline','raid-glow','raid-dots','raid-label'], activeLayers.air_raids);
     setVis(['outage-oblast-fill','outage-oblast-outline','outage-glow','outage-dots','outage-label'], activeLayers.power_outages);
     setVis(['kab-glow','kab-dots','kab-label'], activeLayers.kab_threats);
+    setVis(['drone-glow','drone-dots','drone-label'], activeLayers.drone_threats);
     setVis(['thermal-aoi-glow','thermal-aoi-dots','thermal-aoi-label'], activeLayers.thermal_aoi);
     setVis(['capture-glow','capture-dots'], activeLayers.captures);
     setVis(['frontline-fill','frontline-line'], activeLayers.frontlines);
