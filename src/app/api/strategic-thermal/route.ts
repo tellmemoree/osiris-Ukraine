@@ -188,6 +188,27 @@ function isTerritorialAdvance(item: NewsItem): boolean {
   return ADVANCE_TERMS.some(w => t.includes(w));
 }
 
+// Air-defense / interception reports ("326 UAVs shot down by ПВО") pass
+// isStrikeRelated because they contain drone/UAV terms, yet they report a
+// DEFENSIVE interception, not a ground impact on a strategic target. Exclude
+// them UNLESS the article also contains ground-impact evidence (explosion, fire,
+// hit, damage) that suggests at least one munition got through.
+const INTERCEPT_STEMS = [
+  'shot down', 'were shot', 'дежурными средствами', 'средствами пво',
+  'збили', 'знищили засоба', 'перехват', 'перехоплен',
+  'сбит', 'сбиты', 'сбито', 'збит', 'збиті', 'збито',
+];
+const GROUND_IMPACT_STEMS = [
+  'вибух', 'взрыв', 'пожеж', 'пожар', 'горит', 'горить',
+  'приліт', 'прилет', 'влучан', 'детонац', 'хлопк',
+  'explos', 'blast', 'ablaze', 'burn', 'detonat', 'impact', 'hit',
+];
+function isInterceptionOnly(item: NewsItem): boolean {
+  const t = `${item.title || ''} ${item.description || ''}`.toLowerCase();
+  if (!INTERCEPT_STEMS.some(w => t.includes(w))) return false;
+  return !GROUND_IMPACT_STEMS.some(w => t.includes(w));
+}
+
 // Weapon type inferred from article text. Priority: specific systems → generic class.
 // Returns a short display label or null when nothing matches.
 const WEAPON_PATTERNS: [string, string[]][] = [
@@ -259,7 +280,7 @@ export async function GET(req: Request) {
     };
     const newsByCell = new Map<string, NewsAoi>();
     for (const n of news) {
-      if (!isStrikeRelated(n) || isTerritorialAdvance(n)) continue;
+      if (!isStrikeRelated(n) || isTerritorialAdvance(n) || isInterceptionOnly(n)) continue;
       const candidates = (n.places && n.places.length)
         ? n.places
         : (n.coords && !n.coords_default ? [n.coords] : []);
