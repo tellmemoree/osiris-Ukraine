@@ -1366,7 +1366,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     const cutoffMs = cutoff.getTime();
     const all: any[] = activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi : [];
     const visible = all.filter((a: any) => {
-      if (!a.latest) return a.category !== 'news'; // static unlit sites always show; news-only hide during replay
+      if (!a.latest) {
+        if (a.category === 'news') return replayTime === null; // news-only: visible in live mode, hidden in replay (no timestamp to filter against)
+        return true; // non-news sites (airfield/oil/etc.) always show
+      }
       const parts = (a.latest as string).trim().split(' ');
       if (parts.length < 2) return true;
       const t4 = parts[1].padStart(4, '0');
