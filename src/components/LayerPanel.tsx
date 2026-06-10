@@ -93,6 +93,14 @@ const LAYER_GROUPS = [
     ],
   },
   {
+    label: 'RUSSIA',
+    fullLabel: 'RUSSIA',
+    color: '#B71C1C',
+    layers: [
+      { key: 'ru_air_raids', label: 'RU Oblast Alerts', icon: Siren, color: '#EF5350', dataKey: 'ru_air_raids' },
+    ],
+  },
+  {
     label: 'NETWORK',
     fullLabel: 'NETWORK INTEL',
     color: '#00E5FF',

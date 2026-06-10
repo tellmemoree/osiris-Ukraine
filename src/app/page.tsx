@@ -182,6 +182,7 @@ export default function Dashboard() {
     power_outages: false,
     kab_threats: false,
     drone_threats: false,
+    ru_air_raids: false,
     frontlines: false,
     captures: false,
     air_quality: false,
@@ -408,6 +409,7 @@ export default function Dashboard() {
     kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })),
     weapon_threats: () => fetchEndpoint('/api/weapon-threats', d => ({ weapon_threats: d.threats })),
     drone_threats: () => fetchEndpoint('/api/drone-threats', d => ({ drone_threats: d.threats })),
+    ru_air_raids: () => fetchEndpoint('/api/ru-air-raids', d => ({ ru_air_raids: d.events })),
     frontlines: () => fetchEndpoint('/api/frontlines', d => ({ frontlines: d.frontlines?.features || [] })),
     captures: () => fetchEndpoint('/api/captures', d => ({ captures: d.captures })),
     air_quality: () => fetchEndpoint('/api/air-quality', d => ({ air_quality: d.stations })),
@@ -455,6 +457,7 @@ export default function Dashboard() {
     if (activeLayers.kab_threats) loadOnce('kab_threats');
     if (activeLayers.air_raids) loadOnce('weapon_threats'); // enriches air-raid popups
     if (activeLayers.drone_threats) loadOnce('drone_threats');
+    if (activeLayers.ru_air_raids) loadOnce('ru_air_raids');
     if (activeLayers.frontlines) loadOnce('frontlines');
     if (activeLayers.captures) loadOnce('captures');
     if (activeLayers.air_quality) loadOnce('air_quality');
@@ -473,7 +476,7 @@ export default function Dashboard() {
        'fires', 'weather', 'infrastructure', 'gdelt',
        'maritime', 'radiation', 'live_news', 'cctv',
        'air_quality', 'internet_outages', 'malware',
-       'weapon_threats', 'drone_threats'].forEach(loadOnce);
+       'weapon_threats', 'drone_threats', 'ru_air_raids'].forEach(loadOnce);
     }, 3000);
     return () => clearTimeout(t);
   }, [loadOnce]);
