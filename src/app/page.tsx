@@ -17,6 +17,7 @@ import KeyboardShortcuts from '@/components/KeyboardShortcuts';
 import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 import FrontlineTracker from '@/components/FrontlineTracker';
+import AxisBriefing from '@/components/AxisBriefing';
 import ThresholdToasts from '@/components/ThresholdToasts';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 import NotificationDrawer, { type NotificationRecord } from '@/components/NotificationDrawer';
@@ -138,6 +139,7 @@ export default function Dashboard() {
   const [scanTargets, setScanTargets] = useState<any[]>([]);
   const [demoMode, setDemoMode] = useState(false);
   const [showFrontlineTracker, setShowFrontlineTracker] = useState(false);
+  const [showAxisBriefing, setShowAxisBriefing] = useState(false);
   const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlert[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notificationLog, setNotificationLog] = useState<NotificationRecord[]>([]);
@@ -1092,6 +1094,15 @@ export default function Dashboard() {
           <Activity className={`w-4 h-4 ${showFrontlineTracker ? 'text-[#FF3D3D]' : 'text-white/60'}`} />
         </button>
 
+        {/* Axis Briefing toggle */}
+        <button
+          onClick={() => setShowAxisBriefing(t => !t)}
+          title="Axis briefing"
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showAxisBriefing ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`}
+        >
+          <MapPinned className={`w-4 h-4 ${showAxisBriefing ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+        </button>
+
       </div>}
 
       {/* ── LIVE FEED VIEWER OVERLAY ── */}
@@ -1321,6 +1332,21 @@ export default function Dashboard() {
             className="absolute bottom-6 right-14 z-[205] pointer-events-none"
           >
             <FrontlineTracker />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Axis Briefing panel (desktop) ── */}
+      <AnimatePresence>
+        {!isMobile && showAxisBriefing && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            transition={{ duration: 0.25 }}
+            className="absolute bottom-6 right-14 z-[205] pointer-events-none"
+          >
+            <AxisBriefing show={showAxisBriefing} />
           </motion.div>
         )}
       </AnimatePresence>
