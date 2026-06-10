@@ -66,7 +66,7 @@ export default function NotificationDrawer({ isOpen, onClose, notifications, onC
               top: 56,
               right: 0,
               bottom: 0,
-              width: 340,
+              width: 'min(340px, calc(100vw - 24px))',
               background: 'rgba(10,12,20,0.96)',
               backdropFilter: 'blur(20px)',
               borderLeft: '1px solid rgba(255,255,255,0.07)',
