@@ -6,7 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 
 export interface NotificationRecord extends ThresholdAlert {
-  seenAt: number; // Date.now() when it appeared
+  seenAt: number; // Date.now() when it entered the log (used for unread tracking only)
 }
 
 const SEV_COLOR: Record<string, string> = {
@@ -16,15 +16,16 @@ const SEV_COLOR: Record<string, string> = {
   LOW: '#00E676',
 };
 
-function relativeTime(ts: number): string {
-  const diffMs = Date.now() - ts;
-  const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  return `${Math.floor(diffHr / 24)}d ago`;
+// Format the server-generated ISO timestamp as HH:MM (today) or "Mon DD HH:MM" (older).
+function formatAlertTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  const hh = d.getHours().toString().padStart(2, '0');
+  const mm = d.getMinutes().toString().padStart(2, '0');
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return `${hh}:${mm}`;
+  const mon = d.toLocaleString('en', { month: 'short' });
+  return `${mon} ${d.getDate()}, ${hh}:${mm}`;
 }
 
 interface Props {
@@ -142,7 +143,7 @@ export default function NotificationDrawer({ isOpen, onClose, notifications, onC
                           </span>
                           <span className="flex-1" />
                           <span className="text-[8px] font-mono text-white/30 tabular-nums">
-                            {relativeTime(notif.seenAt)}
+                            {formatAlertTime(notif.timestamp)}
                           </span>
                         </div>
 
