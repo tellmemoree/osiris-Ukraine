@@ -431,6 +431,8 @@ export default function Dashboard() {
     captures: () => fetchEndpoint('/api/captures', d => ({ captures: d.captures })),
     air_quality: () => fetchEndpoint('/api/air-quality', d => ({ air_quality: d.stations })),
     thermal_aoi: () => fetchEndpoint('/api/strategic-thermal', d => ({ thermal_aoi: d.aois })),
+    internet_outages: () => fetchEndpoint('/api/radar', d => ({ ioda_outages: d.outages })),
+    malware: () => fetchEndpoint('/api/malware', d => ({ malware_threats: d.threats })),
   }), [fetchEndpoint]);
 
   // Fetch a source at most once (does NOT toggle the layer on).
@@ -474,6 +476,8 @@ export default function Dashboard() {
     if (activeLayers.captures) loadOnce('captures');
     if (activeLayers.air_quality) loadOnce('air_quality');
     if (activeLayers.thermal_aoi) loadOnce('thermal_aoi');
+    if (activeLayers.internet_outages) loadOnce('internet_outages');
+    if (activeLayers.malware) loadOnce('malware');
   }, [activeLayers, loadOnce]);
 
   // Background pre-fetch: populate LayerPanel counts for every layer
@@ -484,7 +488,8 @@ export default function Dashboard() {
       ['flights', 'air_raids', 'kab_threats', 'power_outages',
        'frontlines', 'captures', 'thermal_aoi', 'satellites',
        'fires', 'weather', 'infrastructure', 'gdelt',
-       'maritime', 'radiation', 'live_news', 'cctv'].forEach(loadOnce);
+       'maritime', 'radiation', 'live_news', 'cctv',
+       'air_quality', 'internet_outages', 'malware'].forEach(loadOnce);
     }, 3000);
     return () => clearTimeout(t);
   }, [loadOnce]);
@@ -506,16 +511,6 @@ export default function Dashboard() {
       layerFetchedRef.current.add('cables');
     }
 
-    // Internet Outages (IODA)
-    if (activeLayers.internet_outages && !layerFetchedRef.current.has('ioda')) {
-      fetchEndpoint('/api/radar', d => ({ ioda_outages: d.outages }));
-      layerFetchedRef.current.add('ioda');
-    }
-    // Live Malware (abuse.ch)
-    if (activeLayers.malware && !layerFetchedRef.current.has('malware')) {
-      fetchEndpoint('/api/malware', d => ({ malware_threats: d.threats }));
-      layerFetchedRef.current.add('malware');
-    }
   }, [activeLayers]);
 
   // ── LAYER-AWARE POLLING — only poll data for active layers ──
