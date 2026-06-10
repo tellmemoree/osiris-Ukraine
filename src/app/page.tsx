@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Play, FileText, Bell, MoreHorizontal } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Bell, MoreHorizontal } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -17,8 +17,6 @@ import KeyboardShortcuts from '@/components/KeyboardShortcuts';
 import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 import FrontlineTracker from '@/components/FrontlineTracker';
-import TimelineControl, { TimelineEvent } from '@/components/TimelineControl';
-import BriefingPanel from '@/components/BriefingPanel';
 import ThresholdToasts from '@/components/ThresholdToasts';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 import NotificationDrawer, { type NotificationRecord } from '@/components/NotificationDrawer';
@@ -117,24 +115,6 @@ export default function Dashboard() {
   // Searchable index over every live entity array (rebuilt when data changes).
   const entityIndex = useMemo(() => buildEntityIndex(data), [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Timestamped events for the timeline density histogram.
-  const timelineEvents = useMemo((): TimelineEvent[] => {
-    const evs: TimelineEvent[] = [];
-    (data.news   || []).forEach((n: any) => n.published  && evs.push({ t: new Date(n.published).getTime(),  type: 'news'  }));
-    (data.kab_threats || []).forEach((k: any) => k.startedAt && evs.push({ t: new Date(k.startedAt).getTime(), type: 'kab'  }));
-    (data.gdelt  || []).forEach((e: any) => e.published  && evs.push({ t: new Date(e.published).getTime(),  type: 'gdelt' }));
-    (data.thermal_aoi || []).forEach((a: any) => {
-      if (!a.latest) return;
-      const parts = (a.latest as string).trim().split(' ');
-      if (parts.length < 2) return;
-      const t4 = parts[1].padStart(4, '0');
-      const ms = new Date(`${parts[0]}T${t4.slice(0,2)}:${t4.slice(2,4)}:00Z`).getTime();
-      if (!isNaN(ms)) evs.push({ t: ms, type: 'thermal' });
-    });
-    (data.captures || []).forEach((c: any) => c.date && evs.push({ t: new Date(c.date).getTime(), type: 'capture' }));
-    return evs;
-  }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const [globalStats, setGlobalStats] = useState<any>(null);
   const mouseCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const coordsDisplayRef = useRef<HTMLDivElement>(null);
@@ -151,17 +131,13 @@ export default function Dashboard() {
   const [showIntel, setShowIntel] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|'more'|'timeline'|'frontline'|'briefing'|null>(null);
+  const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|'more'|'frontline'|null>(null);
   const [mapProjection, setMapProjection] = useState<'globe'|'mercator'>('globe');
   const [mapStyle, setMapStyle] = useState<'dark'|'satellite'>('dark');
   const [sweepData, setSweepData] = useState<any>(null);
   const [scanTargets, setScanTargets] = useState<any[]>([]);
   const [demoMode, setDemoMode] = useState(false);
-  const [replayTime, setReplayTime] = useState<Date | null>(null);
-  const [timelineRangeH, setTimelineRangeH] = useState(24);
-  const [showTimeline, setShowTimeline] = useState(false);
   const [showFrontlineTracker, setShowFrontlineTracker] = useState(false);
-  const [showBriefing, setShowBriefing] = useState(false);
   const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlert[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notificationLog, setNotificationLog] = useState<NotificationRecord[]>([]);
@@ -905,29 +881,8 @@ export default function Dashboard() {
           sweepData={sweepData}
           scanTargets={scanTargets}
           demoMode={demoMode}
-          replayTime={replayTime}
         />
       </ErrorBoundary>
-
-
-      {/* ── TIMELINE CONTROL (desktop only) ── */}
-      <AnimatePresence>
-        {showTimeline && !isMobile && (
-          <motion.div
-            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }}
-            transition={{ duration: 0.2 }}
-            className="absolute bottom-[70px] left-[315px] right-[52px] z-[200]"
-          >
-            <TimelineControl
-              replayTime={replayTime}
-              timelineRangeH={timelineRangeH}
-              events={timelineEvents}
-              onScrub={setReplayTime}
-              onRangeChange={setTimelineRangeH}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* ── MAP VIEW CONTROLS (3D/2D + SATELLITE TOGGLE) ── */}
       <motion.div
@@ -1125,15 +1080,6 @@ export default function Dashboard() {
           </AnimatePresence>
         </div>
 
-        {/* Timeline toggle */}
-        <button
-          onClick={() => setShowTimeline(t => !t)}
-          title="Event timeline / playback"
-          className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showTimeline ? 'bg-[var(--cyan-primary)]/20' : 'hover:bg-white/10'}`}
-        >
-          <Play className={`w-4 h-4 ${showTimeline ? 'text-[var(--cyan-primary)]' : 'text-white/60'}`} />
-        </button>
-
         {/* Frontline change tracker toggle */}
         <button
           onClick={() => setShowFrontlineTracker(t => !t)}
@@ -1142,28 +1088,6 @@ export default function Dashboard() {
         >
           <Activity className={`w-4 h-4 ${showFrontlineTracker ? 'text-[#FF3D3D]' : 'text-white/60'}`} />
         </button>
-
-        {/* Intel digest / situation briefing */}
-        <div className="relative">
-          <button
-            onClick={() => setShowBriefing(t => !t)}
-            title="Intel digest"
-            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showBriefing ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`}
-          >
-            <FileText className={`w-4 h-4 ${showBriefing ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
-          </button>
-          <AnimatePresence>
-            {showBriefing && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
-                transition={{ duration: 0.2 }}
-                className="absolute right-12 top-1/2 -translate-y-1/2"
-              >
-                <BriefingPanel />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
 
       </div>}
 
@@ -1303,7 +1227,7 @@ export default function Dashboard() {
                 <div className="px-3 pb-3">
                   <div className="flex items-center justify-between mb-2">
                     <span className="hud-text text-[9px] text-[var(--text-primary)]">
-                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'OSIRIS RECON' : mobilePanel === 'more' ? 'MORE TOOLS' : mobilePanel === 'timeline' ? 'TIMELINE' : mobilePanel === 'frontline' ? 'FRONTLINE CHANGES' : mobilePanel === 'briefing' ? 'INTEL DIGEST' : 'SEARCH'}
+                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'OSIRIS RECON' : mobilePanel === 'more' ? 'MORE TOOLS' : mobilePanel === 'frontline' ? 'FRONTLINE CHANGES' : 'SEARCH'}
                     </span>
                     <button onClick={() => setMobilePanel(null)} className="text-[var(--text-muted)] p-1"><X className="w-4 h-4" /></button>
                   </div>
@@ -1340,9 +1264,7 @@ export default function Dashboard() {
                   {mobilePanel === 'more' && (
                     <div className="grid grid-cols-2 gap-2">
                       {([
-                        { id: 'timeline' as const, icon: Play, label: 'TIMELINE', color: 'var(--cyan-primary)' },
                         { id: 'frontline' as const, icon: Activity, label: 'FRONTLINE', color: '#FF3D3D' },
-                        { id: 'briefing' as const, icon: FileText, label: 'INTEL DIGEST', color: 'var(--text-primary)' },
                       ] as const).map(item => (
                         <button
                           key={item.id}
@@ -1355,14 +1277,8 @@ export default function Dashboard() {
                       ))}
                     </div>
                   )}
-                  {mobilePanel === 'timeline' && (
-                    <TimelineControl replayTime={replayTime} timelineRangeH={timelineRangeH} events={timelineEvents} onScrub={setReplayTime} onRangeChange={setTimelineRangeH} />
-                  )}
                   {mobilePanel === 'frontline' && (
                     <FrontlineTracker />
-                  )}
-                  {mobilePanel === 'briefing' && (
-                    <BriefingPanel />
                   )}
                 </div>
               </motion.div>
