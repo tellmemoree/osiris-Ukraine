@@ -161,7 +161,7 @@ const STRIKE_TERMS = [
   'хлопк',  // Russian informal "bang" — euphemism used by RU state/milblogs for explosions
 ];
 
-const DIGEST_TITLE_RE = /^(главное за|сводка|зведення|дайджест|итоги дня|підсумки|обзор за|за сутки|за добу|morning brief|evening brief|daily (round|update|brief|wrap))/i;
+const DIGEST_TITLE_RE = /^(главное за|сводка|зведення|дайджест|итоги дня|підсумки|обзор за|за сутки|за добу|вчора та у ніч|вчора і в ніч|за минулу добу|за минулу ніч|morning brief|evening brief|daily (round|update|brief|wrap))/i;
 const HISTORICAL_YEAR_RE = /\b(201[4-9]|202[0-4])\b/;
 
 function isStrikeRelated(item: NewsItem): boolean {
@@ -213,6 +213,32 @@ function isInterceptionOnly(item: NewsItem): boolean {
   return !GROUND_IMPACT_STEMS.some(w => t.includes(w));
 }
 
+
+// For unconfirmed (no-fire) markers, the article must name a specific infrastructure
+// type — not just mention drones/missiles in passing. This filters civilian-incident
+// articles and military-exhibition pieces (e.g. "FPV drones at Patriot Park") from
+// generating unverified markers without any satellite corroboration.
+const STRATEGIC_TARGET_TERMS = [
+  // EN
+  'refinery', 'oil depot', 'fuel depot', 'ammo depot', 'ammunition depot', 'arms depot',
+  'arsenal', 'airfield', 'airbase', 'air base', 'naval facilit', 'shipyard',
+  'oil terminal', 'fuel terminal', 'power plant', 'power station', 'substation',
+  'marshalling yard', 'rail yard', 'rail hub', 'pipeline', 'storage facility',
+  // UA
+  'нпз', 'нафтоба', 'нафтосховищ', 'нафтопереробн', 'паливн',
+  'аеродром', 'авіабаза', 'авіазавод', 'залізничн вузол', 'сортувальн',
+  'електростанц', 'теплоелектростанц', 'підстанц', 'трансформаторн',
+  'склад боєприпасів', 'арсенал', 'сховищ пально', 'нафтопровід',
+  // RU
+  'нефтеба', 'нефтехран', 'нефтезавод',
+  'аэродром', 'авиабаза', 'судоремонтн', 'верфь', 'судостроит',
+  'сортировочн', 'электростанц', 'теплоэлектростанц', 'подстанц',
+  'склад боеприпасов', 'нефтепровод', 'хранилищ топлив',
+];
+function hasStrategicTarget(item: NewsItem): boolean {
+  const t = `${item.title || ''} ${item.description || ''}`.toLowerCase();
+  return STRATEGIC_TARGET_TERMS.some(w => t.includes(w));
+}
 
 // Weapon type inferred from article text. Priority: specific systems → generic class.
 // Returns a short display label or null when nothing matches.
@@ -273,8 +299,8 @@ export async function GET(req: Request) {
     // News: only STRIKE-RELATED articles that are NOT territorial-advance reports,
     // cross-referenced at EVERY place they name (one article often lists several struck
     // targets — but only places with a corroborating fire within NEWS_RADIUS_KM surface,
-    // which is the whole point of the heuristic). Co-located corroborations (same ~0.05°
-    // /~5 km cell — different channels, or one strike reported by both sides) MERGE into a
+    // which is the whole point of the heuristic). Co-located corroborations (same ~0.1°
+    // /~11 km cell — different channels, or one strike reported by both sides) MERGE into a
     // single AOI that carries EVERY contributing source, instead of whichever article was
     // processed first silently winning (and mis-attributing) the marker.
     type Contributor = { source?: string; side?: string; link?: string; title?: string; description?: string; hasVideo?: boolean; weapon?: string };
@@ -292,10 +318,15 @@ export async function GET(req: Request) {
       const seenThisArticle = new Set<string>();
       for (const [lat, lng] of candidates) {
         if (lat < BBOX.latMin || lat > BBOX.latMax || lng < BBOX.lngMin || lng > BBOX.lngMax) continue;
-        const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+        const key = `${lat.toFixed(1)},${lng.toFixed(1)}`;
         if (seenThisArticle.has(key)) continue; // one article contributes one marker per place
         seenThisArticle.add(key);
         const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
+        // Without satellite corroboration, only show a marker when the article names a
+        // specific strategic infrastructure type. Civilian incidents ("explosion near a
+        // supermarket") and military-exhibition pieces have no business appearing as
+        // unconfirmed AOIs — they flood the layer with noise.
+        if (!h && !n.hasVideo && !hasStrategicTarget(n)) continue;
         const articleText = `${n.title || ''} ${n.description || ''}`;
         const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220), hasVideo: n.hasVideo, weapon: detectWeapon(articleText) ?? undefined };
         const existing = newsByCell.get(key);
