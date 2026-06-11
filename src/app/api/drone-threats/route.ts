@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getThreatCorpus, classifyWeapons, matchOblasts } from '@/lib/telegram-threats';
-import type { OblastRef } from '@/lib/telegram-threats';
+import { getThreatCorpus, classifyWeapons, matchOblasts, buildRoute } from '@/lib/telegram-threats';
+import type { OblastRef, RouteWave } from '@/lib/telegram-threats';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +35,7 @@ interface DroneEvent {
 
 interface DroneResponse {
   threats:      DroneEvent[];
+  waves:        RouteWave[];   // one per distinct attack group; empty when no confirmed sightings
   total:        number;
   window_hours: number;
   timestamp:    string;
@@ -102,8 +103,11 @@ async function buildDroneResponse(): Promise<DroneResponse> {
     }))
     .sort((x, y) => new Date(y.startedAt).getTime() - new Date(x.startedAt).getTime());
 
+  const waves = buildRoute(messages, 'DRONE');
+
   return {
     threats,
+    waves,
     total:        threats.length,
     window_hours: WINDOW_HOURS,
     timestamp:    new Date().toISOString(),
