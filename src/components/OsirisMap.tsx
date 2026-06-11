@@ -354,13 +354,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
             0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5],
         ] as any,
         'circle-color': thermalCatColor,
-        'circle-opacity': ['case', ['get', 'hit'], 0.12, 0.04] as any,
+        'circle-opacity': ['case', ['get', 'hit'], 0.12, ['==', ['get', 'category'], 'news'], 0.07, 0.04] as any,
         'circle-blur': 1,
       }});
       map.addLayer({ id: 'thermal-aoi-dots', type: 'circle', source: 'thermal-aoi', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 4, 5, 7, 10, 11] as any,
         'circle-color': thermalCatColor,
-        'circle-opacity': ['case', ['get', 'hit'], 0.9, 0.35] as any,
+        'circle-opacity': ['case', ['get', 'hit'], 0.9, ['==', ['get', 'category'], 'news'], 0.6, 0.35] as any,
         'circle-stroke-width': 1.5,
         'circle-stroke-color': '#000',
         'circle-stroke-opacity': 0.4,
@@ -369,6 +369,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         filter: ['==', ['get', 'hit'], true],
         layout: { 'text-field': ['get', 'name'], 'text-size': 9, 'text-offset': [0, 1.8], 'text-anchor': 'top' },
         paint: { 'text-color': '#FF9500', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+      map.addLayer({ id: 'thermal-aoi-unconfirmed-label', type: 'symbol', source: 'thermal-aoi', minzoom: 5,
+        filter: ['all', ['==', ['get', 'hit'], false], ['==', ['get', 'category'], 'news']],
+        layout: { 'text-field': 'UNCONFIRMED', 'text-size': 8, 'text-offset': [0, 1.4], 'text-anchor': 'top' },
+        paint: { 'text-color': '#8B7355', 'text-halo-color': '#000', 'text-halo-width': 1 }});
       // Territorial Captures — RU red, UA blue.
       map.addLayer({ id: 'capture-glow', type: 'circle', source: 'captures', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 12, 5, 20, 10, 30],
@@ -977,7 +981,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const coords = (e.features[0].geometry as any).coordinates;
       const catLabel = (p.category || 'site').toUpperCase();
       const catColor = { airfield: '#00E5FF', oil: '#FF9500', rail: '#FFD700', logistics: '#FFA500', naval: '#4FC3F7', power: '#FF6B00', ammo: '#FF3D3D', news: '#D4AF37' }[p.category as string] || '#FF6B00';
-      const confColor = p.confidence === 'high' ? '#00E676' : p.confidence === 'med' ? '#FFD700' : p.confidence === 'low' ? '#888' : '#555';
+      const confColor = p.confidence === 'high' ? '#00E676' : p.confidence === 'med' ? '#FFD700' : p.confidence === 'low' ? '#888' : '#8B7355';
       const weapon = p.weapon || '';
       const weaponColor = weapon === 'MISSILE' ? '#FF4444' : weapon === 'SHAHED' ? '#FF9500' : weapon === 'GLIDE BOMB' ? '#FF6B00' : weapon === 'ARTILLERY' ? '#FFD700' : '';
       const isNews = p.category === 'news';
@@ -1920,7 +1924,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['kab-glow','kab-dots','kab-label'], activeLayers.kab_threats);
     setVis(['drone-glow','drone-dots','drone-label'], activeLayers.drone_threats);
     setVis(['ru-raid-glow','ru-raid-dots','ru-raid-label'], activeLayers.ru_air_raids);
-    setVis(['thermal-aoi-glow','thermal-aoi-dots','thermal-aoi-label'], activeLayers.thermal_aoi);
+    setVis(['thermal-aoi-glow','thermal-aoi-dots','thermal-aoi-label','thermal-aoi-unconfirmed-label'], activeLayers.thermal_aoi);
     setVis(['capture-glow','capture-dots'], activeLayers.captures);
     setVis(['frontline-fill','frontline-line'], activeLayers.frontlines);
   }, [mapReady, activeLayers, setVis]);
