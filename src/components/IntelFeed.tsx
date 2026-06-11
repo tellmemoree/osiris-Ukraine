@@ -72,6 +72,7 @@ export default function IntelFeed({ data, onLocate }: IntelFeedProps) {
       return next;
     });
 
+  const isLoading = data.news === undefined;
   const allNews: NewsItem[] = data.news || [];
   const news = filter === 'all' ? allNews : allNews.filter((n) => (n.side || 'world') === filter);
   const countFor = (side: SideFilter) =>
@@ -143,7 +144,7 @@ export default function IntelFeed({ data, onLocate }: IntelFeedProps) {
               {news.length === 0 ? (
                 <div className="px-4 py-6 text-center">
                   <span className="text-[11px] font-mono text-[var(--text-muted)] tracking-widest">
-                    AWAITING INTELLIGENCE...
+                    {isLoading ? 'LOADING INTEL FEED...' : 'AWAITING INTELLIGENCE...'}
                   </span>
                 </div>
               ) : (

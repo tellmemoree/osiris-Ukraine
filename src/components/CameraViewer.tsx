@@ -65,7 +65,7 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
       return;
     }
 
-    if (streamType === 'iframe' && camera.stream_url) {
+    if ((streamType === 'iframe' || streamType === 'mp4') && camera.stream_url) {
       setLoading(false);
       return;
     }
@@ -180,6 +180,15 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
                 autoPlay
                 muted
                 playsInline
+              />
+            ) : streamType === 'mp4' && camera.stream_url ? (
+              <video
+                src={camera.stream_url}
+                className={`w-full ${fullscreen ? 'h-full object-contain' : 'h-full object-cover'}`}
+                autoPlay
+                muted
+                playsInline
+                controls
               />
             ) : streamType === 'iframe' && camera.stream_url ? (
               <iframe

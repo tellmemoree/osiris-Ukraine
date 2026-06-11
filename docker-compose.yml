@@ -25,6 +25,8 @@ services:
       - HOSTNAME=0.0.0.0
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ~/.osiris-data:/home/nextjs/.osiris-data
     restart: unless-stopped
     networks:
       - default
@@ -40,6 +42,17 @@ services:
       - nginx-cache:/var/cache/nginx
     depends_on:
       - osiris
+    restart: unless-stopped
+    networks:
+      - default
+
+  osiris-intel:
+    build:
+      context: ./intel
+      dockerfile: Dockerfile
+    container_name: osiris-intel
+    ports:
+      - "4000:4000"
     restart: unless-stopped
     networks:
       - default

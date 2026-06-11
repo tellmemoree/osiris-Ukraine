@@ -88,7 +88,16 @@ const LAYER_GROUPS = [
       { key: 'captures', label: 'Territorial Captures', icon: Target, color: '#FF3D3D', dataKey: 'captures' },
       { key: 'air_raids', label: 'Air Raid Alerts', icon: Siren, color: '#FF1744', dataKey: 'air_raids' },
       { key: 'kab_threats', label: 'KAB / Glide-Bomb', icon: Bomb, color: '#FF6B00', dataKey: 'kab_threats' },
+      { key: 'drone_threats', label: 'Drone / UAV Swarms', icon: Plane, color: '#CE93D8', dataKey: 'drone_threats' },
       { key: 'power_outages', label: 'Power Outages', icon: Zap, color: '#FFD500', dataKey: 'power_outages' },
+    ],
+  },
+  {
+    label: 'RUSSIA',
+    fullLabel: 'RUSSIA',
+    color: '#B71C1C',
+    layers: [
+      { key: 'ru_air_raids', label: 'RU Oblast Alerts', icon: Siren, color: '#EF5350', dataKey: 'ru_air_raids' },
     ],
   },
   {

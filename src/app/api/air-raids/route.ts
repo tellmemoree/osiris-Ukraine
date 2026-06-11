@@ -1,7 +1,44 @@
 
 import { NextResponse } from 'next/server';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 import { stealthFetch } from '@/lib/stealthFetch';
 import { DISTRICT_COORDS } from './district-coords';
+
+// ---------------------------------------------------------------------------
+// Persistence — ~/.osiris-data/air-raid-history.json
+// ---------------------------------------------------------------------------
+const DATA_DIR = path.join(os.homedir(), '.osiris-data');
+const FILE = path.join(DATA_DIR, 'air-raid-history.json');
+
+// 5-min intervals × 60min × 24h × 7 days = 2 016 entries max
+const SNAP_INTERVAL_MS = 5 * 60 * 1_000;
+const MAX_SNAPS = 2_016;
+
+interface AirRaidSnap {
+  ts: string;      // ISO timestamp
+  active: string[]; // English oblast names currently alarmed
+}
+
+let lastSnapAt = 0; // epoch ms — module-level, survives across requests
+
+async function readHistory(): Promise<AirRaidSnap[]> {
+  try {
+    const txt = await fs.readFile(FILE, 'utf8');
+    const arr = JSON.parse(txt);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+async function writeHistory(snaps: AirRaidSnap[]): Promise<void> {
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(FILE, JSON.stringify(snaps.slice(-MAX_SNAPS)), 'utf8');
+  } catch (e) {
+    console.warn('[OSIRIS] air-raids: persist failed', e instanceof Error ? e.message : e);
+  }
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -70,7 +107,23 @@ type EnrichedAlert = {
   lng: number | null;
 };
 
-export async function GET() {
+export async function GET(req: Request) {
+  // -------------------------------------------------------------------------
+  // ?history=1 — return accumulated snapshots, no upstream fetch needed
+  // -------------------------------------------------------------------------
+  const { searchParams } = new URL(req.url);
+  if (searchParams.get('history') === '1') {
+    const history = await readHistory();
+    return NextResponse.json({
+      history,
+      count: history.length,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Normal path — fetch live alerts
+  // -------------------------------------------------------------------------
   try {
     const res = await stealthFetch('https://vadimklimenko.com/map/statuses.json', {
       signal: AbortSignal.timeout(8000),
@@ -84,6 +137,7 @@ export async function GET() {
     const data: RawStatuses = await res.json();
     const states = data.states ?? {};
     const alerts: EnrichedAlert[] = [];
+    const activeOblasts: string[] = [];
 
     for (const [stateName, state] of Object.entries(states)) {
       const info = OBLAST_INFO[stateName];
@@ -91,6 +145,7 @@ export async function GET() {
 
       if (state.enabled) {
         // Whole oblast under alert → single oblast-level marker
+        activeOblasts.push(oblastEn);
         alerts.push({
           regionId: null,
           regionName: oblastEn,
@@ -120,6 +175,21 @@ export async function GET() {
           lat: coords ? coords[1] : null,
           lng: coords ? coords[0] : null,
         });
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Persist snapshot if enough time has passed since the last one
+    // -----------------------------------------------------------------------
+    const now = Date.now();
+    if (now - lastSnapAt >= SNAP_INTERVAL_MS) {
+      lastSnapAt = now;
+      try {
+        const history = await readHistory();
+        history.push({ ts: new Date(now).toISOString(), active: activeOblasts });
+        await writeHistory(history);
+      } catch (e) {
+        console.warn('[OSIRIS] air-raids: snapshot append failed', e instanceof Error ? e.message : e);
       }
     }
 

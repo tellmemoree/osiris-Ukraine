@@ -72,6 +72,7 @@ const CONFLICT_TERMS_CYR = [
   'мобіліз', 'мобилиз', 'війн', 'войн', 'бій', 'бой', 'взрыв', 'вибух', 'пво',
   'ппо', 'хаймарс', 'авіаудар', 'авиаудар', 'оборон', 'загарбник', 'загиб',
   'поранен', 'танк', 'артилер', 'артиллер', 'бойов', 'боев', 'атак',
+  'хлопк',  // Russian informal "bang" (хлопок/хлопка) — common euphemism for explosion in ru state/milblog posts
 ];
 
 // NOTE: tuples are [lat, lng] here — the OPPOSITE of gdelt/route.ts's GEO_DICT.
@@ -128,6 +129,16 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'murmansk': [68.958, 33.083], 'kazan': [55.796, 49.109], 'samara': [53.196, 50.100],
   'dzhankoi': [45.709, 34.393], 'saky': [45.134, 33.599],
   'kronstadt': [59.990, 29.760], 'кронштадт': [59.990, 29.760],
+  // Ukrainian / slang spellings of Russian cities seen in UA-language posts
+  'пітер': [59.931, 30.361],   // Rus slang for Saint Petersburg
+  'пітєр': [59.931, 30.361],   // Ukrainian є-spelling of Piter
+  'новоросійськ': [44.724, 37.768], // Ukrainian spelling of Novorossiysk
+  // Russian cities absent from gazetteer (new UA strike targets)
+  'кизилюрт': [43.209, 46.868],  // Kizlyurt, Dagestan
+  'чебоксар': [56.144, 47.249],  // Cheboksary (incl. declined Чебоксарах)
+  'самар': [53.196, 50.100],     // Samara declined forms (Самарі, Самарою)
+  'владімірськ': [56.130, 40.411], // Vladimir Oblast — Ukrainian adjectival stem
+  'владимирск': [56.130, 40.411], // Vladimir Oblast — Russian adjectival stem
   'ust-labinsk': [45.220, 39.710], 'усть-лабинск': [45.220, 39.710], 'усть-лабінськ': [45.220, 39.710],
   'zugres': [48.010, 38.510], 'зугрес': [48.010, 38.510], 'зугрэс': [48.010, 38.510],
   'зуївська тес': [48.010, 38.510],
@@ -296,14 +307,17 @@ function findCoords(text: string): [number, number] | null {
   return best ? best.coords : null;
 }
 
-// Every distinct place a story names (raw gazetteer centroids, un-jittered). Used by
-// cross-reference consumers (e.g. /api/strategic-thermal) that must check ALL mentioned
-// locations, not just the single primary one findCoords returns.
+// Every distinct SPECIFIC place a story names (raw gazetteer centroids, un-jittered).
+// Used by cross-reference consumers (e.g. /api/strategic-thermal) that must check ALL
+// mentioned locations for fire correlation. Deliberately excludes broad country/sea
+// centroids (rank=1): those coordinates have low precision and cause false-positive
+// thermal AOIs whenever there happens to be a FIRMS fire near a country centroid.
 function findAllCoords(text: string): [number, number][] {
   const lower = text.toLowerCase();
   const seen = new Set<string>();
   const out: [number, number][] = [];
-  for (const { re, coords } of COMPILED_GAZETTEER) {
+  for (const { re, coords, rank } of COMPILED_GAZETTEER) {
+    if (rank < 2) continue; // skip country/sea-level centroids
     const key = `${coords[0]},${coords[1]}`;
     if (!seen.has(key) && re.test(lower)) { seen.add(key); out.push(coords); }
   }
@@ -417,7 +431,7 @@ async function buildNews(): Promise<unknown> {
         });
         if (!res.ok) return [];
         const html = await res.text();
-        return parseTelegramHTML(html, channel).slice(-8);
+        return parseTelegramHTML(html, channel).slice(-15);
       } catch { return []; }
     });
 
@@ -456,7 +470,12 @@ async function buildNews(): Promise<unknown> {
       const riskScore = scoreRisk(searchText);
       const id = crypto.createHash('md5').update((article.link || '') + (article.pubDate || '')).digest('hex');
       const coords = findCoords(searchText);
+      const allCoords = findAllCoords(searchText); // specific places only (no country centroids)
       const placed = coords ? jitterAround(coords, id) : null;
+      // coords_default = true when there are no SPECIFIC place matches. A country/sea
+      // centroid as the only match is too imprecise to use as a thermal fire candidate —
+      // it just means "this story is about Russia/Ukraine" not "strike happened here".
+      const coordsDefault = !coords || allCoords.length === 0;
 
       return {
         id,
@@ -468,8 +487,8 @@ async function buildNews(): Promise<unknown> {
         side: sideForSource(article.source),
         risk_score: riskScore,
         coords: placed,
-        coords_default: !coords,
-        places: findAllCoords(searchText),
+        coords_default: coordsDefault,
+        places: allCoords,
         hasVideo: article.hasVideo,
       };
     });
