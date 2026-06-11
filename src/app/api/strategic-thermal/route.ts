@@ -209,6 +209,7 @@ function isInterceptionOnly(item: NewsItem): boolean {
   return !GROUND_IMPACT_STEMS.some(w => t.includes(w));
 }
 
+
 // Weapon type inferred from article text. Priority: specific systems → generic class.
 // Returns a short display label or null when nothing matches.
 const WEAPON_PATTERNS: [string, string[]][] = [
