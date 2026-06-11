@@ -61,6 +61,7 @@ interface Site { id: string; name: string; category: Exclude<Category, 'news'>; 
 const BBOX = { latMin: 43, latMax: 71, lngMin: 19, lngMax: 66 };
 const SITE_RADIUS_KM = 12;   // airfields/yards sprawl; be inclusive
 const NEWS_RADIUS_KM = 15;   // news coords are city-level (and jittered)
+const FIRE_ACTIVE_MS = 12 * 60 * 60 * 1000;  // fires older than 12h don't sustain a "hit"
 
 const SITES: Site[] = [
   // ── Strategic / frontline airfields ──
@@ -127,7 +128,7 @@ const SITES: Site[] = [
   { id: 'oil-kizlyurt-gas', name: 'Gas infrastructure (Kizlyurt, Dagestan)', category: 'oil', lat: 43.21, lng: 46.87 },
 ];
 
-interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; }
+interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; ts: number; }
 interface NewsItem { title?: string; description?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; places?: [number, number][]; hasVideo?: boolean; }
 
 // Equirectangular distance (km) — accurate enough at this scale, cheap in a hot loop.
@@ -159,9 +160,12 @@ async function fetchTheaterFires(): Promise<Fire[]> {
         const lat = parseFloat(c[li]), lng = parseFloat(c[gi]);
         if (isNaN(lat) || isNaN(lng)) continue;
         if (lat < BBOX.latMin || lat > BBOX.latMax || lng < BBOX.lngMin || lng > BBOX.lngMax) continue;
-        fires.push({ lat, lng, frp: parseFloat(c[fi]) || 0, brightness: parseFloat(c[bi]) || 0, date: c[di] || '', time: c[ti] || '' });
+        const acqTime = (c[ti] || '0000').padStart(4, '0');
+        const ts = new Date(`${c[di]}T${acqTime.slice(0, 2)}:${acqTime.slice(2, 4)}:00Z`).getTime();
+        fires.push({ lat, lng, frp: parseFloat(c[fi]) || 0, brightness: parseFloat(c[bi]) || 0, date: c[di] || '', time: c[ti] || '', ts: isNaN(ts) ? Date.now() : ts });
       }
-      return fires;
+      const cutoff = Date.now() - FIRE_ACTIVE_MS;
+      return fires.filter(f => f.ts >= cutoff);
     } catch { continue; }
   }
   return [];

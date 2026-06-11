@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +10,14 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — shared by all consumers (strate
 let newsCache: unknown = null;
 let newsCachedAt = 0;
 let newsInflight: Promise<unknown> | null = null;
+
+const DATA_DIR = path.join(os.homedir(), '.osiris-data');
+const DISK_CACHE_FILE = path.join(DATA_DIR, 'news-cache.json');
+const SCRAPE_WINDOW_MS    = 3  * 60 * 60 * 1000;  // 3h back per run
+const DISK_HORIZON_MS     = 24 * 60 * 60 * 1000;  // keep 24h of articles
+const REFRESH_INTERVAL_MS = 90 * 60 * 1000;       // min gap between disk refreshes
+let lastRefreshAt = 0;
+interface DiskCache { raw: ParsedArticle[]; updatedAt: number; }
 
 /**
  * OSIRIS — Military-Grade Intelligence API
@@ -394,6 +405,50 @@ function parseTelegramHTML(html: string, channel: string): ParsedArticle[] {
   return items;
 }
 
+async function fetchChannelWithPagination(channel: string, cutoffMs: number): Promise<ParsedArticle[]> {
+  const all: ParsedArticle[] = [];
+  let beforeId: number | null = null;
+  for (let page = 0; page < 5; page++) {
+    const url = beforeId
+      ? `https://t.me/s/${channel}?before=${beforeId}`
+      : `https://t.me/s/${channel}`;
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+      });
+      if (!res.ok) break;
+      const html = await res.text();
+      const posts = parseTelegramHTML(html, channel);
+      if (!posts.length) break;
+      all.push(...posts.filter(p => new Date(p.pubDate).getTime() > cutoffMs));
+      const oldestMs = Math.min(...posts.map(p => new Date(p.pubDate).getTime()));
+      if (oldestMs <= cutoffMs) break;
+      const ids = posts.flatMap(p => { const m = p.link.match(/\/(\d+)$/); return m ? [parseInt(m[1], 10)] : []; });
+      if (!ids.length) break;
+      beforeId = Math.min(...ids);
+    } catch { break; }
+  }
+  return all;
+}
+
+async function readDiskCache(): Promise<DiskCache | null> {
+  try {
+    const txt = await fs.readFile(DISK_CACHE_FILE, 'utf8');
+    const d = JSON.parse(txt);
+    return Array.isArray(d.raw) && typeof d.updatedAt === 'number' ? d as DiskCache : null;
+  } catch { return null; }
+}
+
+async function writeDiskCache(raw: ParsedArticle[]): Promise<void> {
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(DISK_CACHE_FILE, JSON.stringify({ raw, updatedAt: Date.now() }), 'utf8');
+  } catch (e) {
+    console.warn('[OSIRIS] news: disk cache write failed', e instanceof Error ? e.message : e);
+  }
+}
+
 function parseRSSItems(xml: string, sourceName: string): ParsedArticle[] {
   const items: ParsedArticle[] = [];
   const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
@@ -423,24 +478,52 @@ function parseRSSItems(xml: string, sourceName: string): ParsedArticle[] {
 
 async function buildNews(): Promise<unknown> {
   try {
-  const feedPromises = TELEGRAM_CHANNELS.map(async (channel) => {
-      try {
-        const res = await fetch(`https://t.me/s/${channel}`, { 
-          signal: AbortSignal.timeout(8000), 
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } 
-        });
-        if (!res.ok) return [];
-        const html = await res.text();
-        return parseTelegramHTML(html, channel).slice(-15);
-      } catch { return []; }
-    });
+    // --- Disk cache layer ---
+    const disk = await readDiskCache();
+    const now = Date.now();
+    let rawArticles: ParsedArticle[];
 
-    const feedResults = await Promise.allSettled(feedPromises);
-    const allArticles: ParsedArticle[] = [];
-
-    for (const result of feedResults) {
-      if (result.status === 'fulfilled') allArticles.push(...result.value);
+    if (disk && now - disk.updatedAt < REFRESH_INTERVAL_MS) {
+      // Cache is fresh — use it directly
+      rawArticles = disk.raw.filter(a => new Date(a.pubDate).getTime() > now - DISK_HORIZON_MS);
+      // Kick off a background refresh when cache is getting stale (> 45 min) so next request sees fresh data
+      if (now - disk.updatedAt > 45 * 60 * 1000 && now - lastRefreshAt > REFRESH_INTERVAL_MS) {
+        lastRefreshAt = now;
+        (async () => {
+          try {
+            const cutoff = Date.now() - SCRAPE_WINDOW_MS;
+            const fresh: ParsedArticle[] = (await Promise.allSettled(
+              TELEGRAM_CHANNELS.map(ch => fetchChannelWithPagination(ch, cutoff))
+            )).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+            const horizon = Date.now() - DISK_HORIZON_MS;
+            const byLink = new Map<string, ParsedArticle>();
+            for (const a of [...disk.raw, ...fresh]) {
+              const key = a.link || `${a.source}:${a.pubDate}`;
+              if (!byLink.has(key) && new Date(a.pubDate).getTime() > horizon) byLink.set(key, a);
+            }
+            await writeDiskCache(Array.from(byLink.values()));
+          } catch { /* background — swallow */ }
+        })();
+      }
+    } else {
+      // Cache is missing or stale — full synchronous refresh
+      lastRefreshAt = now;
+      const cutoff = now - SCRAPE_WINDOW_MS;
+      const fresh: ParsedArticle[] = (await Promise.allSettled(
+        TELEGRAM_CHANNELS.map(ch => fetchChannelWithPagination(ch, cutoff))
+      )).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+      const horizon = now - DISK_HORIZON_MS;
+      const byLink = new Map<string, ParsedArticle>();
+      const existing = disk?.raw ?? [];
+      for (const a of [...existing, ...fresh]) {
+        const key = a.link || `${a.source}:${a.pubDate}`;
+        if (!byLink.has(key) && new Date(a.pubDate).getTime() > horizon) byLink.set(key, a);
+      }
+      rawArticles = Array.from(byLink.values());
+      await writeDiskCache(rawArticles);
     }
+
+    const allArticles: ParsedArticle[] = rawArticles;
 
     // FAILSAFE: If Telegram completely blocks the IP, fall back to traditional RSS
     if (allArticles.length === 0) {
