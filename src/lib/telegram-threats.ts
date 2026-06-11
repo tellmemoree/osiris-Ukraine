@@ -36,6 +36,21 @@ export interface OblastRef {
 
 export type WeaponType = 'KAB' | 'CRUISE' | 'BALLISTIC' | 'DRONE' | 'KINZHAL' | 'S300' | 'KH22';
 
+export interface RouteWaypoint {
+  lat: number;
+  lng: number;
+  oblast: string;
+  ts: string;     // ISO
+  text: string;
+  channel: string;
+}
+
+export interface RouteWave {
+  waveIndex: number;
+  startedAt: string;    // ISO of first waypoint
+  waypoints: RouteWaypoint[];
+}
+
 // ── oblast refs (verbatim from kab-threats) ─────────────────────────────────
 
 export const OBLAST_REFS: OblastRef[] = [
@@ -238,4 +253,92 @@ export function matchOblasts(text: string): OblastRef[] {
   return OBLAST_MATCHERS
     .filter(({ regexes }) => regexes.some((re) => re.test(text)))
     .map(({ ref }) => ref);
+}
+
+// ── route building ───────────────────────────────────────────────────────────
+
+// Messages matching these patterns are threat-level assessments or probability
+// forecasts, not actual sightings. They name many oblasts as *potential* targets,
+// which produces entirely false routes.
+const ANALYSIS_PATTERNS: RegExp[] = [
+  /ймовірніст/iu,                       // "probability / likelihood"
+  /рівень\s+(загроз|небезпек|атак)/iu,  // "threat / danger / attack level"
+  /низьк\p{L}+\s+рівен/iu,             // "low level"
+  /висок\p{L}+\s+рівен/iu,             // "high level"
+  /середн\p{L}+\s+рівен/iu,            // "medium level"
+];
+
+function isAnalysis(text: string): boolean {
+  return ANALYSIS_PATTERNS.some(re => re.test(text));
+}
+
+// Returns the oblast whose first token match appears earliest in the message
+// text (character position) — text order, not OBLAST_REFS definition order.
+// One waypoint per message prevents a single "X, Y, Z under threat" post from
+// generating a fake multi-step route.
+function firstOblastInText(text: string): OblastRef | null {
+  let earliest = Infinity;
+  let result: OblastRef | null = null;
+  for (const { ref, regexes } of OBLAST_MATCHERS) {
+    for (const re of regexes) {
+      const m = re.exec(text);
+      if (m && m.index < earliest) {
+        earliest = m.index;
+        result   = ref;
+      }
+    }
+  }
+  return result;
+}
+
+// A 25-minute gap between consecutive sighting messages is treated as a new
+// wave (separate attack group / drone swarm).
+const WAVE_GAP_MS = 25 * 60 * 1000;
+
+/**
+ * Builds temporal route waves for a given weapon type.
+ *
+ * Each wave is a contiguous series of sighting messages (no >25 min gap).
+ * Analysis / probability-assessment messages are excluded entirely.
+ * Each qualifying message contributes at most one waypoint (first-mentioned
+ * oblast in text order), preventing forecast posts from faking routes.
+ */
+export function buildRoute(messages: TgMessage[], weaponType: WeaponType): RouteWave[] {
+  const relevant = messages
+    .filter(msg => classifyWeapons(msg.text).includes(weaponType) && !isAnalysis(msg.text))
+    .sort((a, b) => a.ts - b.ts);
+
+  const waves: RouteWave[] = [];
+  let current: RouteWaypoint[] = [];
+  let lastTs = 0;
+
+  const flush = () => {
+    if (current.length > 0) {
+      waves.push({ waveIndex: waves.length, startedAt: current[0].ts, waypoints: current });
+      current = [];
+    }
+  };
+
+  for (const msg of relevant) {
+    if (lastTs && msg.ts - lastTs > WAVE_GAP_MS) flush();
+
+    const ref = firstOblastInText(msg.text);
+    if (!ref) { lastTs = msg.ts; continue; }
+
+    const last = current[current.length - 1];
+    if (last && last.oblast === ref.oblast) { lastTs = msg.ts; continue; }
+
+    current.push({
+      lat:     ref.coords[1],
+      lng:     ref.coords[0],
+      oblast:  ref.oblast,
+      ts:      new Date(msg.ts).toISOString(),
+      text:    msg.text.length > 120 ? msg.text.slice(0, 120) + '…' : msg.text,
+      channel: msg.channel,
+    });
+    lastTs = msg.ts;
+  }
+
+  flush();
+  return waves;
 }
