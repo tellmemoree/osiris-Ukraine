@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { stealthFetch } from '@/lib/stealthFetch';
 
 export const dynamic = 'force-dynamic';
 
@@ -126,10 +127,18 @@ async function fetchGdeltEvents(): Promise<ConflictEvent[]> {
       const encodedQuery = encodeURIComponent(query);
       const url = `https://api.gdeltproject.org/api/v2/geo/geo?query=${encodedQuery}&format=GeoJSON&timespan=24h&maxpoints=100`;
 
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000), cache: 'no-store' });
-      if (!res.ok) continue;
-
-      const geojson = await res.json();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      let geojson: any;
+      try {
+        const res = await stealthFetch(url, { signal: controller.signal, cache: 'no-store' });
+        clearTimeout(timeoutId);
+        if (!res.ok) continue;
+        geojson = await res.json();
+      } catch {
+        clearTimeout(timeoutId);
+        continue;
+      }
       if (!geojson?.features) continue;
 
       for (const feature of geojson.features) {
