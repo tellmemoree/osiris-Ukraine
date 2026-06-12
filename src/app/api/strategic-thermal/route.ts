@@ -43,6 +43,12 @@ const SITES: Site[] = [
   { id: 'af-taganrog', name: 'Taganrog', category: 'airfield', lat: 47.20, lng: 38.85 },
   { id: 'af-kursk', name: 'Kursk-Vostochny', category: 'airfield', lat: 51.75, lng: 36.30 },
   { id: 'af-berdyansk', name: 'Berdyansk (occupied)', category: 'airfield', lat: 46.82, lng: 36.75 },
+  { id: 'af-shaykovka', name: 'Shaykovka (Tu-22M3 base, Kaluga)', category: 'airfield', lat: 54.23, lng: 34.37 },
+  { id: 'af-pskov', name: 'Pskov/Kresty (Il-76 transport base)', category: 'airfield', lat: 57.78, lng: 28.40 },
+  { id: 'af-marinovka', name: 'Marinovka (Su-34/Su-24 base, Volgograd)', category: 'airfield', lat: 48.64, lng: 43.79 },
+  { id: 'af-lipetsk', name: 'Lipetsk-2 (Su-27/Su-30 combat training)', category: 'airfield', lat: 52.63, lng: 39.44 },
+  { id: 'af-kazan-kapo', name: 'Kazan KAPO (Tu-160/Tu-22M3 production & repair)', category: 'airfield', lat: 55.86, lng: 49.12 },
+  { id: 'af-seshcha', name: 'Seshcha (An-124 heavy-lift transport, Bryansk)', category: 'airfield', lat: 53.72, lng: 33.34 },
   // ── Rail hubs / marshalling yards ──
   { id: 'rl-rostov', name: 'Rostov-on-Don (rail hub)', category: 'rail', lat: 47.24, lng: 39.71 },
   { id: 'rl-bataysk', name: 'Bataysk marshalling yard', category: 'rail', lat: 47.14, lng: 39.75 },
@@ -77,6 +83,8 @@ const SITES: Site[] = [
   { id: 'naval-kronstadt', name: 'Kronstadt naval base (Baltic)', category: 'naval', lat: 59.99, lng: 29.76 },
   { id: 'naval-berdyansk', name: 'Berdyansk port (occupied)', category: 'naval', lat: 46.75, lng: 36.80 },
   { id: 'naval-mariupol', name: 'Mariupol port (occupied)', category: 'naval', lat: 47.10, lng: 37.57 },
+  { id: 'naval-novorossiysk', name: 'Novorossiysk naval base (Black Sea Fleet HQ)', category: 'naval', lat: 44.72, lng: 37.83 },
+  { id: 'naval-kerch-zaliv', name: 'Zaliv shipyard Kerch (corvette construction, Crimea)', category: 'naval', lat: 45.26, lng: 36.42 },
   // ── Power infrastructure ──
   { id: 'pwr-zugres', name: 'Zuivska TPS — Zugres (Donetsk)', category: 'power', lat: 48.01, lng: 38.51 },
   { id: 'pwr-simferopol-tes', name: 'Simferopol TES (Crimea CHP)', category: 'power', lat: 44.98, lng: 34.07 },
@@ -85,13 +93,20 @@ const SITES: Site[] = [
   { id: 'oil-semykolod', name: 'Semykolodiaznaya oil depot (Crimea)', category: 'oil', lat: 45.20, lng: 33.78 },
   // ── Ammunition / arsenal ──
   { id: 'ammo-leningrad-arsenal', name: 'Leningrad Oblast naval arsenal', category: 'ammo', lat: 59.90, lng: 29.60 },
+  { id: 'ammo-tambov', name: 'Tambov gunpowder plant / Kotovsk (propellant, artillery powder)', category: 'ammo', lat: 52.58, lng: 41.52 },
+  { id: 'ammo-bryansk-chem', name: 'Bryansk Chemical Plant / Seltso (rocket propellant, phosphorous)', category: 'ammo', lat: 53.37, lng: 34.10 },
   // ── Defense-industrial (direct strike targets, June 2026) ──
   { id: 'ind-arsenal-spb', name: 'Arsenal defense plant (St. Petersburg)', category: 'ammo', lat: 59.96, lng: 30.37 },
   { id: 'ind-vniir-cheboksary', name: 'VNIIR-Progress (Cheboksary — drives/hydraulics for artillery/Iskander)', category: 'ammo', lat: 56.14, lng: 47.22 },
+  { id: 'ind-alabuga', name: 'Alabuga SEZ / Yelabuga (Shahed/Geran-2 drone factory, Tatarstan)', category: 'ammo', lat: 55.84, lng: 52.05 },
+  { id: 'ind-kupol-izhevsk', name: 'Kupol plant Izhevsk (Tor SAM + Garpia-A1 drone production)', category: 'ammo', lat: 56.84, lng: 53.18 },
   // ── Oil / energy (new or previously unnamed targets) ──
   { id: 'oil-kuibyshev-samara', name: 'Kuibyshev refinery (Samara, Rosneft)', category: 'oil', lat: 53.21, lng: 50.15 },
   { id: 'oil-nps-vtoroye', name: 'NPS Vtoroye — Transneft pipeline (Vladimir Oblast)', category: 'oil', lat: 56.40, lng: 41.85 },
   { id: 'oil-kizlyurt-gas', name: 'Gas infrastructure (Kizlyurt, Dagestan)', category: 'oil', lat: 43.21, lng: 46.87 },
+  { id: 'oil-yaroslavl', name: 'Slavneft-YANOS refinery (Yaroslavl, 15M t/yr)', category: 'oil', lat: 57.55, lng: 39.81 },
+  { id: 'oil-kapotnya', name: 'Kapotnya refinery (Moscow, 40% of region fuel)', category: 'oil', lat: 55.64, lng: 37.80 },
+  { id: 'oil-ufa', name: 'Bashneft-UNPZ / Novoil refinery complex (Ufa, Bashkortostan)', category: 'oil', lat: 54.86, lng: 56.09 },
   // ── Petrochemical / military-industrial (struck June 2026) ──
   { id: 'ind-tolyattikauchuk', name: 'Tolyattikauchuk (Samara Oblast — synthetic rubber for armour/aviation)', category: 'oil', lat: 53.50, lng: 49.38 },
   { id: 'ind-nizhnekamskneftekhim', name: 'Nizhnekamskneftekhim (Tatarstan — polymers/rubber for VPK)', category: 'oil', lat: 55.64, lng: 51.55 },

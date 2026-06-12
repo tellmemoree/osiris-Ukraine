@@ -319,28 +319,36 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'airfield', '#00E5FF', 'oil', '#FF9500', 'rail', '#FFD700',
         'logistics', '#FFA500', 'naval', '#4FC3F7', 'power', '#FF6B00',
         'ammo', '#FF3D3D', 'news', '#D4AF37', '#FF6B00'];
+      // confirmed = fire hit OR video evidence OR bilateral corroboration
       map.addLayer({ id: 'thermal-aoi-glow', type: 'circle', source: 'thermal-aoi', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 16, 10, 24] as any,
         'circle-color': thermalCatColor,
-        'circle-opacity': ['case', ['get', 'hit'], 0.12, ['==', ['get', 'category'], 'news'], 0.07, 0.04] as any,
+        'circle-opacity': ['case', ['boolean', ['get', 'confirmed'], false], 0.12, 0.03] as any,
         'circle-blur': 1,
       }});
       map.addLayer({ id: 'thermal-aoi-dots', type: 'circle', source: 'thermal-aoi', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 4, 5, 7, 10, 11] as any,
         'circle-color': thermalCatColor,
-        'circle-opacity': ['case', ['get', 'hit'], 0.9, ['==', ['get', 'category'], 'news'], 0.6, 0.35] as any,
-        'circle-stroke-width': 1.5,
-        'circle-stroke-color': '#000',
-        'circle-stroke-opacity': 0.4,
+        // unconfirmed: half-opacity; confirmed: near-full
+        'circle-opacity': ['case', ['boolean', ['get', 'confirmed'], false], 0.88, 0.38] as any,
+        'circle-stroke-width': ['case', ['boolean', ['get', 'confirmed'], false], 1.5, 2] as any,
+        // fire-confirmed → black; video-confirmed → gold; unconfirmed → bright amber warning ring
+        'circle-stroke-color': ['case',
+          ['boolean', ['get', 'hit'], false], '#000000',
+          ['boolean', ['get', 'videoConfirmed'], false], '#FFD700',
+          '#FF8C00'] as any,
+        'circle-stroke-opacity': ['case', ['boolean', ['get', 'confirmed'], false], 0.45, 0.9] as any,
       }});
+      // Label confirmed strikes (fire OR video) with the site/article name
       map.addLayer({ id: 'thermal-aoi-label', type: 'symbol', source: 'thermal-aoi', minzoom: 5,
-        filter: ['==', ['get', 'hit'], true],
-        layout: { 'text-field': ['get', 'name'], 'text-size': 9, 'text-offset': [0, 1.8], 'text-anchor': 'top' },
+        filter: ['boolean', ['get', 'confirmed'], false],
+        layout: { 'text-field': ['get', 'name'], 'text-size': 9, 'text-font': ['Open Sans Regular'], 'text-offset': [0, 1.8], 'text-anchor': 'top', 'text-allow-overlap': false },
         paint: { 'text-color': '#FF9500', 'text-halo-color': '#000', 'text-halo-width': 1 }});
-      map.addLayer({ id: 'thermal-aoi-unconfirmed-label', type: 'symbol', source: 'thermal-aoi', minzoom: 5,
-        filter: ['all', ['==', ['get', 'hit'], false], ['==', ['get', 'category'], 'news']],
-        layout: { 'text-field': 'UNCONFIRMED', 'text-size': 8, 'text-offset': [0, 1.4], 'text-anchor': 'top' },
-        paint: { 'text-color': '#8B7355', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+      // Unconfirmed news markers: bright amber "?" centred on the dot — unmissable
+      map.addLayer({ id: 'thermal-aoi-unconfirmed-label', type: 'symbol', source: 'thermal-aoi', minzoom: 4,
+        filter: ['!', ['boolean', ['get', 'confirmed'], false]],
+        layout: { 'text-field': '?', 'text-size': 14, 'text-font': ['Open Sans Bold'], 'text-offset': [0, 0], 'text-anchor': 'center', 'text-allow-overlap': true },
+        paint: { 'text-color': '#FF8C00', 'text-halo-color': '#000', 'text-halo-width': 1.5 }});
       // Territorial Captures — RU red, UA blue.
       map.addLayer({ id: 'capture-glow', type: 'circle', source: 'captures', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 16, 10, 24],
@@ -1570,6 +1578,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         confidence: a.confidence, latest: a.latest,
         bilateral: a.bilateral ?? false,
         videoConfirmed: a.videoConfirmed ?? false,
+        confirmed: !!(a.hit || a.videoConfirmed || a.bilateral),
         weapon: a.weapon ?? '',
         sources: a.sources ? JSON.stringify(a.sources) : '[]',
       },
