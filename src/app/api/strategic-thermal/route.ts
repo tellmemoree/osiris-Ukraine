@@ -116,7 +116,7 @@ const SITES: Site[] = [
 ];
 
 interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; ts: number; }
-interface NewsItem { title?: string; description?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; places?: [number, number][]; hasVideo?: boolean; }
+interface NewsItem { title?: string; description?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; places?: [number, number][]; place_names?: string[]; hasVideo?: boolean; }
 
 // Equirectangular distance (km) — accurate enough at this scale, cheap in a hot loop.
 function distKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
@@ -220,9 +220,10 @@ function isTerritorialAdvance(item: NewsItem): boolean {
 // them UNLESS the article also contains ground-impact evidence (explosion, fire,
 // hit, damage) that suggests at least one munition got through.
 const INTERCEPT_STEMS = [
-  'shot down', 'were shot', 'дежурными средствами', 'средствами пво',
+  'shot down', 'were shot', 'intercept', 'downed', 'knocked down',
+  'дежурными средствами', 'средствами пво',
   'збили', 'знищили засоба', 'перехват', 'перехоплен',
-  'сбит', 'сбиты', 'сбито', 'збит', 'збиті', 'збито',
+  'сбит', 'сбиты', 'сбито', 'сбили', 'збит', 'збиті', 'збито',
 ];
 const GROUND_IMPACT_STEMS = [
   'вибух', 'взрыв', 'пожеж', 'пожар', 'горит', 'горить',
@@ -302,22 +303,33 @@ function fireHit(fires: Fire[], lat: number, lng: number, radiusKm: number) {
   return count > 0 ? { count, maxFrp: Math.round(maxFrp * 10) / 10, latest: latest.trim() } : null;
 }
 
+// Score a sentence by how informative it is about a strike on a strategic target.
+function scoreSentence(s: string): number {
+  const lower = s.toLowerCase();
+  let score = 0;
+  if (STRATEGIC_TARGET_TERMS.some(w => lower.includes(w))) score += 4;
+  if (STRIKE_TERMS.some(w => lower.includes(w))) score += 2;
+  for (const [, terms] of WEAPON_PATTERNS) {
+    if (terms.some(w => lower.includes(w))) { score += 2; break; }
+  }
+  return score;
+}
+
 // Extract the most informative sentence from a Telegram post about a strike.
-// Scores by: STRATEGIC_TARGET_TERMS (highest) > STRIKE_TERMS > WEAPON_PATTERNS.
-// Falls back to the article title. This replaces raw title display in popups so
-// "231 дронів збито" headlines don't appear as the report text near a strike target.
-function extractBestSnippet(title: string, desc: string): string {
+// When `placeName` is provided (the gazetteer keyword that matched this coord),
+// prefer sentences that mention that place — so a Belgorod-coord marker shows
+// the sentence about Belgorod, not the Kuibyshev-refinery sentence from the
+// same multi-location article.
+function extractBestSnippet(title: string, desc: string, placeName?: string): string {
   const sentences = `${title}\n${desc}`.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 12);
   let best = title.slice(0, 140);
-  let bestScore = 0;
+  let bestScore = -1;
+  const nameLower = placeName?.toLowerCase();
   for (const s of sentences) {
     const lower = s.toLowerCase();
-    let score = 0;
-    if (STRATEGIC_TARGET_TERMS.some(w => lower.includes(w))) score += 4;
-    if (STRIKE_TERMS.some(w => lower.includes(w))) score += 2;
-    for (const [, terms] of WEAPON_PATTERNS) {
-      if (terms.some(w => lower.includes(w))) { score += 2; break; }
-    }
+    let score = scoreSentence(s);
+    // Strongly prefer sentences that mention this specific place.
+    if (nameLower && lower.includes(nameLower)) score += 6;
     if (score > bestScore) { bestScore = score; best = s.slice(0, 140); }
   }
   return best;
@@ -363,11 +375,14 @@ export async function GET(req: Request) {
       // includes incidental context cities, not just the actual strike location.
       // n.coords = primary / most-specific location (single best match).
       const isFromPlaces = !!(n.places && n.places.length);
-      const candidates = isFromPlaces
-        ? n.places
-        : (n.coords && !n.coords_default ? [n.coords] : []);
+      // Pair each place coord with its gazetteer keyword (if available) so the
+      // snippet extractor can prefer sentences that mention this specific location.
+      type Candidate = { lat: number; lng: number; name?: string };
+      const candidates: Candidate[] = isFromPlaces
+        ? (n.places as [number, number][]).map((c, i) => ({ lat: c[0], lng: c[1], name: n.place_names?.[i] }))
+        : (n.coords && !n.coords_default ? [{ lat: n.coords[0], lng: n.coords[1] }] : []);
       const seenThisArticle = new Set<string>();
-      for (const [lat, lng] of candidates) {
+      for (const { lat, lng, name: placeName } of candidates) {
         if (lat < BBOX.latMin || lat > BBOX.latMax || lng < BBOX.lngMin || lng > BBOX.lngMax) continue;
         const key = `${lat.toFixed(1)},${lng.toFixed(1)}`;
         if (seenThisArticle.has(key)) continue; // one article contributes one marker per place
@@ -391,7 +406,7 @@ export async function GET(req: Request) {
           if (!meaningfulHit && !hasStrategicTarget(n)) continue;
         }
         const articleText = `${n.title || ''} ${n.description || ''}`;
-        const snippet = extractBestSnippet(n.title || '', n.description || '');
+        const snippet = extractBestSnippet(n.title || '', n.description || '', placeName);
         const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220), hasVideo: n.hasVideo, weapon: detectWeapon(articleText) ?? undefined, snippet };
 
         // Corroboration: if this coord falls within a curated site's radius, merge the
