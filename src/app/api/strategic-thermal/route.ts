@@ -299,6 +299,27 @@ function fireHit(fires: Fire[], lat: number, lng: number, radiusKm: number) {
   return count > 0 ? { count, maxFrp: Math.round(maxFrp * 10) / 10, latest: latest.trim() } : null;
 }
 
+// Extract the most informative sentence from a Telegram post about a strike.
+// Scores by: STRATEGIC_TARGET_TERMS (highest) > STRIKE_TERMS > WEAPON_PATTERNS.
+// Falls back to the article title. This replaces raw title display in popups so
+// "231 дронів збито" headlines don't appear as the report text near a strike target.
+function extractBestSnippet(title: string, desc: string): string {
+  const sentences = `${title}\n${desc}`.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 12);
+  let best = title.slice(0, 140);
+  let bestScore = 0;
+  for (const s of sentences) {
+    const lower = s.toLowerCase();
+    let score = 0;
+    if (STRATEGIC_TARGET_TERMS.some(w => lower.includes(w))) score += 4;
+    if (STRIKE_TERMS.some(w => lower.includes(w))) score += 2;
+    for (const [, terms] of WEAPON_PATTERNS) {
+      if (terms.some(w => lower.includes(w))) { score += 2; break; }
+    }
+    if (score > bestScore) { bestScore = score; best = s.slice(0, 140); }
+  }
+  return best;
+}
+
 export async function GET(req: Request) {
   try {
     const [fires, news] = await Promise.all([fetchTheaterFires(), fetchNews(req)]);
@@ -306,12 +327,16 @@ export async function GET(req: Request) {
     const aois = [];
 
     // Sites: always emitted; `hit` flips when a fire is within range.
+    // sources/videoConfirmed/bilateral/weapon are initialised empty so the news
+    // corroboration pass can merge nearby articles into the site dot instead of
+    // creating a separate news marker on top of it.
     for (const s of SITES) {
       const h = fireHit(fires, s.lat, s.lng, SITE_RADIUS_KM);
       aois.push({
         id: s.id, category: s.category, name: s.name, lat: s.lat, lng: s.lng,
         hit: !!h, fireCount: h?.count ?? 0, maxFrp: h?.maxFrp ?? 0, latest: h?.latest ?? null,
         confidence: h ? confidenceOf(h.count, h.maxFrp) : null,
+        sources: [] as Contributor[], videoConfirmed: false, bilateral: false, weapon: '',
       });
     }
 
@@ -322,7 +347,7 @@ export async function GET(req: Request) {
     // /~11 km cell — different channels, or one strike reported by both sides) MERGE into a
     // single AOI that carries EVERY contributing source, instead of whichever article was
     // processed first silently winning (and mis-attributing) the marker.
-    type Contributor = { source?: string; side?: string; link?: string; title?: string; description?: string; hasVideo?: boolean; weapon?: string };
+    type Contributor = { source?: string; side?: string; link?: string; title?: string; description?: string; hasVideo?: boolean; weapon?: string; snippet?: string };
     type NewsAoi = {
       id: string; category: 'news'; name: string; source?: string; side?: string; link?: string;
       lat: number; lng: number; hit: boolean; fireCount: number; maxFrp: number; latest: string | null;
@@ -342,12 +367,39 @@ export async function GET(req: Request) {
         seenThisArticle.add(key);
         const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
         // Without satellite corroboration, only show a marker when the article names a
-        // specific strategic infrastructure type. Civilian incidents ("explosion near a
-        // supermarket") and military-exhibition pieces have no business appearing as
-        // unconfirmed AOIs — they flood the layer with noise.
-        if (!h && !n.hasVideo && !hasStrategicTarget(n)) continue;
+        // specific strategic infrastructure type. Civilian incidents, direction/sector
+        // reports ("Запорожское направление"), meta-headlines ("several cities hit"), and
+        // military-exhibition pieces have no business appearing as unconfirmed AOIs.
+        // hasVideo is intentionally NOT a bypass here — video of a drone combat strike
+        // at a front sector doesn't mean we should pin a marker to that sector centroid.
+        // Video is a confidence/badge signal only.
+        if (!h && !hasStrategicTarget(n)) continue;
         const articleText = `${n.title || ''} ${n.description || ''}`;
-        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220), hasVideo: n.hasVideo, weapon: detectWeapon(articleText) ?? undefined };
+        const snippet = extractBestSnippet(n.title || '', n.description || '');
+        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220), hasVideo: n.hasVideo, weapon: detectWeapon(articleText) ?? undefined, snippet };
+
+        // Corroboration: if this coord falls within a curated site's radius, merge the
+        // article into the site AOI instead of creating a separate news dot on top of it.
+        const siteAoi = (aois as any[]).find(a => a.category !== 'news' && distKm(lat, lng, a.lat, a.lng) <= SITE_RADIUS_KM);
+        if (siteAoi) {
+          if (!siteAoi.sources.some((s: any) => s.source === contributor.source && s.title === contributor.title)) {
+            siteAoi.sources.push(contributor);
+          }
+          if (h && !siteAoi.hit) {
+            siteAoi.hit = true; siteAoi.fireCount = h.count; siteAoi.maxFrp = h.maxFrp;
+            siteAoi.latest = h.latest; siteAoi.confidence = confidenceOf(h.count, h.maxFrp);
+          }
+          if (contributor.weapon && !siteAoi.weapon) siteAoi.weapon = contributor.weapon;
+          if (contributor.hasVideo && !siteAoi.videoConfirmed) siteAoi.videoConfirmed = true;
+          const bil = siteAoi.sources.some((s: any) => s.side === 'ua') && siteAoi.sources.some((s: any) => s.side === 'ru');
+          if (bil && !siteAoi.bilateral) {
+            siteAoi.bilateral = true;
+            if (siteAoi.hit && siteAoi.confidence && siteAoi.confidence !== 'news')
+              siteAoi.confidence = siteAoi.confidence === 'low' ? 'med' : 'high';
+          }
+          continue;
+        }
+
         const existing = newsByCell.get(key);
         if (existing) {
           // Upgrade news-only → fire-confirmed if this pass has a hit
@@ -381,7 +433,7 @@ export async function GET(req: Request) {
         const initVideo = !!n.hasVideo;
         const initConf: Confidence = h ? confidenceOf(h.count, h.maxFrp) : (initVideo ? 'low' : 'news');
         newsByCell.set(key, {
-          id: `news-${newsByCell.size + 1}`, category: 'news', name: contributor.title || 'News report',
+          id: `news-${newsByCell.size + 1}`, category: 'news', name: contributor.snippet || contributor.title || 'News report',
           source: n.source, side: n.side, link: n.link, lat, lng,
           hit: !!h, fireCount: h?.count ?? 0, maxFrp: h?.maxFrp ?? 0, latest: h?.latest ?? null,
           confidence: initConf,
