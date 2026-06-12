@@ -21,7 +21,7 @@ interface NewsItem { title?: string; description?: string; source?: string; side
 
 // Active contact zone only. Covers Kherson/Zaporizhzhia north through the Kursk
 // incursion axis. Excludes deep Russia (Bryansk 53°N, Adygea 44°N, Rostov east of 40°E).
-const CONTACT_BBOX = { latMin: 45.5, latMax: 52.5, lngMin: 30.5, lngMax: 40.0 };
+const CONTACT_BBOX = { latMin: 45.5, latMax: 52.5, lngMin: 31.5, lngMax: 40.0 };
 
 // Capture/liberation/control-change wording. Mirrors strategic-thermal's ADVANCE_TERMS
 // (kept in sync deliberately — that route drops these, this one keeps them).
@@ -80,12 +80,13 @@ function captureSide(item: NewsItem): 'ru' | 'ua' | null {
   return null;
 }
 
-// Return all un-jittered place centroids for an article. `places[]` holds the raw
-// gazetteer coords; `coords` is one of them jittered for anti-stacking. When `places`
-// is empty fall back to the single jittered coord so older items still render.
+// Return only the PRIMARY place centroid for an article. Using all places[] would
+// scatter markers to every geographic mention in the body — comparison cities, political
+// context, Kyiv-as-capital references — none of which represent the claimed territory.
+// Primary = first gazetteer hit (highest rank); fall back to jittered coords.
 function allCentroids(item: NewsItem): [number, number][] {
-  if (item.places?.length) return item.places;
-  return item.coords ? [item.coords] : [];
+  const primary = item.places?.[0] ?? item.coords;
+  return primary ? [primary] : [];
 }
 
 async function fetchNews(req: Request): Promise<NewsItem[]> {
