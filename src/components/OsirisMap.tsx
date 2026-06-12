@@ -411,7 +411,14 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         paint: { 'text-color': '#E040FB', 'text-halo-color': '#000', 'text-halo-width': 1 }});
       map.addLayer({ id: 'drone-route-nodes', type: 'circle', source: 'drone-route',
         filter: ['==', ['geometry-type'], 'Point'],
-        paint: { 'circle-radius': 4, 'circle-color': '#CE93D8', 'circle-opacity': 0.9, 'circle-stroke-width': 1.5, 'circle-stroke-color': '#E040FB', 'circle-stroke-opacity': 0.7 }});
+        paint: {
+          'circle-radius': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 6, 4],
+          'circle-color': '#CE93D8',
+          'circle-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.8],
+          'circle-stroke-width': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 2.5, 1.5],
+          'circle-stroke-color': ['case', ['boolean', ['get', 'alarmConfirmed'], false], '#FF1744', '#E040FB'],
+          'circle-stroke-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.7],
+        }});
       map.addLayer({ id: 'drone-route-label', type: 'symbol', source: 'drone-route', minzoom: 4,
         filter: ['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'isLatest'], true]],
         layout: { 'text-field': ['concat', 'DRONE ', ['get', 'oblast']], 'text-size': 9, 'text-font': ['Open Sans Regular'], 'text-offset': [0, 1.9], 'text-allow-overlap': false },
@@ -428,7 +435,14 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         paint: { 'text-color': ['get', 'color'], 'text-halo-color': '#000', 'text-halo-width': 1 }});
       map.addLayer({ id: 'missile-route-nodes', type: 'circle', source: 'missile-routes',
         filter: ['==', ['geometry-type'], 'Point'],
-        paint: { 'circle-radius': 4, 'circle-color': ['get', 'color'], 'circle-opacity': 0.9, 'circle-stroke-width': 1.5, 'circle-stroke-color': ['get', 'color'], 'circle-stroke-opacity': 0.5 }});
+        paint: {
+          'circle-radius': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 6, 4],
+          'circle-color': ['get', 'color'],
+          'circle-opacity': 0.9,
+          'circle-stroke-width': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 2.5, 1.5],
+          'circle-stroke-color': ['case', ['boolean', ['get', 'alarmConfirmed'], false], '#FF1744', ['get', 'color']],
+          'circle-stroke-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.5],
+        }});
       map.addLayer({ id: 'missile-route-label', type: 'symbol', source: 'missile-routes', minzoom: 4,
         filter: ['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'isLatest'], true]],
         layout: { 'text-field': ['get', 'weaponLabel'], 'text-size': 9, 'text-font': ['Open Sans Regular'], 'text-offset': [0, 1.9], 'text-allow-overlap': false },
@@ -1077,6 +1091,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         <div style="display:grid;grid-template-columns:1fr;gap:4px;font-size:9px;">
           <div><span style="color:#5C5A54;">REPORTED</span><br/><span style="color:#E8E6E0;">${p.ts ? new Date(p.ts).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
         </div>
+        ${p.alarmConfirmed ? '<div style="margin-top:6px;padding:3px 6px;background:rgba(255,23,68,0.15);border:1px solid rgba(255,23,68,0.4);border-radius:3px;color:#FF1744;font-size:8px;font-weight:700;letter-spacing:0.05em;">AIR RAID ALARM CORROBORATED</div>' : ''}
         <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Confirmed sighting signal — verify before acting.</div>
       </div>`);
     });
@@ -1096,6 +1111,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           <div><span style="color:#5C5A54;">REPORTED</span><br/><span style="color:#E8E6E0;">${p.ts ? new Date(p.ts).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
           <div><span style="color:#5C5A54;">SOURCES</span><br/><span style="color:#E8E6E0;font-size:8px;">${p.sources||'—'}</span></div>
         </div>
+        ${p.alarmConfirmed ? '<div style="margin-top:6px;padding:3px 6px;background:rgba(255,23,68,0.15);border:1px solid rgba(255,23,68,0.4);border-radius:3px;color:#FF1744;font-size:8px;font-weight:700;letter-spacing:0.05em;">AIR RAID ALARM CORROBORATED</div>' : ''}
         <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Confirmed sighting signal — verify before acting.</div>
       </div>`);
     });
@@ -1808,7 +1824,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         features.push({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [w.lng, w.lat] },
-          properties: { oblast: w.oblast, ts: w.ts, text: w.text, isLatest: i === wps.length - 1, sequence: i + 1, waveIndex: wave.waveIndex },
+          properties: { oblast: w.oblast, ts: w.ts, text: w.text, isLatest: i === wps.length - 1, sequence: i + 1, waveIndex: wave.waveIndex, alarmConfirmed: !!w.alarmConfirmed },
         });
       });
     }
@@ -1838,6 +1854,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
               weaponType: route.weaponType, color: route.color, weaponLabel: route.label,
               isLatest: i === wps.length - 1, sequence: i + 1, waveIndex: wave.waveIndex,
               oblast: w.oblast, ts: w.ts, text: w.text, sources: route.sources?.join(', ') || '',
+              alarmConfirmed: !!w.alarmConfirmed,
             },
           });
         });

@@ -43,6 +43,7 @@ export interface RouteWaypoint {
   ts: string;     // ISO
   text: string;
   channel: string;
+  alarmConfirmed?: boolean; // true when air-raid history records this oblast alarmed near ts
 }
 
 export interface RouteWave {
