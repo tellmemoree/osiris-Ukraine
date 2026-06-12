@@ -1031,12 +1031,16 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         const srcs = JSON.parse(p.sources || '[]') as any[];
         if (srcs.length > 0) {
           const first = srcs[0];
-          if (!isNews && first.title) {
-            snippetHtml = `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;font-style:italic;">"${esc((first.title as string).slice(0, 100))}"</div>`;
+          // For site markers that received merged news/Telegram sources, show the best-extracted
+          // snippet from the first contributing article (not just the raw title).
+          if (!isNews && (first.snippet || first.title)) {
+            const text = (first.snippet || first.title) as string;
+            snippetHtml = `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;font-style:italic;">"${esc(text.slice(0, 120))}"</div>`;
           }
-          const linkRows = srcs.filter((s: any) => s.link || s.source).map((s: any) =>
-            `<div style="margin-bottom:3px;line-height:1.4;">${s.link ? `<a href="${safeUrl(s.link)}" target="_blank" style="color:#D4AF37;text-decoration:none;">${esc(s.source)||'source'}</a>` : `<span style="color:#D4AF37;">${esc(s.source)}</span>`}${isNews && s.title ? `<span style="color:#666;font-size:8px;"> — ${esc((s.title as string).slice(0,80))}</span>` : ''}</div>`
-          ).join('');
+          const linkRows = srcs.filter((s: any) => s.link || s.source).map((s: any) => {
+            const label = (s.snippet || s.title) as string | undefined;
+            return `<div style="margin-bottom:3px;line-height:1.4;">${s.link ? `<a href="${safeUrl(s.link)}" target="_blank" style="color:#D4AF37;text-decoration:none;">${esc(s.source)||'source'}</a>` : `<span style="color:#D4AF37;">${esc(s.source)}</span>`}${label ? `<span style="color:#666;font-size:8px;"> — ${esc(label.slice(0,90))}</span>` : ''}</div>`;
+          }).join('');
           sourcesHtml = linkRows ? `<div style="font-size:9px;margin-top:6px;">${linkRows}</div>` : '';
         }
       } catch { /* ignore */ }
