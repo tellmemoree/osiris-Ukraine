@@ -190,6 +190,7 @@ export default function Dashboard() {
     captures: false,
     air_quality: false,
     thermal_aoi: false,
+    thermal_aoi_fires_only: false,
     internet_outages: false,
     malware: false,
   });

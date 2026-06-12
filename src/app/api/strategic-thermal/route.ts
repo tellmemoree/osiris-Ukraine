@@ -1,6 +1,41 @@
 import { NextResponse } from 'next/server';
+import { getThreatCorpus, matchOblasts, type TgMessage } from '@/lib/telegram-threats';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
+
+// ── Hit history persistence ─────────────────────────────────────────────────
+// Rolls a 48-hour log of fire-confirmed site hits to disk so analysts can
+// see what burned overnight after the FIRMS 12-hour active-fire window expires.
+
+const HITS_FILE = path.join(process.env.HOME ?? '/root', '.osiris-data', 'thermal-hits.json');
+const HITS_TTL_MS = 48 * 60 * 60 * 1000;
+
+interface StoredHit {
+  id: string; name: string; category: string;
+  lat: number; lng: number;
+  confidence: string; maxFrp: number; fireCount: number;
+  latest: string | null; weapon?: string;
+  ts: number; // epoch ms of first detection in this window
+}
+
+async function loadStoredHits(): Promise<StoredHit[]> {
+  try {
+    return JSON.parse(await fs.readFile(HITS_FILE, 'utf8')) as StoredHit[];
+  } catch { return []; }
+}
+
+async function mergeAndSaveHits(incoming: StoredHit[]): Promise<StoredHit[]> {
+  if (!incoming.length) return await loadStoredHits();
+  const cutoff = Date.now() - HITS_TTL_MS;
+  const existing = (await loadStoredHits()).filter(h => h.ts > cutoff);
+  const byId = new Map(existing.map(h => [h.id, h]));
+  for (const hit of incoming) byId.set(hit.id, hit);
+  const merged = [...byId.values()];
+  try { await fs.writeFile(HITS_FILE, JSON.stringify(merged)); } catch { /* ignore */ }
+  return merged;
+}
 
 /**
  * OSIRIS — Strategic Thermal AOIs.
@@ -250,19 +285,85 @@ function fireHit(fires: Fire[], lat: number, lng: number, radiusKm: number) {
   return count > 0 ? { count, maxFrp: Math.round(maxFrp * 10) / 10, latest: latest.trim() } : null;
 }
 
+// Generic words to strip when extracting site-name keywords for Telegram matching.
+// Only location-specific words (city/river/person names) are used for matching.
+const GENERIC_SITE_WORDS = new Set([
+  'base', 'hub', 'yard', 'rail', 'naval', 'terminal', 'refinery', 'depot',
+  'logistics', 'facility', 'junction', 'station', 'plant', 'occupied',
+  'marshalling', 'airfield', 'bomber', 'transport', 'combat', 'training',
+  'production', 'repair', 'heavy', 'strategic', 'airbase',
+]);
+
+function siteKeywords(name: string): string[] {
+  return name
+    .replace(/\(.*?\)/g, '')
+    .split(/[\s,\/\-]+/)
+    .map(w => w.toLowerCase().trim())
+    .filter(w => w.length > 3 && !GENERIC_SITE_WORDS.has(w));
+}
+
+// Convert a TgMessage to a NewsItem for the existing news pipeline.
+// Uses oblast matching for coordinates — oblast centroid level, deduplicated by cell.
+// Returns null when no oblast can be inferred (message stays useful for site augmentation only).
+function tgToNewsItem(msg: TgMessage): NewsItem | null {
+  const oblasts = matchOblasts(msg.text);
+  if (!oblasts.length) return null;
+  const places: [number, number][] = oblasts.map(o => [o.coords[1], o.coords[0]]); // [lat, lng]
+  return {
+    title: msg.text.slice(0, 120).replace(/\n/g, ' '),
+    description: msg.text,
+    source: `t.me/${msg.channel}`,
+    side: 'ua',
+    coords: places[0],
+    coords_default: false,
+    places: places.length > 1 ? places : undefined,
+    hasVideo: false,
+  };
+}
+
 export async function GET(req: Request) {
   try {
-    const [fires, news] = await Promise.all([fetchTheaterFires(), fetchNews(req)]);
+    const [fires, news, tgCorpus] = await Promise.all([
+      fetchTheaterFires(),
+      fetchNews(req),
+      getThreatCorpus(),
+    ]);
+
+    // Pre-filter Telegram corpus: keep only strike-related messages that are not
+    // territorial-advance or interception-only reports (same gates as RSS news).
+    const tgStrike = tgCorpus.filter(msg => {
+      const fake: NewsItem = { title: msg.text.slice(0, 120), description: msg.text };
+      return isStrikeRelated(fake) && !isTerritorialAdvance(fake) && !isInterceptionOnly(fake);
+    });
 
     const aois = [];
 
     // Sites: always emitted; `hit` flips when a fire is within range.
+    // Telegram strike messages are matched against site keywords and surfaced as
+    // additional sources in the popup — adding fast-twitch Telegram intel to site markers.
     for (const s of SITES) {
       const h = fireHit(fires, s.lat, s.lng, SITE_RADIUS_KM);
+      const keywords = siteKeywords(s.name);
+      const tgSources = keywords.length > 0
+        ? tgStrike
+            .filter(msg => keywords.some(k => msg.text.toLowerCase().includes(k)))
+            .slice(0, 4)
+            .map(msg => ({
+              source: `t.me/${msg.channel}`,
+              side: 'ua',
+              title: msg.text.slice(0, 120).replace(/\n/g, ' '),
+              snippet: msg.text.slice(0, 200).replace(/\n/g, ' '),
+            }))
+        : [];
+      const tgText = tgSources.map(s => s.snippet).join(' ');
       aois.push({
         id: s.id, category: s.category, name: s.name, lat: s.lat, lng: s.lng,
         hit: !!h, fireCount: h?.count ?? 0, maxFrp: h?.maxFrp ?? 0, latest: h?.latest ?? null,
         confidence: h ? confidenceOf(h.count, h.maxFrp) : null,
+        sources: tgSources,
+        videoConfirmed: false,
+        bilateral: false,
+        weapon: tgText ? (detectWeapon(tgText) ?? undefined) : undefined,
       });
     }
 
@@ -279,8 +380,49 @@ export async function GET(req: Request) {
       lat: number; lng: number; hit: boolean; fireCount: number; maxFrp: number; latest: string | null;
       confidence: Confidence; sources: Contributor[]; bilateral: boolean; videoConfirmed: boolean; weapon?: string;
     };
+    // Persist fire-confirmed site hits (48-hour rolling log) and annotate every site
+    // AOI with lastHit* fields so the popup can show "Last hit: Xh ago" even after
+    // the 12-hour FIRMS active-fire window has expired.
+    const currentHits: StoredHit[] = aois
+      .filter((a: any) => a.category !== 'news' && a.hit)
+      .map((a: any) => ({
+        id: a.id, name: a.name, category: a.category,
+        lat: a.lat, lng: a.lng,
+        confidence: a.confidence, maxFrp: a.maxFrp, fireCount: a.fireCount,
+        latest: a.latest, weapon: a.weapon,
+        ts: Date.now(),
+      }));
+    const allHits = await mergeAndSaveHits(currentHits);
+    const hitById = new Map(allHits.map((h: StoredHit) => [h.id, h]));
+    for (const aoi of aois as any[]) {
+      if (aoi.category === 'news') continue;
+      const h = hitById.get(aoi.id);
+      if (h && !aoi.hit) {
+        // Site is not currently burning but has a recent hit in history
+        aoi.lastHitTs   = h.ts;
+        aoi.lastHitConf = h.confidence;
+        aoi.lastHitFrp  = h.maxFrp;
+        aoi.lastHitWeapon = h.weapon;
+      } else if (aoi.hit) {
+        // Currently hit — record when we first confirmed it
+        const prev = hitById.get(aoi.id);
+        aoi.lastHitTs   = prev?.ts ?? Date.now();
+        aoi.lastHitConf = aoi.confidence;
+        aoi.lastHitFrp  = aoi.maxFrp;
+        aoi.lastHitWeapon = aoi.weapon;
+      }
+    }
+
+    // Merge Telegram strike messages (with oblast-level coords) into the news pipeline.
+    // Each TgMessage that names a UA oblast becomes a NewsItem at that centroid;
+    // the same isStrikeRelated / deduplication / fire-crossref logic applies.
+    const tgNewsItems: NewsItem[] = tgStrike
+      .map(tgToNewsItem)
+      .filter((item): item is NewsItem => item !== null);
+    const allNews = [...news, ...tgNewsItems];
+
     const newsByCell = new Map<string, NewsAoi>();
-    for (const n of news) {
+    for (const n of allNews) {
       if (!isStrikeRelated(n) || isTerritorialAdvance(n) || isInterceptionOnly(n)) continue;
       const candidates = (n.places && n.places.length)
         ? n.places
