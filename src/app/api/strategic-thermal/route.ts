@@ -79,6 +79,7 @@ const SITES: Site[] = [
   { id: 'naval-mariupol', name: 'Mariupol port (occupied)', category: 'naval', lat: 47.10, lng: 37.57 },
   // ── Power infrastructure ──
   { id: 'pwr-zugres', name: 'Zuivska TPS — Zugres (Donetsk)', category: 'power', lat: 48.01, lng: 38.51 },
+  { id: 'pwr-simferopol-tes', name: 'Simferopol TES (Crimea CHP)', category: 'power', lat: 44.98, lng: 34.07 },
   // ── Oil storage (bilateral-confirmed strikes) ──
   { id: 'oil-ust-labinsk', name: 'Ust-Labinsk oil depot (Kuban)', category: 'oil', lat: 45.22, lng: 39.71 },
   { id: 'oil-semykolod', name: 'Semykolodiaznaya oil depot (Crimea)', category: 'oil', lat: 45.20, lng: 33.78 },
@@ -91,6 +92,9 @@ const SITES: Site[] = [
   { id: 'oil-kuibyshev-samara', name: 'Kuibyshev refinery (Samara, Rosneft)', category: 'oil', lat: 53.21, lng: 50.15 },
   { id: 'oil-nps-vtoroye', name: 'NPS Vtoroye — Transneft pipeline (Vladimir Oblast)', category: 'oil', lat: 56.40, lng: 41.85 },
   { id: 'oil-kizlyurt-gas', name: 'Gas infrastructure (Kizlyurt, Dagestan)', category: 'oil', lat: 43.21, lng: 46.87 },
+  // ── Petrochemical / military-industrial (struck June 2026) ──
+  { id: 'ind-tolyattikauchuk', name: 'Tolyattikauchuk (Samara Oblast — synthetic rubber for armour/aviation)', category: 'oil', lat: 53.50, lng: 49.38 },
+  { id: 'ind-nizhnekamskneftekhim', name: 'Nizhnekamskneftekhim (Tatarstan — polymers/rubber for VPK)', category: 'oil', lat: 55.64, lng: 51.55 },
 ];
 
 interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; ts: number; }
