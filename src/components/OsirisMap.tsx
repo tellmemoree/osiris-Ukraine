@@ -345,8 +345,14 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'airfield', '#00E5FF', 'oil', '#FF9500', 'rail', '#FFD700',
         'logistics', '#FFA500', 'naval', '#4FC3F7', 'power', '#FF6B00',
         'ammo', '#FF3D3D', 'news', '#D4AF37', '#FF6B00'];
+      // Glow radius scales with FRP: low-FRP fires get base radius, high-FRP
+      // (depot/refinery infernos) bloom larger so they read from low zoom.
       map.addLayer({ id: 'thermal-aoi-glow', type: 'circle', source: 'thermal-aoi', paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 16, 10, 24] as any,
+        'circle-radius': ['*',
+          ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 16, 10, 24],
+          ['interpolate', ['linear'], ['coalesce', ['get', 'maxFrp'], 0],
+            0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5],
+        ] as any,
         'circle-color': thermalCatColor,
         'circle-opacity': ['case', ['get', 'hit'], 0.12, 0.04] as any,
         'circle-blur': 1,
@@ -1534,10 +1540,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     const cutoff = new Date();
     const cutoffMs = cutoff.getTime();
     const all: any[] = activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi : [];
+    const firesOnly = activeLayers.thermal_aoi_fires_only;
     const visible = all.filter((a: any) => {
+      if (firesOnly && !a.hit) return false; // hide cold sites when fires-only is on
       if (!a.latest) {
-        if (a.category === 'news') return true; // news-only sites always visible in live mode
-        return true; // non-news sites (airfield/oil/etc.) always show
+        if (a.category === 'news') return true;
+        return true;
       }
       const parts = (a.latest as string).trim().split(' ');
       if (parts.length < 2) return true;
@@ -1558,7 +1566,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         sources: a.sources ? JSON.stringify(a.sources) : '[]',
       },
     })));
-  }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, setGeo]);
+  }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, activeLayers.thermal_aoi_fires_only, setGeo]);
 
   useEffect(() => {
     if (!mapReady) return;
