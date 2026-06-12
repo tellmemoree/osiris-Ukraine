@@ -494,7 +494,11 @@ export async function GET(req: Request) {
     const newsByCell = new Map<string, NewsAoi>();
     for (const n of allNews) {
       if (!isStrikeRelated(n) || isTerritorialAdvance(n) || isInterceptionOnly(n)) continue;
-      const candidates = (n.places && n.places.length)
+      // n.places = ALL cities the article names (gazetteer scan of full body) — often
+      // includes incidental context cities, not just the actual strike location.
+      // n.coords = primary / most-specific location (single best match).
+      const isFromPlaces = !!(n.places && n.places.length);
+      const candidates = isFromPlaces
         ? n.places
         : (n.coords && !n.coords_default ? [n.coords] : []);
       const seenThisArticle = new Set<string>();
@@ -504,14 +508,23 @@ export async function GET(req: Request) {
         if (seenThisArticle.has(key)) continue; // one article contributes one marker per place
         seenThisArticle.add(key);
         const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
-        // Without satellite corroboration, only show a marker when the article names a
-        // specific strategic infrastructure type. Civilian incidents, direction/sector
-        // reports ("Запорожское направление"), meta-headlines ("several cities hit"), and
-        // military-exhibition pieces have no business appearing as unconfirmed AOIs.
-        // hasVideo is intentionally NOT a bypass here — video of a drone combat strike
-        // at a front sector doesn't mean we should pin a marker to that sector centroid.
-        // Video is a confidence/badge signal only.
-        if (!h && !hasStrategicTarget(n)) continue;
+        // FRP floor for fire-confirmed news markers. Background fires (agriculture,
+        // industrial flare, stubble burn) typically run < 1.5 MW — too weak to confirm
+        // a strike. Only fires above this floor count as corroboration.
+        const meaningfulHit = h && h.maxFrp >= 1.5 ? h : null;
+        // Gate logic differs by coord source:
+        //   n.places coords: ALL cities named in the article body, including incidental
+        //     context cities. hasStrategicTarget fires on the whole article, not this
+        //     specific location, so it cannot disambiguate. Require a meaningful fire
+        //     hit. The curated-site proximity merge above already handles the real target
+        //     (e.g. "Samara" in a Kuibyshev-refinery article → merges into the site dot).
+        //   n.coords (primary location): unconfirmed-strategic markers still allowed for
+        //     single-location articles that name a specific strategic infrastructure type.
+        if (isFromPlaces) {
+          if (!meaningfulHit) continue;
+        } else {
+          if (!meaningfulHit && !hasStrategicTarget(n)) continue;
+        }
         const articleText = `${n.title || ''} ${n.description || ''}`;
         const snippet = extractBestSnippet(n.title || '', n.description || '');
         const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220), hasVideo: n.hasVideo, weapon: detectWeapon(articleText) ?? undefined, snippet };
@@ -540,13 +553,13 @@ export async function GET(req: Request) {
 
         const existing = newsByCell.get(key);
         if (existing) {
-          // Upgrade news-only → fire-confirmed if this pass has a hit
-          if (h && !existing.hit) {
+          // Upgrade news-only → fire-confirmed only on a meaningful fire hit
+          if (meaningfulHit && !existing.hit) {
             existing.hit = true;
-            existing.fireCount = h.count;
-            existing.maxFrp = h.maxFrp;
-            existing.latest = h.latest;
-            existing.confidence = confidenceOf(h.count, h.maxFrp);
+            existing.fireCount = meaningfulHit.count;
+            existing.maxFrp = meaningfulHit.maxFrp;
+            existing.latest = meaningfulHit.latest;
+            existing.confidence = confidenceOf(meaningfulHit.count, meaningfulHit.maxFrp);
           }
           if (!existing.sources.some(s => s.source === contributor.source && s.title === contributor.title)) {
             existing.sources.push(contributor);
@@ -569,11 +582,11 @@ export async function GET(req: Request) {
           continue;
         }
         const initVideo = !!n.hasVideo;
-        const initConf: Confidence = h ? confidenceOf(h.count, h.maxFrp) : (initVideo ? 'low' : 'news');
+        const initConf: Confidence = meaningfulHit ? confidenceOf(meaningfulHit.count, meaningfulHit.maxFrp) : (initVideo ? 'low' : 'news');
         newsByCell.set(key, {
           id: `news-${newsByCell.size + 1}`, category: 'news', name: contributor.snippet || contributor.title || 'News report',
           source: n.source, side: n.side, link: n.link, lat, lng,
-          hit: !!h, fireCount: h?.count ?? 0, maxFrp: h?.maxFrp ?? 0, latest: h?.latest ?? null,
+          hit: !!meaningfulHit, fireCount: meaningfulHit?.count ?? 0, maxFrp: meaningfulHit?.maxFrp ?? 0, latest: meaningfulHit?.latest ?? null,
           confidence: initConf,
           sources: [contributor], bilateral: false, videoConfirmed: initVideo, weapon: contributor.weapon,
         });
