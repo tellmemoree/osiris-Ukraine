@@ -37,7 +37,7 @@ const UA_CHANNELS = [
   // Ukrainian-language (Cyrillic)
   'suspilne_news', 'hromadske_ua', 'truexanewsua', 'serhii_flash',
   'operativnoZSU', 'butusovplus', 'Tsaplienko', 'lachentyt',
-  'ssternenko', 'informnapalm',
+  'ssternenko', 'informnapalm', 'gruntmedia',
 ];
 
 // Russian milblogger / MoD channels — monitored for the adversary picture.
@@ -227,6 +227,10 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'toropets': [56.500, 31.633], 'торопец': [56.500, 31.633], 'торопц': [56.500, 31.633],
   'tikhoretsk': [45.856, 40.126], 'тихорецк': [45.856, 40.126],
   'dyagilevo': [54.643, 39.570], 'olenya': [68.152, 33.464],
+  // Nizhnekamsk industrial cluster (TANECO + TAIF-NK + Nizhnekamskneftekhim — struck June 2026)
+  'nizhnekamsk': [55.64, 51.83], 'нижнекамск': [55.64, 51.83], 'нижнєкамськ': [55.64, 51.83],
+  'taneco': [55.77, 51.88], 'танеко': [55.77, 51.88],
+  'taif-nk': [55.64, 51.82], 'таіф-нк': [55.64, 51.82], 'taif': [55.64, 51.82], 'таіф': [55.64, 51.82],
   // Maritime / sea areas (ships in Black/Azov Sea are frequent strike targets)
   'black sea': [43.300, 33.800], 'чорне море': [43.300, 33.800], 'чёрное море': [43.300, 33.800],
   'azov sea': [46.200, 37.500], 'azov': [46.200, 37.500],
