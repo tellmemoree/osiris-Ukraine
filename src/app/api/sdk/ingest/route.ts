@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'node:crypto';
 
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
@@ -28,14 +29,35 @@ if (!globalForSDK.sdkIngestLog) {
   globalForSDK.sdkIngestLog = [];
 }
 
-// Simple API key validation (in production, use proper auth)
-const VALID_KEYS = new Set([
-  process.env.SDK_INGEST_KEY || 'polybolos-dev-key',
-  'lattice-integration-key',
-]);
+// API key auth. The key MUST be supplied via SDK_INGEST_KEY — there is no
+// baked-in fallback or backdoor key. If the env var is unset the endpoint is
+// disabled (fail closed) rather than accepting a default/public key.
+const INGEST_KEY = process.env.SDK_INGEST_KEY || '';
+
+// Cap on distinct entities held in the in-memory store to bound memory use
+// against a flood of unique ids. Oldest entries are evicted first.
+const MAX_ENTITIES = 5000;
+
+function keyMatches(provided: unknown): boolean {
+  if (!INGEST_KEY || typeof provided !== 'string') return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(INGEST_KEY);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
 
 export async function POST(request: NextRequest) {
   try {
+    // Fail closed: no configured key means the ingest endpoint is disabled.
+    if (!INGEST_KEY) {
+      return NextResponse.json({
+        accepted: 0,
+        rejected: 0,
+        errors: ['Ingest endpoint disabled: SDK_INGEST_KEY is not configured'],
+        timestamp: new Date().toISOString(),
+      }, { status: 503 });
+    }
+
     const body = await request.json();
 
     // Validate structure
@@ -48,8 +70,8 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Validate API key
-    if (!VALID_KEYS.has(body.apiKey)) {
+    // Validate API key (constant-time comparison)
+    if (!keyMatches(body.apiKey)) {
       return NextResponse.json({
         accepted: 0,
         rejected: 0,
@@ -102,7 +124,18 @@ export async function POST(request: NextRequest) {
         },
       };
 
-      globalForSDK.sdkEntityStore.set(normalized.id, normalized);
+      // Bound memory: evict oldest entries once the store is full (Map keeps
+      // insertion order, so the first key is the oldest). Updates to an
+      // existing id don't grow the store.
+      const store = globalForSDK.sdkEntityStore;
+      if (!store.has(normalized.id)) {
+        while (store.size >= MAX_ENTITIES) {
+          const oldest = store.keys().next().value;
+          if (oldest === undefined) break;
+          store.delete(oldest);
+        }
+      }
+      store.set(normalized.id, normalized);
       accepted++;
     }
 
