@@ -61,6 +61,7 @@ interface Site { id: string; name: string; category: Exclude<Category, 'news'>; 
 const BBOX = { latMin: 43, latMax: 71, lngMin: 19, lngMax: 66 };
 const SITE_RADIUS_KM = 12;   // airfields/yards sprawl; be inclusive
 const NEWS_RADIUS_KM = 15;   // news coords are city-level (and jittered)
+const FIRE_ACTIVE_MS = 12 * 60 * 60 * 1000;  // fires older than 12h don't sustain a "hit"
 
 const SITES: Site[] = [
   // ── Strategic / frontline airfields ──
@@ -77,6 +78,12 @@ const SITES: Site[] = [
   { id: 'af-taganrog', name: 'Taganrog', category: 'airfield', lat: 47.20, lng: 38.85 },
   { id: 'af-kursk', name: 'Kursk-Vostochny', category: 'airfield', lat: 51.75, lng: 36.30 },
   { id: 'af-berdyansk', name: 'Berdyansk (occupied)', category: 'airfield', lat: 46.82, lng: 36.75 },
+  { id: 'af-shaykovka', name: 'Shaykovka (Tu-22M3 base, Kaluga)', category: 'airfield', lat: 54.23, lng: 34.37 },
+  { id: 'af-pskov', name: 'Pskov/Kresty (Il-76 transport base)', category: 'airfield', lat: 57.78, lng: 28.40 },
+  { id: 'af-marinovka', name: 'Marinovka (Su-34/Su-24 base, Volgograd)', category: 'airfield', lat: 48.64, lng: 43.79 },
+  { id: 'af-lipetsk', name: 'Lipetsk-2 (Su-27/Su-30 combat training)', category: 'airfield', lat: 52.63, lng: 39.44 },
+  { id: 'af-kazan-kapo', name: 'Kazan KAPO (Tu-160/Tu-22M3 production & repair)', category: 'airfield', lat: 55.86, lng: 49.12 },
+  { id: 'af-seshcha', name: 'Seshcha (An-124 heavy-lift transport, Bryansk)', category: 'airfield', lat: 53.72, lng: 33.34 },
   // ── Rail hubs / marshalling yards ──
   { id: 'rl-rostov', name: 'Rostov-on-Don (rail hub)', category: 'rail', lat: 47.24, lng: 39.71 },
   { id: 'rl-bataysk', name: 'Bataysk marshalling yard', category: 'rail', lat: 47.14, lng: 39.75 },
@@ -111,24 +118,40 @@ const SITES: Site[] = [
   { id: 'naval-kronstadt', name: 'Kronstadt naval base (Baltic)', category: 'naval', lat: 59.99, lng: 29.76 },
   { id: 'naval-berdyansk', name: 'Berdyansk port (occupied)', category: 'naval', lat: 46.75, lng: 36.80 },
   { id: 'naval-mariupol', name: 'Mariupol port (occupied)', category: 'naval', lat: 47.10, lng: 37.57 },
+  { id: 'naval-novorossiysk', name: 'Novorossiysk naval base (Black Sea Fleet HQ)', category: 'naval', lat: 44.72, lng: 37.83 },
+  { id: 'naval-kerch-zaliv', name: 'Zaliv shipyard Kerch (corvette construction, Crimea)', category: 'naval', lat: 45.26, lng: 36.42 },
   // ── Power infrastructure ──
   { id: 'pwr-zugres', name: 'Zuivska TPS — Zugres (Donetsk)', category: 'power', lat: 48.01, lng: 38.51 },
+  { id: 'pwr-simferopol-tes', name: 'Simferopol TES (Crimea CHP)', category: 'power', lat: 44.98, lng: 34.07 },
   // ── Oil storage (bilateral-confirmed strikes) ──
   { id: 'oil-ust-labinsk', name: 'Ust-Labinsk oil depot (Kuban)', category: 'oil', lat: 45.22, lng: 39.71 },
   { id: 'oil-semykolod', name: 'Semykolodiaznaya oil depot (Crimea)', category: 'oil', lat: 45.20, lng: 33.78 },
   // ── Ammunition / arsenal ──
   { id: 'ammo-leningrad-arsenal', name: 'Leningrad Oblast naval arsenal', category: 'ammo', lat: 59.90, lng: 29.60 },
+  { id: 'ammo-tambov', name: 'Tambov gunpowder plant / Kotovsk (propellant, artillery powder)', category: 'ammo', lat: 52.58, lng: 41.52 },
+  { id: 'ammo-bryansk-chem', name: 'Bryansk Chemical Plant / Seltso (rocket propellant, phosphorous)', category: 'ammo', lat: 53.37, lng: 34.10 },
   // ── Defense-industrial (direct strike targets, June 2026) ──
   { id: 'ind-arsenal-spb', name: 'Arsenal defense plant (St. Petersburg)', category: 'ammo', lat: 59.96, lng: 30.37 },
   { id: 'ind-vniir-cheboksary', name: 'VNIIR-Progress (Cheboksary — drives/hydraulics for artillery/Iskander)', category: 'ammo', lat: 56.14, lng: 47.22 },
+  { id: 'ind-alabuga', name: 'Alabuga SEZ / Yelabuga (Shahed/Geran-2 drone factory, Tatarstan)', category: 'ammo', lat: 55.84, lng: 52.05 },
+  { id: 'ind-kupol-izhevsk', name: 'Kupol plant Izhevsk (Tor SAM + Garpia-A1 drone production)', category: 'ammo', lat: 56.84, lng: 53.18 },
   // ── Oil / energy (new or previously unnamed targets) ──
   { id: 'oil-kuibyshev-samara', name: 'Kuibyshev refinery (Samara, Rosneft)', category: 'oil', lat: 53.21, lng: 50.15 },
   { id: 'oil-nps-vtoroye', name: 'NPS Vtoroye — Transneft pipeline (Vladimir Oblast)', category: 'oil', lat: 56.40, lng: 41.85 },
   { id: 'oil-kizlyurt-gas', name: 'Gas infrastructure (Kizlyurt, Dagestan)', category: 'oil', lat: 43.21, lng: 46.87 },
+  { id: 'oil-yaroslavl', name: 'Slavneft-YANOS refinery (Yaroslavl, 15M t/yr)', category: 'oil', lat: 57.55, lng: 39.81 },
+  { id: 'oil-kapotnya', name: 'Kapotnya refinery (Moscow, 40% of region fuel)', category: 'oil', lat: 55.64, lng: 37.80 },
+  { id: 'oil-ufa', name: 'Bashneft-UNPZ / Novoil refinery complex (Ufa, Bashkortostan)', category: 'oil', lat: 54.86, lng: 56.09 },
+  // ── Petrochemical / military-industrial (struck June 2026) ──
+  { id: 'ind-tolyattikauchuk', name: 'Tolyattikauchuk (Samara Oblast — synthetic rubber for armour/aviation)', category: 'oil', lat: 53.50, lng: 49.38 },
+  { id: 'ind-nizhnekamskneftekhim', name: 'Nizhnekamskneftekhim (Tatarstan — polymers/rubber for VPK)', category: 'oil', lat: 55.64, lng: 51.55 },
+  // ── Nizhnekamsk refinery complex (struck June 2026, confirmed by UA General Staff) ──
+  { id: 'oil-taneco-nizhnekamsk', name: 'TANECO refinery (Nizhnekamsk, Tatarstan — 15M t/yr, TAIF Group)', category: 'oil', lat: 55.77, lng: 51.88 },
+  { id: 'oil-taifnk-nizhnekamsk', name: 'TAIF-NK refinery (Nizhnekamsk, Tatarstan — naphtha/fuel oil)', category: 'oil', lat: 55.64, lng: 51.82 },
 ];
 
-interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; }
-interface NewsItem { title?: string; description?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; places?: [number, number][]; hasVideo?: boolean; }
+interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; ts: number; }
+interface NewsItem { title?: string; description?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; places?: [number, number][]; place_names?: string[]; hasVideo?: boolean; }
 
 // Equirectangular distance (km) — accurate enough at this scale, cheap in a hot loop.
 function distKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
@@ -159,9 +182,12 @@ async function fetchTheaterFires(): Promise<Fire[]> {
         const lat = parseFloat(c[li]), lng = parseFloat(c[gi]);
         if (isNaN(lat) || isNaN(lng)) continue;
         if (lat < BBOX.latMin || lat > BBOX.latMax || lng < BBOX.lngMin || lng > BBOX.lngMax) continue;
-        fires.push({ lat, lng, frp: parseFloat(c[fi]) || 0, brightness: parseFloat(c[bi]) || 0, date: c[di] || '', time: c[ti] || '' });
+        const acqTime = (c[ti] || '0000').padStart(4, '0');
+        const ts = new Date(`${c[di]}T${acqTime.slice(0, 2)}:${acqTime.slice(2, 4)}:00Z`).getTime();
+        fires.push({ lat, lng, frp: parseFloat(c[fi]) || 0, brightness: parseFloat(c[bi]) || 0, date: c[di] || '', time: c[ti] || '', ts: isNaN(ts) ? Date.now() : ts });
       }
-      return fires;
+      const cutoff = Date.now() - FIRE_ACTIVE_MS;
+      return fires.filter(f => f.ts >= cutoff);
     } catch { continue; }
   }
   return [];
@@ -192,7 +218,7 @@ const STRIKE_TERMS = [
   'хлопк',  // Russian informal "bang" — euphemism used by RU state/milblogs for explosions
 ];
 
-const DIGEST_TITLE_RE = /^(главное за|сводка|зведення|дайджест|итоги дня|підсумки|обзор за|за сутки|за добу|morning brief|evening brief|daily (round|update|brief|wrap))/i;
+const DIGEST_TITLE_RE = /^(главное за|сводка|зведення|дайджест|итоги дня|підсумки|обзор за|за сутки|за добу|вчора та у ніч|вчора і в ніч|за минулу добу|за минулу ніч|morning brief|evening brief|daily (round|update|brief|wrap))/i;
 const HISTORICAL_YEAR_RE = /\b(201[4-9]|202[0-4])\b/;
 
 function isStrikeRelated(item: NewsItem): boolean {
@@ -229,9 +255,10 @@ function isTerritorialAdvance(item: NewsItem): boolean {
 // them UNLESS the article also contains ground-impact evidence (explosion, fire,
 // hit, damage) that suggests at least one munition got through.
 const INTERCEPT_STEMS = [
-  'shot down', 'were shot', 'дежурными средствами', 'средствами пво',
+  'shot down', 'were shot', 'intercept', 'downed', 'knocked down',
+  'дежурными средствами', 'средствами пво',
   'збили', 'знищили засоба', 'перехват', 'перехоплен',
-  'сбит', 'сбиты', 'сбито', 'збит', 'збиті', 'збито',
+  'сбит', 'сбиты', 'сбито', 'сбили', 'збит', 'збиті', 'збито',
 ];
 const GROUND_IMPACT_STEMS = [
   'вибух', 'взрыв', 'пожеж', 'пожар', 'горит', 'горить',
@@ -244,6 +271,32 @@ function isInterceptionOnly(item: NewsItem): boolean {
   return !GROUND_IMPACT_STEMS.some(w => t.includes(w));
 }
 
+
+// For unconfirmed (no-fire) markers, the article must name a specific infrastructure
+// type — not just mention drones/missiles in passing. This filters civilian-incident
+// articles and military-exhibition pieces (e.g. "FPV drones at Patriot Park") from
+// generating unverified markers without any satellite corroboration.
+const STRATEGIC_TARGET_TERMS = [
+  // EN
+  'refinery', 'oil depot', 'fuel depot', 'ammo depot', 'ammunition depot', 'arms depot',
+  'arsenal', 'airfield', 'airbase', 'air base', 'naval facilit', 'shipyard',
+  'oil terminal', 'fuel terminal', 'power plant', 'power station', 'substation',
+  'marshalling yard', 'rail yard', 'rail hub', 'pipeline', 'storage facility',
+  // UA
+  'нпз', 'нафтоба', 'нафтосховищ', 'нафтопереробн', 'паливн',
+  'аеродром', 'авіабаза', 'авіазавод', 'залізничн вузол', 'сортувальн',
+  'електростанц', 'теплоелектростанц', 'підстанц', 'трансформаторн',
+  'склад боєприпасів', 'арсенал', 'сховищ пально', 'нафтопровід',
+  // RU
+  'нефтеба', 'нефтехран', 'нефтезавод',
+  'аэродром', 'авиабаза', 'судоремонтн', 'верфь', 'судостроит',
+  'сортировочн', 'электростанц', 'теплоэлектростанц', 'подстанц',
+  'склад боеприпасов', 'нефтепровод', 'хранилищ топлив',
+];
+function hasStrategicTarget(item: NewsItem): boolean {
+  const t = `${item.title || ''} ${item.description || ''}`.toLowerCase();
+  return STRATEGIC_TARGET_TERMS.some(w => t.includes(w));
+}
 
 // Weapon type inferred from article text. Priority: specific systems → generic class.
 // Returns a short display label or null when nothing matches.
@@ -321,6 +374,38 @@ function tgToNewsItem(msg: TgMessage): NewsItem | null {
   };
 }
 
+// Score a sentence by how informative it is about a strike on a strategic target.
+function scoreSentence(s: string): number {
+  const lower = s.toLowerCase();
+  let score = 0;
+  if (STRATEGIC_TARGET_TERMS.some(w => lower.includes(w))) score += 4;
+  if (STRIKE_TERMS.some(w => lower.includes(w))) score += 2;
+  for (const [, terms] of WEAPON_PATTERNS) {
+    if (terms.some(w => lower.includes(w))) { score += 2; break; }
+  }
+  return score;
+}
+
+// Extract the most informative sentence from a Telegram post about a strike.
+// When `placeName` is provided (the gazetteer keyword that matched this coord),
+// prefer sentences that mention that place — so a Belgorod-coord marker shows
+// the sentence about Belgorod, not the Kuibyshev-refinery sentence from the
+// same multi-location article.
+function extractBestSnippet(title: string, desc: string, placeName?: string): string {
+  const sentences = `${title}\n${desc}`.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 12);
+  let best = title.slice(0, 140);
+  let bestScore = -1;
+  const nameLower = placeName?.toLowerCase();
+  for (const s of sentences) {
+    const lower = s.toLowerCase();
+    let score = scoreSentence(s);
+    // Strongly prefer sentences that mention this specific place.
+    if (nameLower && lower.includes(nameLower)) score += 6;
+    if (score > bestScore) { bestScore = score; best = s.slice(0, 140); }
+  }
+  return best;
+}
+
 export async function GET(req: Request) {
   try {
     const [fires, news, tgCorpus] = await Promise.all([
@@ -370,11 +455,11 @@ export async function GET(req: Request) {
     // News: only STRIKE-RELATED articles that are NOT territorial-advance reports,
     // cross-referenced at EVERY place they name (one article often lists several struck
     // targets — but only places with a corroborating fire within NEWS_RADIUS_KM surface,
-    // which is the whole point of the heuristic). Co-located corroborations (same ~0.05°
-    // /~5 km cell — different channels, or one strike reported by both sides) MERGE into a
+    // which is the whole point of the heuristic). Co-located corroborations (same ~0.1°
+    // /~11 km cell — different channels, or one strike reported by both sides) MERGE into a
     // single AOI that carries EVERY contributing source, instead of whichever article was
     // processed first silently winning (and mis-attributing) the marker.
-    type Contributor = { source?: string; side?: string; link?: string; title?: string; description?: string; hasVideo?: boolean; weapon?: string };
+    type Contributor = { source?: string; side?: string; link?: string; title?: string; description?: string; hasVideo?: boolean; weapon?: string; snippet?: string };
     type NewsAoi = {
       id: string; category: 'news'; name: string; source?: string; side?: string; link?: string;
       lat: number; lng: number; hit: boolean; fireCount: number; maxFrp: number; latest: string | null;
@@ -424,27 +509,75 @@ export async function GET(req: Request) {
     const newsByCell = new Map<string, NewsAoi>();
     for (const n of allNews) {
       if (!isStrikeRelated(n) || isTerritorialAdvance(n) || isInterceptionOnly(n)) continue;
-      const candidates = (n.places && n.places.length)
-        ? n.places
-        : (n.coords && !n.coords_default ? [n.coords] : []);
+      // n.places = ALL cities the article names (gazetteer scan of full body) — often
+      // includes incidental context cities, not just the actual strike location.
+      // n.coords = primary / most-specific location (single best match).
+      const isFromPlaces = !!(n.places && n.places.length);
+      // Pair each place coord with its gazetteer keyword (if available) so the
+      // snippet extractor can prefer sentences that mention this specific location.
+      type Candidate = { lat: number; lng: number; name?: string };
+      const candidates: Candidate[] = isFromPlaces
+        ? (n.places as [number, number][]).map((c, i) => ({ lat: c[0], lng: c[1], name: n.place_names?.[i] }))
+        : (n.coords && !n.coords_default ? [{ lat: n.coords[0], lng: n.coords[1] }] : []);
       const seenThisArticle = new Set<string>();
-      for (const [lat, lng] of candidates) {
+      for (const { lat, lng, name: placeName } of candidates) {
         if (lat < BBOX.latMin || lat > BBOX.latMax || lng < BBOX.lngMin || lng > BBOX.lngMax) continue;
-        const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+        const key = `${lat.toFixed(1)},${lng.toFixed(1)}`;
         if (seenThisArticle.has(key)) continue; // one article contributes one marker per place
         seenThisArticle.add(key);
         const h = fireHit(fires, lat, lng, NEWS_RADIUS_KM);
+        // FRP floor for fire-confirmed news markers. Background fires (agriculture,
+        // industrial flare, stubble burn) typically run < 1.5 MW — too weak to confirm
+        // a strike. Only fires above this floor count as corroboration.
+        const meaningfulHit = h && h.maxFrp >= 1.5 ? h : null;
+        // Gate logic differs by coord source:
+        //   n.places coords: ALL cities named in the article body, including incidental
+        //     context cities. hasStrategicTarget fires on the whole article, not this
+        //     specific location, so it cannot disambiguate. Require a meaningful fire
+        //     hit. The curated-site proximity merge above already handles the real target
+        //     (e.g. "Samara" in a Kuibyshev-refinery article → merges into the site dot).
+        //   n.coords (primary location): unconfirmed-strategic markers still allowed for
+        //     single-location articles that name a specific strategic infrastructure type.
+        if (isFromPlaces) {
+          if (!meaningfulHit) continue;
+        } else {
+          if (!meaningfulHit && !hasStrategicTarget(n)) continue;
+        }
         const articleText = `${n.title || ''} ${n.description || ''}`;
-        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220), hasVideo: n.hasVideo, weapon: detectWeapon(articleText) ?? undefined };
+        const snippet = extractBestSnippet(n.title || '', n.description || '', placeName);
+        const contributor: Contributor = { source: n.source, side: n.side, link: n.link, title: n.title?.slice(0, 120), description: n.description?.slice(0, 220), hasVideo: n.hasVideo, weapon: detectWeapon(articleText) ?? undefined, snippet };
+
+        // Corroboration: if this coord falls within a curated site's radius, merge the
+        // article into the site AOI instead of creating a separate news dot on top of it.
+        const siteAoi = (aois as any[]).find(a => a.category !== 'news' && distKm(lat, lng, a.lat, a.lng) <= SITE_RADIUS_KM);
+        if (siteAoi) {
+          if (!siteAoi.sources.some((s: any) => s.source === contributor.source && s.title === contributor.title)) {
+            siteAoi.sources.push(contributor);
+          }
+          if (h && !siteAoi.hit) {
+            siteAoi.hit = true; siteAoi.fireCount = h.count; siteAoi.maxFrp = h.maxFrp;
+            siteAoi.latest = h.latest; siteAoi.confidence = confidenceOf(h.count, h.maxFrp);
+          }
+          if (contributor.weapon && !siteAoi.weapon) siteAoi.weapon = contributor.weapon;
+          if (contributor.hasVideo && !siteAoi.videoConfirmed) siteAoi.videoConfirmed = true;
+          const bil = siteAoi.sources.some((s: any) => s.side === 'ua') && siteAoi.sources.some((s: any) => s.side === 'ru');
+          if (bil && !siteAoi.bilateral) {
+            siteAoi.bilateral = true;
+            if (siteAoi.hit && siteAoi.confidence && siteAoi.confidence !== 'news')
+              siteAoi.confidence = siteAoi.confidence === 'low' ? 'med' : 'high';
+          }
+          continue;
+        }
+
         const existing = newsByCell.get(key);
         if (existing) {
-          // Upgrade news-only → fire-confirmed if this pass has a hit
-          if (h && !existing.hit) {
+          // Upgrade news-only → fire-confirmed only on a meaningful fire hit
+          if (meaningfulHit && !existing.hit) {
             existing.hit = true;
-            existing.fireCount = h.count;
-            existing.maxFrp = h.maxFrp;
-            existing.latest = h.latest;
-            existing.confidence = confidenceOf(h.count, h.maxFrp);
+            existing.fireCount = meaningfulHit.count;
+            existing.maxFrp = meaningfulHit.maxFrp;
+            existing.latest = meaningfulHit.latest;
+            existing.confidence = confidenceOf(meaningfulHit.count, meaningfulHit.maxFrp);
           }
           if (!existing.sources.some(s => s.source === contributor.source && s.title === contributor.title)) {
             existing.sources.push(contributor);
@@ -467,11 +600,11 @@ export async function GET(req: Request) {
           continue;
         }
         const initVideo = !!n.hasVideo;
-        const initConf: Confidence = h ? confidenceOf(h.count, h.maxFrp) : (initVideo ? 'low' : 'news');
+        const initConf: Confidence = meaningfulHit ? confidenceOf(meaningfulHit.count, meaningfulHit.maxFrp) : (initVideo ? 'low' : 'news');
         newsByCell.set(key, {
-          id: `news-${newsByCell.size + 1}`, category: 'news', name: contributor.title || 'News report',
+          id: `news-${newsByCell.size + 1}`, category: 'news', name: contributor.snippet || contributor.title || 'News report',
           source: n.source, side: n.side, link: n.link, lat, lng,
-          hit: !!h, fireCount: h?.count ?? 0, maxFrp: h?.maxFrp ?? 0, latest: h?.latest ?? null,
+          hit: !!meaningfulHit, fireCount: meaningfulHit?.count ?? 0, maxFrp: meaningfulHit?.maxFrp ?? 0, latest: meaningfulHit?.latest ?? null,
           confidence: initConf,
           sources: [contributor], bilateral: false, videoConfirmed: initVideo, weapon: contributor.weapon,
         });

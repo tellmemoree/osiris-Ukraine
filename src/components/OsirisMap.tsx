@@ -354,21 +354,32 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
             0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5],
         ] as any,
         'circle-color': thermalCatColor,
-        'circle-opacity': ['case', ['get', 'hit'], 0.12, 0.04] as any,
+        'circle-opacity': ['case', ['boolean', ['get', 'confirmed'], false], 0.12, 0.03] as any,
         'circle-blur': 1,
       }});
       map.addLayer({ id: 'thermal-aoi-dots', type: 'circle', source: 'thermal-aoi', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 4, 5, 7, 10, 11] as any,
         'circle-color': thermalCatColor,
-        'circle-opacity': ['case', ['get', 'hit'], 0.9, 0.35] as any,
-        'circle-stroke-width': 1.5,
-        'circle-stroke-color': '#000',
-        'circle-stroke-opacity': 0.4,
+        // unconfirmed: half-opacity; confirmed: near-full
+        'circle-opacity': ['case', ['boolean', ['get', 'confirmed'], false], 0.88, 0.38] as any,
+        'circle-stroke-width': ['case', ['boolean', ['get', 'confirmed'], false], 1.5, 2] as any,
+        // fire-confirmed → black; video-confirmed → gold; unconfirmed → bright amber warning ring
+        'circle-stroke-color': ['case',
+          ['boolean', ['get', 'hit'], false], '#000000',
+          ['boolean', ['get', 'videoConfirmed'], false], '#FFD700',
+          '#FF8C00'] as any,
+        'circle-stroke-opacity': ['case', ['boolean', ['get', 'confirmed'], false], 0.45, 0.9] as any,
       }});
+      // Label confirmed strikes (fire OR video) with the site/article name
       map.addLayer({ id: 'thermal-aoi-label', type: 'symbol', source: 'thermal-aoi', minzoom: 5,
-        filter: ['==', ['get', 'hit'], true],
-        layout: { 'text-field': ['get', 'name'], 'text-size': 9, 'text-offset': [0, 1.8], 'text-anchor': 'top' },
+        filter: ['boolean', ['get', 'confirmed'], false],
+        layout: { 'text-field': ['get', 'name'], 'text-size': 9, 'text-font': ['Open Sans Regular'], 'text-offset': [0, 1.8], 'text-anchor': 'top', 'text-allow-overlap': false },
         paint: { 'text-color': '#FF9500', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+      // Unconfirmed news markers: bright amber "?" centred on the dot — unmissable
+      map.addLayer({ id: 'thermal-aoi-unconfirmed-label', type: 'symbol', source: 'thermal-aoi', minzoom: 4,
+        filter: ['!', ['boolean', ['get', 'confirmed'], false]],
+        layout: { 'text-field': '?', 'text-size': 14, 'text-font': ['Open Sans Bold'], 'text-offset': [0, 0], 'text-anchor': 'center', 'text-allow-overlap': true },
+        paint: { 'text-color': '#FF8C00', 'text-halo-color': '#000', 'text-halo-width': 1.5 }});
       // Territorial Captures — RU red, UA blue.
       map.addLayer({ id: 'capture-glow', type: 'circle', source: 'captures', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 12, 5, 20, 10, 30],
@@ -430,23 +441,56 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-offset': [0, 1.9], 'text-allow-overlap': false,
       }, paint: { 'text-color': '#FF8C00', 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
-      // Drone / UAV Swarms — purple (Telegram-derived, oblast-level).
-      // Note: 'drone-threats' is NOT in the sources array above — it is registered
-      // via explicit addSource() here (with its own initial data shape).
+      // Drone / UAV Swarms — route trail (Telegram-derived, confirmed sightings only).
+      // 'drone-threats' source kept for backward compat (threats array still flows to it).
+      // 'drone-route' carries the LineString + waypoint Points built from drone_waves.
       map.addSource('drone-threats', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      map.addLayer({ id: 'drone-glow', type: 'circle', source: 'drone-threats', paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 12, 5, 20, 10, 30],
-        'circle-color': '#CE93D8', 'circle-opacity': 0.13, 'circle-blur': 1,
-      }});
-      map.addLayer({ id: 'drone-dots', type: 'circle', source: 'drone-threats', paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 5, 5, 8, 10, 12],
-        'circle-color': '#CE93D8', 'circle-opacity': 0.88,
-        'circle-stroke-width': 2, 'circle-stroke-color': '#E040FB', 'circle-stroke-opacity': 0.6,
-      }});
-      map.addLayer({ id: 'drone-label', type: 'symbol', source: 'drone-threats', minzoom: 4, layout: {
-        'text-field': ['concat', 'DRONE ', ['get','regionName']], 'text-size': 9, 'text-font': ['Open Sans Regular'],
-        'text-offset': [0, 1.9], 'text-allow-overlap': false,
-      }, paint: { 'text-color': '#CE93D8', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+      map.addSource('drone-route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({ id: 'drone-route-line', type: 'line', source: 'drone-route',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        paint: { 'line-color': '#CE93D8', 'line-width': 2, 'line-opacity': 0.85, 'line-dasharray': [3, 2] }});
+      map.addLayer({ id: 'drone-route-arrows', type: 'symbol', source: 'drone-route',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: { 'symbol-placement': 'line', 'text-field': '▶', 'text-size': 10, 'text-font': ['Open Sans Regular'], 'symbol-spacing': 80 },
+        paint: { 'text-color': '#E040FB', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+      map.addLayer({ id: 'drone-route-nodes', type: 'circle', source: 'drone-route',
+        filter: ['==', ['geometry-type'], 'Point'],
+        paint: {
+          'circle-radius': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 6, 4],
+          'circle-color': '#CE93D8',
+          'circle-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.8],
+          'circle-stroke-width': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 2.5, 1.5],
+          'circle-stroke-color': ['case', ['boolean', ['get', 'alarmConfirmed'], false], '#FF1744', '#E040FB'],
+          'circle-stroke-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.7],
+        }});
+      map.addLayer({ id: 'drone-route-label', type: 'symbol', source: 'drone-route', minzoom: 4,
+        filter: ['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'isLatest'], true]],
+        layout: { 'text-field': ['concat', 'DRONE ', ['get', 'oblast']], 'text-size': 9, 'text-font': ['Open Sans Regular'], 'text-offset': [0, 1.9], 'text-allow-overlap': false },
+        paint: { 'text-color': '#CE93D8', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // Missile Threat Routes — one route per weapon type (CRUISE, BALLISTIC, KINZHAL, KH22).
+      map.addSource('missile-routes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({ id: 'missile-route-line', type: 'line', source: 'missile-routes',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': 0.8 }});
+      map.addLayer({ id: 'missile-route-arrows', type: 'symbol', source: 'missile-routes',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: { 'symbol-placement': 'line', 'text-field': '▶', 'text-size': 10, 'text-font': ['Open Sans Regular'], 'symbol-spacing': 80 },
+        paint: { 'text-color': ['get', 'color'], 'text-halo-color': '#000', 'text-halo-width': 1 }});
+      map.addLayer({ id: 'missile-route-nodes', type: 'circle', source: 'missile-routes',
+        filter: ['==', ['geometry-type'], 'Point'],
+        paint: {
+          'circle-radius': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 6, 4],
+          'circle-color': ['get', 'color'],
+          'circle-opacity': 0.9,
+          'circle-stroke-width': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 2.5, 1.5],
+          'circle-stroke-color': ['case', ['boolean', ['get', 'alarmConfirmed'], false], '#FF1744', ['get', 'color']],
+          'circle-stroke-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.5],
+        }});
+      map.addLayer({ id: 'missile-route-label', type: 'symbol', source: 'missile-routes', minzoom: 4,
+        filter: ['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'isLatest'], true]],
+        layout: { 'text-field': ['get', 'weaponLabel'], 'text-size': 9, 'text-font': ['Open Sans Regular'], 'text-offset': [0, 1.9], 'text-allow-overlap': false },
+        paint: { 'text-color': ['get', 'color'], 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
       // RU Oblast Alerts — red (Russian border oblast drone/strike incursions).
       // Note: 'ru-air-raids' is NOT in the sources array above — registered explicitly here.
@@ -977,7 +1021,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const coords = (e.features[0].geometry as any).coordinates;
       const catLabel = (p.category || 'site').toUpperCase();
       const catColor = { airfield: '#00E5FF', oil: '#FF9500', rail: '#FFD700', logistics: '#FFA500', naval: '#4FC3F7', power: '#FF6B00', ammo: '#FF3D3D', news: '#D4AF37' }[p.category as string] || '#FF6B00';
-      const confColor = p.confidence === 'high' ? '#00E676' : p.confidence === 'med' ? '#FFD700' : p.confidence === 'low' ? '#888' : '#555';
+      const confColor = p.confidence === 'high' ? '#00E676' : p.confidence === 'med' ? '#FFD700' : p.confidence === 'low' ? '#888' : '#8B7355';
       const weapon = p.weapon || '';
       const weaponColor = weapon === 'MISSILE' ? '#FF4444' : weapon === 'SHAHED' ? '#FF9500' : weapon === 'GLIDE BOMB' ? '#FF6B00' : weapon === 'ARTILLERY' ? '#FFD700' : '';
       const isNews = p.category === 'news';
@@ -987,12 +1031,16 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         const srcs = JSON.parse(p.sources || '[]') as any[];
         if (srcs.length > 0) {
           const first = srcs[0];
-          if (!isNews && first.title) {
-            snippetHtml = `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;font-style:italic;">"${esc((first.title as string).slice(0, 100))}"</div>`;
+          // For site markers that received merged news/Telegram sources, show the best-extracted
+          // snippet from the first contributing article (not just the raw title).
+          if (!isNews && (first.snippet || first.title)) {
+            const text = (first.snippet || first.title) as string;
+            snippetHtml = `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;font-style:italic;">"${esc(text.slice(0, 120))}"</div>`;
           }
-          const linkRows = srcs.filter((s: any) => s.link || s.source).map((s: any) =>
-            `<div style="margin-bottom:3px;line-height:1.4;">${s.link ? `<a href="${safeUrl(s.link)}" target="_blank" style="color:#D4AF37;text-decoration:none;">${esc(s.source)||'source'}</a>` : `<span style="color:#D4AF37;">${esc(s.source)}</span>`}${isNews && s.title ? `<span style="color:#666;font-size:8px;"> — ${esc((s.title as string).slice(0,80))}</span>` : ''}</div>`
-          ).join('');
+          const linkRows = srcs.filter((s: any) => s.link || s.source).map((s: any) => {
+            const label = (s.snippet || s.title) as string | undefined;
+            return `<div style="margin-bottom:3px;line-height:1.4;">${s.link ? `<a href="${safeUrl(s.link)}" target="_blank" style="color:#D4AF37;text-decoration:none;">${esc(s.source)||'source'}</a>` : `<span style="color:#D4AF37;">${esc(s.source)}</span>`}${label ? `<span style="color:#666;font-size:8px;"> — ${esc(label.slice(0,90))}</span>` : ''}</div>`;
+          }).join('');
           sourcesHtml = linkRows ? `<div style="font-size:9px;margin-top:6px;">${linkRows}</div>` : '';
         }
       } catch { /* ignore */ }
@@ -1094,20 +1142,42 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
-    // ── Drone / UAV Swarms (Telegram-derived) ──
-    map.on('click', 'drone-dots', e => {
+    // ── Drone / UAV Swarms — route waypoint nodes ──
+    map.on('click', 'drone-route-nodes', e => {
       if (!e.features?.length) return;
       const p = e.features[0].properties as any;
       const coords = (e.features[0].geometry as any).coordinates;
+      const waveLabel = p.waveIndex > 0 ? ` · Wave ${p.waveIndex + 1}` : '';
       popup(coords, `<div style="${pStyle}border:1px solid rgba(206,147,216,0.45);max-width:300px;">
-        <div style="color:#CE93D8;font-size:13px;font-weight:700;margin-bottom:6px;">🚁 DRONE / UAV SWARM</div>
-        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${esc(p.regionName)||'Unknown region'}</div>
-        <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">${Number(p.count)||1} mention(s) · last 1.5h · OSINT Telegram</div>
+        <div style="color:#CE93D8;font-size:13px;font-weight:700;margin-bottom:6px;">🚁 DRONE / UAV${waveLabel}</div>
+        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${p.oblast||'Unknown region'}</div>
+        <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">Waypoint ${p.sequence||'?'} · last 1.5h · OSINT Telegram</div>
         <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid rgba(206,147,216,0.4);padding-left:6px;">${esc(p.text)}</div>
         <div style="display:grid;grid-template-columns:1fr;gap:4px;font-size:9px;">
-          <div><span style="color:#5C5A54;">LAST SEEN</span><br/><span style="color:#E8E6E0;">${p.startedAt ? new Date(p.startedAt).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
+          <div><span style="color:#5C5A54;">REPORTED</span><br/><span style="color:#E8E6E0;">${p.ts ? new Date(p.ts).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
         </div>
-        <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Heuristic text signal — verify before acting.</div>
+        ${p.alarmConfirmed ? '<div style="margin-top:6px;padding:3px 6px;background:rgba(255,23,68,0.15);border:1px solid rgba(255,23,68,0.4);border-radius:3px;color:#FF1744;font-size:8px;font-weight:700;letter-spacing:0.05em;">AIR RAID ALARM CORROBORATED</div>' : ''}
+        <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Confirmed sighting signal — verify before acting.</div>
+      </div>`);
+    });
+
+    // ── Missile Threat Routes ──
+    map.on('click', 'missile-route-nodes', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      const waveLabel = p.waveIndex > 0 ? ` · Wave ${p.waveIndex + 1}` : '';
+      popup(coords, `<div style="${pStyle}border:1px solid ${p.color}44;max-width:300px;">
+        <div style="color:${p.color};font-size:13px;font-weight:700;margin-bottom:6px;">🚀 ${p.weaponLabel||p.weaponType}${waveLabel}</div>
+        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${p.oblast||'Unknown region'}</div>
+        <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">Waypoint ${p.sequence||'?'} · last 1.5h · OSINT Telegram</div>
+        <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid ${p.color}44;padding-left:6px;">${(p.text||'').replace(/</g,'&lt;')}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
+          <div><span style="color:#5C5A54;">REPORTED</span><br/><span style="color:#E8E6E0;">${p.ts ? new Date(p.ts).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
+          <div><span style="color:#5C5A54;">SOURCES</span><br/><span style="color:#E8E6E0;font-size:8px;">${p.sources||'—'}</span></div>
+        </div>
+        ${p.alarmConfirmed ? '<div style="margin-top:6px;padding:3px 6px;background:rgba(255,23,68,0.15);border:1px solid rgba(255,23,68,0.4);border-radius:3px;color:#FF1744;font-size:8px;font-weight:700;letter-spacing:0.05em;">AIR RAID ALARM CORROBORATED</div>' : ''}
+        <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Confirmed sighting signal — verify before acting.</div>
       </div>`);
     });
 
@@ -1253,7 +1323,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Generic hover for clickables ──
-    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-sea-atmo','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo','raid-dots','outage-dots','kab-dots','drone-dots','ru-raid-dots','malware-dots','ioda-dots'].forEach(layer => {
+    ['conflict-icons','cctv-dots','eq-circles','sat-dots','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','sigint-news-dots','balloon-dots','rad-dots','ship-dots','ship-shadow-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-sea-atmo','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo','raid-dots','outage-dots','kab-dots','drone-route-nodes','missile-route-nodes','ru-raid-dots','malware-dots','ioda-dots'].forEach(layer => {
       map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
     });
@@ -1567,6 +1637,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         confidence: a.confidence, latest: a.latest,
         bilateral: a.bilateral ?? false,
         videoConfirmed: a.videoConfirmed ?? false,
+        confirmed: !!(a.hit || a.videoConfirmed || a.bilateral),
         weapon: a.weapon ?? '',
         sources: a.sources ? JSON.stringify(a.sources) : '[]',
       },
@@ -1792,7 +1863,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     })));
   }, [mapReady, data.kab_threats, activeLayers.kab_threats, setGeo]);
 
-  // Drone / UAV Swarms (Telegram-derived, oblast-level point markers).
+  // Drone threats — keep flowing to drone-threats source for backward compat.
   useEffect(() => {
     if (!mapReady) return;
     const threats = activeLayers.drone_threats && data.drone_threats ? data.drone_threats : [];
@@ -1802,6 +1873,81 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       properties: { regionName: t.regionName, count: t.count, startedAt: t.startedAt, text: t.text },
     })));
   }, [mapReady, data.drone_threats, activeLayers.drone_threats, setGeo]);
+
+  // Drone route trail — builds LineString + waypoint Points from confirmed sighting waves.
+  // Filters out waypoints whose oblast no longer has an active air-raid alarm; waves with
+  // zero surviving waypoints are skipped so the swarm clears as soon as the region goes quiet.
+  useEffect(() => {
+    if (!mapReady) return;
+    const waves: any[] = activeLayers.drone_threats && data.drone_waves ? data.drone_waves : [];
+    // null = not yet loaded (show all); Set = alarms known (filter by active)
+    const alarmedOblasts: Set<string> | null = data.air_raids
+      ? new Set((data.air_raids as any[]).map((a: any) => a.oblast.toLowerCase()))
+      : null;
+    const features: any[] = [];
+    for (const wave of waves) {
+      const allWps: any[] = wave.waypoints || [];
+      const wps = alarmedOblasts
+        ? allWps.filter((w: any) => alarmedOblasts.has(w.oblast.toLowerCase()))
+        : allWps;
+      if (wps.length === 0) continue;
+      if (wps.length >= 2) {
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: wps.map((w: any) => [w.lng, w.lat]) },
+          properties: { waveIndex: wave.waveIndex },
+        });
+      }
+      wps.forEach((w: any, i: number) => {
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [w.lng, w.lat] },
+          properties: { oblast: w.oblast, ts: w.ts, text: w.text, isLatest: i === wps.length - 1, sequence: i + 1, waveIndex: wave.waveIndex, alarmConfirmed: !!w.alarmConfirmed },
+        });
+      });
+    }
+    setGeo('drone-route', features);
+  }, [mapReady, data.drone_waves, data.air_raids, activeLayers.drone_threats, setGeo]);
+
+  // Missile threat routes (CRUISE, BALLISTIC, KINZHAL, KH22) — one line per wave per type.
+  // Same alarm-clearing logic as drone route: waypoints drop when their oblast goes quiet.
+  useEffect(() => {
+    if (!mapReady) return;
+    const routes: any[] = activeLayers.missile_threats && data.missile_routes ? data.missile_routes : [];
+    const alarmedOblasts: Set<string> | null = data.air_raids
+      ? new Set((data.air_raids as any[]).map((a: any) => a.oblast.toLowerCase()))
+      : null;
+    const features: any[] = [];
+    for (const route of routes) {
+      for (const wave of (route.waves || [])) {
+        const allWps: any[] = wave.waypoints || [];
+        const wps = alarmedOblasts
+          ? allWps.filter((w: any) => alarmedOblasts.has(w.oblast.toLowerCase()))
+          : allWps;
+        if (wps.length === 0) continue;
+        if (wps.length >= 2) {
+          features.push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: wps.map((w: any) => [w.lng, w.lat]) },
+            properties: { weaponType: route.weaponType, color: route.color, weaponLabel: route.label, waveIndex: wave.waveIndex },
+          });
+        }
+        wps.forEach((w: any, i: number) => {
+          features.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [w.lng, w.lat] },
+            properties: {
+              weaponType: route.weaponType, color: route.color, weaponLabel: route.label,
+              isLatest: i === wps.length - 1, sequence: i + 1, waveIndex: wave.waveIndex,
+              oblast: w.oblast, ts: w.ts, text: w.text, sources: route.sources?.join(', ') || '',
+              alarmConfirmed: !!w.alarmConfirmed,
+            },
+          });
+        });
+      }
+    }
+    setGeo('missile-routes', features);
+  }, [mapReady, data.missile_routes, data.air_raids, activeLayers.missile_threats, setGeo]);
 
   // RU Oblast Alerts (Russian border oblast drone/strike incursions).
   useEffect(() => {
@@ -1918,9 +2064,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['raid-oblast-fill','raid-oblast-outline','raid-district-fill','raid-district-outline','raid-glow','raid-dots','raid-label'], activeLayers.air_raids);
     setVis(['outage-oblast-fill','outage-oblast-outline','outage-glow','outage-dots','outage-label'], activeLayers.power_outages);
     setVis(['kab-glow','kab-dots','kab-label'], activeLayers.kab_threats);
-    setVis(['drone-glow','drone-dots','drone-label'], activeLayers.drone_threats);
+    setVis(['drone-route-line','drone-route-arrows','drone-route-nodes','drone-route-label'], activeLayers.drone_threats);
+    setVis(['missile-route-line','missile-route-arrows','missile-route-nodes','missile-route-label'], activeLayers.missile_threats);
     setVis(['ru-raid-glow','ru-raid-dots','ru-raid-label'], activeLayers.ru_air_raids);
-    setVis(['thermal-aoi-glow','thermal-aoi-dots','thermal-aoi-label'], activeLayers.thermal_aoi);
+    setVis(['thermal-aoi-glow','thermal-aoi-dots','thermal-aoi-label','thermal-aoi-unconfirmed-label'], activeLayers.thermal_aoi);
     setVis(['capture-glow','capture-dots'], activeLayers.captures);
     setVis(['frontline-fill','frontline-line'], activeLayers.frontlines);
   }, [mapReady, activeLayers, setVis]);
