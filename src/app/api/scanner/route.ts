@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { validateHost, isRateLimited, getClientIp } from '@/lib/ssrf-guard';
+import { validateHost, isRateLimited, getClientIp, safeFetch } from '@/lib/ssrf-guard';
 import { spawn } from 'node:child_process';
 import * as dns from 'node:dns/promises';
 import * as net from 'node:net';
@@ -88,11 +88,18 @@ async function fetchShodanHost(ip: string): Promise<ShodanHost | null> {
   return task;
 }
 
-// Resolve a hostname to its first IPv4 address.
+// Resolve a hostname to its first IPv4 address, re-validating the address we
+// actually got back. validateHost ran once in the GET handler, but the scan
+// helpers resolve again before connecting — without re-checking, an attacker
+// DNS server answering public→private on the second lookup (DNS rebinding /
+// TOCTOU) would slip an internal IP past the guard. Re-validating the literal
+// IP here (no second DNS round-trip — validateHost on an IP literal only does
+// the blocklist check) pins every native connect to a vetted address.
 async function resolveIp(hostname: string): Promise<string> {
-  if (net.isIP(hostname)) return hostname;
-  const records = await dns.lookup(hostname, { family: 4 });
-  return records.address;
+  const ip = net.isIP(hostname) ? hostname : (await dns.lookup(hostname, { family: 4 })).address;
+  const check = await validateHost(ip);
+  if (!check.ok) throw new Error(`resolved IP blocked: ${check.reason}`);
+  return ip;
 }
 
 // ── Scan implementations ──
@@ -197,17 +204,19 @@ async function scanSsl(target: string) {
     };
   }
 
-  // Fallback: live TLS connect
-  return scanSslNative(hostname);
+  // Fallback: live TLS connect — connect to the already-validated IP, not the
+  // raw hostname (which tls.connect would re-resolve, reopening the rebinding window).
+  return scanSslNative(hostname, ip);
 }
 
-async function scanSslNative(hostname: string): Promise<Record<string, unknown>> {
+async function scanSslNative(hostname: string, ip: string): Promise<Record<string, unknown>> {
   // rejectUnauthorized:false is deliberate — this function's purpose is to INSPECT
   // certificates on arbitrary hosts, including expired, self-signed, and mismatched ones.
   // Authorization error state is preserved and returned in the `authorized` field so the
   // caller can still distinguish a valid cert from an invalid one.
+  // Connect by the vetted IP; keep servername=hostname so SNI + cert subject still match.
   const tlsOpts: tls.ConnectionOptions = {
-    host: hostname, port: 443, servername: hostname,
+    host: ip, port: 443, servername: hostname,
     rejectUnauthorized: false, // required to read certs on invalid/expired hosts
   };
   return new Promise((resolve, reject) => {
@@ -266,11 +275,13 @@ async function scanHeaders(target: string) {
 
 async function scanHeadersNative(hostname: string) {
   const url = `https://${hostname}`;
+  // safeFetch follows redirects manually and re-validates every hop, so a
+  // public host can't 30x-redirect us onto an internal target.
   let res: Response;
   try {
-    res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(8000), redirect: 'follow' });
+    res = await safeFetch(url, { method: 'HEAD', signal: AbortSignal.timeout(8000) });
   } catch {
-    res = await fetch(url, { signal: AbortSignal.timeout(8000), redirect: 'follow' });
+    res = await safeFetch(url, { signal: AbortSignal.timeout(8000) });
   }
   const headers: Record<string, string> = {};
   res.headers.forEach((v, k) => { headers[k] = v; });
@@ -337,8 +348,10 @@ async function scanTech(target: string) {
   // Augment / fallback with live page analysis — use validated hostname, not raw target
   try {
     const url = `https://${hostname}`;
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(10000), redirect: 'follow',
+    // safeFetch re-validates each redirect hop — a public host can't bounce us
+    // to an internal target (cloud metadata, localhost services, RFC1918).
+    const res = await safeFetch(url, {
+      signal: AbortSignal.timeout(10000),
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OSIRIS-OSINT/1.0)' },
     });
     const pageHeaders: Record<string, string> = {};
@@ -508,9 +521,12 @@ async function scanGeoloc(target: string) {
 // (not shell exec) so there is no injection risk from the hostname argument.
 async function scanTraceroute(target: string): Promise<Record<string, unknown>> {
   const hostname = target.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+  // Resolve+validate first and trace to the vetted IP so mtr can't re-resolve
+  // the name to an internal address.
+  const ip = await resolveIp(hostname);
   return new Promise((resolve, reject) => {
     // 2 cycles, 20 hops max, numeric output — typically completes in 15-25s
-    const proc = spawn('mtr', ['--report', '--report-cycles', '2', '--no-dns', '--max-ttl', '20', hostname]);
+    const proc = spawn('mtr', ['--report', '--report-cycles', '2', '--no-dns', '--max-ttl', '20', ip]);
     let out = '', err = '';
     const timer = setTimeout(() => { proc.kill(); reject(new Error('traceroute timed out after 30s')); }, 30000);
 
