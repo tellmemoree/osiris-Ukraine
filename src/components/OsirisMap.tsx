@@ -1493,6 +1493,45 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       });
     });
 
+    // ── Frontline Areas (DeepState) — click for territory status + duration ──
+    map.on('click', 'frontline-fill', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const { lngLat } = e;
+      const sk: string = p.statusKey || '';
+      if (!sk || sk === 'other' || sk === 'attack_direction') return;
+
+      const isOccupied  = sk === 'occupied';
+      const isLiberated = sk === 'dismissed' || sk === 'dismissed_at';
+      const color = isOccupied ? '#EF5350' : isLiberated ? '#66BB6A' : '#78909C';
+      const label = (p.statusLabel || sk).toUpperCase();
+
+      let durationHtml = '';
+      if (isOccupied) {
+        const days = Math.floor((Date.now() - new Date('2022-02-24').getTime()) / 86400000);
+        const months = Math.floor(days / 30.44);
+        durationHtml = `<div style="margin-top:6px;font-size:10px;color:#aaa;">Under occupation ~${months} months (since 24 Feb 2022)</div>`;
+      } else if (isLiberated && p.eventDate) {
+        const d = new Date(p.eventDate);
+        const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+        const months = Math.floor(days / 30.44);
+        const dateLabel = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        durationHtml = `<div style="margin-top:6px;font-size:10px;color:#aaa;">Liberated ~${months} months ago (${dateLabel})</div>`;
+      } else if (isLiberated) {
+        durationHtml = `<div style="margin-top:6px;font-size:10px;color:#aaa;">Liberated from Russian occupation</div>`;
+      }
+
+      const desc = (p.descriptionEn || '').replace(/Source:.*$/i, '').trim();
+      popup([lngLat.lng, lngLat.lat], `<div style="${pStyle}border:1px solid ${color}40;min-width:220px;">
+        <div style="color:${color};font-size:13px;font-weight:700;letter-spacing:0.08em;">${isOccupied ? '⬛' : isLiberated ? '✅' : '❓'} ${label}</div>
+        ${durationHtml}
+        ${desc ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid ${color}20;font-size:10px;color:#ccc;line-height:1.55;">${desc}</div>` : ''}
+        <div style="margin-top:8px;font-size:9px;color:#5C5A54;">${lngLat.lat.toFixed(3)}°N ${lngLat.lng.toFixed(3)}°E</div>
+      </div>`);
+    });
+    map.on('mouseenter', 'frontline-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'frontline-fill', () => { map.getCanvas().style.cursor = ''; });
+
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
