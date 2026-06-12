@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getThreatCorpus, classifyWeapons, matchOblasts, buildRoute } from '@/lib/telegram-threats';
 import type { OblastRef, RouteWave } from '@/lib/telegram-threats';
+import { readAlarmHistory, isOblastAlarmed } from '@/lib/alarm-history';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,6 +105,16 @@ async function buildDroneResponse(): Promise<DroneResponse> {
     .sort((x, y) => new Date(y.startedAt).getTime() - new Date(x.startedAt).getTime());
 
   const waves = buildRoute(messages, 'DRONE');
+
+  // Cross-reference each waypoint against air-raid alarm history.
+  // Drones are slow (~150 km/h) and stay in an oblast for 20-40 min;
+  // a ±45-min window catches the alarm reliably.
+  const alarmHistory = await readAlarmHistory();
+  for (const wave of waves) {
+    for (const wp of wave.waypoints) {
+      wp.alarmConfirmed = isOblastAlarmed(wp.oblast, wp.ts, alarmHistory);
+    }
+  }
 
   return {
     threats,

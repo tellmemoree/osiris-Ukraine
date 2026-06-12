@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getThreatCorpus, buildRoute } from '@/lib/telegram-threats';
 import type { RouteWave, WeaponType } from '@/lib/telegram-threats';
+import { readAlarmHistory, isOblastAlarmed } from '@/lib/alarm-history';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,9 +54,20 @@ async function buildMissileResponse(): Promise<MissileResponse> {
   const messages = await getThreatCorpus();
   const routes: MissileRoute[] = [];
 
+  // Load alarm history once; shared across all missile types.
+  // Missiles are fast and alarms are issued PRE-EMPTIVELY — the oblast may be
+  // alarmed up to 60 min before the Telegram sighting, and only 15 min after.
+  const alarmHistory = await readAlarmHistory();
+
   for (const wt of MISSILE_TYPES) {
     const waves = buildRoute(messages, wt as WeaponType);
     if (waves.length === 0) continue;
+
+    for (const wave of waves) {
+      for (const wp of wave.waypoints) {
+        wp.alarmConfirmed = isOblastAlarmed(wp.oblast, wp.ts, alarmHistory, 60 * 60_000, 15 * 60_000);
+      }
+    }
 
     const allWaypoints = waves.flatMap(w => w.waypoints);
     const sources = [...new Set(allWaypoints.map(w => `t.me/${w.channel}`))];
