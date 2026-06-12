@@ -297,10 +297,12 @@ function keywordRegex(keyword: string): RegExp {
 
 // Compile every gazetteer entry once at module load — findCoords runs this over
 // hundreds of articles per request, so the regexes must not be rebuilt per call.
+// `keyword` is kept so consumers can do location-aware text extraction.
 const COMPILED_GAZETTEER = Object.entries(KEYWORD_COORDS).map(([keyword, coords]) => ({
   re: keywordRegex(keyword),
   coords,
   rank: BROAD_KEYS.has(keyword) ? 1 : 2, // a named city beats a country
+  keyword,
 }));
 
 /**
@@ -323,20 +325,22 @@ function findCoords(text: string): [number, number] | null {
 }
 
 // Every distinct SPECIFIC place a story names (raw gazetteer centroids, un-jittered).
-// Used by cross-reference consumers (e.g. /api/strategic-thermal) that must check ALL
-// mentioned locations for fire correlation. Deliberately excludes broad country/sea
-// centroids (rank=1): those coordinates have low precision and cause false-positive
-// thermal AOIs whenever there happens to be a FIRMS fire near a country centroid.
-function findAllCoords(text: string): [number, number][] {
+// Returns both coords and the matched keyword so callers can do location-aware text
+// extraction (e.g. find the sentence that mentions "belgorod" specifically).
+// Deliberately excludes broad country/sea centroids (rank=1).
+function findAllPlaces(text: string): { coords: [number, number]; name: string }[] {
   const lower = text.toLowerCase();
   const seen = new Set<string>();
-  const out: [number, number][] = [];
-  for (const { re, coords, rank } of COMPILED_GAZETTEER) {
-    if (rank < 2) continue; // skip country/sea-level centroids
+  const out: { coords: [number, number]; name: string }[] = [];
+  for (const { re, coords, rank, keyword } of COMPILED_GAZETTEER) {
+    if (rank < 2) continue;
     const key = `${coords[0]},${coords[1]}`;
-    if (!seen.has(key) && re.test(lower)) { seen.add(key); out.push(coords); }
+    if (!seen.has(key) && re.test(lower)) { seen.add(key); out.push({ coords, name: keyword }); }
   }
   return out;
+}
+function findAllCoords(text: string): [number, number][] {
+  return findAllPlaces(text).map(p => p.coords);
 }
 
 // Spread several stories about the same place into a small (~0–8 km) cluster
@@ -557,12 +561,12 @@ async function buildNews(): Promise<unknown> {
       const riskScore = scoreRisk(searchText);
       const id = crypto.createHash('md5').update((article.link || '') + (article.pubDate || '')).digest('hex');
       const coords = findCoords(searchText);
-      const allCoords = findAllCoords(searchText); // specific places only (no country centroids)
+      const allPlaces = findAllPlaces(searchText); // specific places only (no country centroids)
       const placed = coords ? jitterAround(coords, id) : null;
       // coords_default = true when there are no SPECIFIC place matches. A country/sea
       // centroid as the only match is too imprecise to use as a thermal fire candidate —
       // it just means "this story is about Russia/Ukraine" not "strike happened here".
-      const coordsDefault = !coords || allCoords.length === 0;
+      const coordsDefault = !coords || allPlaces.length === 0;
 
       return {
         id,
@@ -575,7 +579,8 @@ async function buildNews(): Promise<unknown> {
         risk_score: riskScore,
         coords: placed,
         coords_default: coordsDefault,
-        places: allCoords,
+        places: allPlaces.map(p => p.coords),
+        place_names: allPlaces.map(p => p.name),
         hasVideo: article.hasVideo,
       };
     });
