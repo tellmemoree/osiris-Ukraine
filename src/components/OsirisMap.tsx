@@ -365,18 +365,23 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         paint: { 'text-color': '#FF9500', 'text-halo-color': '#000', 'text-halo-width': 1 }});
       // Territorial Captures — RU red, UA blue.
       map.addLayer({ id: 'capture-glow', type: 'circle', source: 'captures', paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 16, 10, 24],
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 12, 5, 20, 10, 30],
         'circle-color': ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888'],
-        'circle-opacity': 0.10,
+        'circle-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.05, 3, 0.14],
         'circle-blur': 1,
       }});
       map.addLayer({ id: 'capture-dots', type: 'circle', source: 'captures', paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 4, 5, 7, 10, 11],
+        // Radius and opacity scale with corroboration count — count=1 stays small/dim.
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          1,  ['interpolate', ['linear'], ['get', 'count'], 1, 2, 4, 5],
+          5,  ['interpolate', ['linear'], ['get', 'count'], 1, 4, 4, 8],
+          10, ['interpolate', ['linear'], ['get', 'count'], 1, 6, 4, 12],
+        ],
         'circle-color': ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888'],
-        'circle-opacity': 0.85,
+        'circle-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.40, 3, 0.88],
         'circle-stroke-width': 1.5,
         'circle-stroke-color': '#ffffff',
-        'circle-stroke-opacity': 0.3,
+        'circle-stroke-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.15, 3, 0.45],
       }});
 
       // Air Raid Alerts — pulsing red (Ukraine-specific alerts).
@@ -1557,7 +1562,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('captures', visible.map((c: any) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-      properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count },
+      properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description },
     })));
   }, [mapReady, data.captures, activeLayers.captures, setGeo]);
 
