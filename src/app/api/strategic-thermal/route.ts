@@ -1,7 +1,41 @@
 import { NextResponse } from 'next/server';
 import { getThreatCorpus, matchOblasts, type TgMessage } from '@/lib/telegram-threats';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
+
+// ── Hit history persistence ─────────────────────────────────────────────────
+// Rolls a 48-hour log of fire-confirmed site hits to disk so analysts can
+// see what burned overnight after the FIRMS 12-hour active-fire window expires.
+
+const HITS_FILE = path.join(process.env.HOME ?? '/root', '.osiris-data', 'thermal-hits.json');
+const HITS_TTL_MS = 48 * 60 * 60 * 1000;
+
+interface StoredHit {
+  id: string; name: string; category: string;
+  lat: number; lng: number;
+  confidence: string; maxFrp: number; fireCount: number;
+  latest: string | null; weapon?: string;
+  ts: number; // epoch ms of first detection in this window
+}
+
+async function loadStoredHits(): Promise<StoredHit[]> {
+  try {
+    return JSON.parse(await fs.readFile(HITS_FILE, 'utf8')) as StoredHit[];
+  } catch { return []; }
+}
+
+async function mergeAndSaveHits(incoming: StoredHit[]): Promise<StoredHit[]> {
+  if (!incoming.length) return await loadStoredHits();
+  const cutoff = Date.now() - HITS_TTL_MS;
+  const existing = (await loadStoredHits()).filter(h => h.ts > cutoff);
+  const byId = new Map(existing.map(h => [h.id, h]));
+  for (const hit of incoming) byId.set(hit.id, hit);
+  const merged = [...byId.values()];
+  try { await fs.writeFile(HITS_FILE, JSON.stringify(merged)); } catch { /* ignore */ }
+  return merged;
+}
 
 /**
  * OSIRIS — Strategic Thermal AOIs.
@@ -346,6 +380,39 @@ export async function GET(req: Request) {
       lat: number; lng: number; hit: boolean; fireCount: number; maxFrp: number; latest: string | null;
       confidence: Confidence; sources: Contributor[]; bilateral: boolean; videoConfirmed: boolean; weapon?: string;
     };
+    // Persist fire-confirmed site hits (48-hour rolling log) and annotate every site
+    // AOI with lastHit* fields so the popup can show "Last hit: Xh ago" even after
+    // the 12-hour FIRMS active-fire window has expired.
+    const currentHits: StoredHit[] = aois
+      .filter((a: any) => a.category !== 'news' && a.hit)
+      .map((a: any) => ({
+        id: a.id, name: a.name, category: a.category,
+        lat: a.lat, lng: a.lng,
+        confidence: a.confidence, maxFrp: a.maxFrp, fireCount: a.fireCount,
+        latest: a.latest, weapon: a.weapon,
+        ts: Date.now(),
+      }));
+    const allHits = await mergeAndSaveHits(currentHits);
+    const hitById = new Map(allHits.map((h: StoredHit) => [h.id, h]));
+    for (const aoi of aois as any[]) {
+      if (aoi.category === 'news') continue;
+      const h = hitById.get(aoi.id);
+      if (h && !aoi.hit) {
+        // Site is not currently burning but has a recent hit in history
+        aoi.lastHitTs   = h.ts;
+        aoi.lastHitConf = h.confidence;
+        aoi.lastHitFrp  = h.maxFrp;
+        aoi.lastHitWeapon = h.weapon;
+      } else if (aoi.hit) {
+        // Currently hit — record when we first confirmed it
+        const prev = hitById.get(aoi.id);
+        aoi.lastHitTs   = prev?.ts ?? Date.now();
+        aoi.lastHitConf = aoi.confidence;
+        aoi.lastHitFrp  = aoi.maxFrp;
+        aoi.lastHitWeapon = aoi.weapon;
+      }
+    }
+
     // Merge Telegram strike messages (with oblast-level coords) into the news pipeline.
     // Each TgMessage that names a UA oblast becomes a NewsItem at that centroid;
     // the same isStrikeRelated / deduplication / fire-crossref logic applies.

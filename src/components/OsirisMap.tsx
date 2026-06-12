@@ -1002,7 +1002,23 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           <span style="color:#3A3832;">·</span>
           <span style="color:#FF9500;">${Number(p.maxFrp)||0} MW</span>
         </div>
-        ${p.latest ? `<div style="font-size:9px;color:#5C5A54;margin-bottom:4px;">LATEST <span style="color:#E8E6E0;">${esc(p.latest)}</span></div>` : ''}
+        ${p.latest ? (() => {
+          const [d, t] = (p.latest as string).split(' ');
+          const iso = t && t.length >= 4 ? `${d}T${t.slice(0,2)}:${t.slice(2,4)}:00Z` : '';
+          const ms = iso ? Date.now() - new Date(iso).getTime() : NaN;
+          const hh = Math.floor(ms / 3600000), mm = Math.floor((ms % 3600000) / 60000);
+          const age = isNaN(ms) || ms < 0 ? esc(p.latest)
+            : hh >= 24 ? `${Math.floor(hh/24)}d ${hh%24}h ago`
+            : hh >= 1  ? `${hh}h ${mm}m ago`
+            : `${mm}m ago`;
+          return `<div style="font-size:9px;color:#5C5A54;margin-bottom:4px;">DETECTION <span style="color:#FF9500;">${age}</span></div>`;
+        })() : ''}
+        ${(p.lastHitTs && !p.hit) ? (() => {
+          const ms2 = Date.now() - Number(p.lastHitTs);
+          const hh2 = Math.floor(ms2 / 3600000), mm2 = Math.floor((ms2 % 3600000) / 60000);
+          const age2 = hh2 >= 24 ? `${Math.floor(hh2/24)}d ${hh2%24}h ago` : hh2 >= 1 ? `${hh2}h ${mm2}m ago` : `${mm2}m ago`;
+          return `<div style="font-size:9px;color:#FF6B00;margin-bottom:4px;">LAST HIT <span style="color:#FFB74D;">${age2}</span> · <span style="color:#888;">${esc(String(p.lastHitConf||'')).toUpperCase()} / ${p.lastHitFrp||0}MW${p.lastHitWeapon ? ' · '+esc(p.lastHitWeapon) : ''}</span></div>`;
+        })() : ''}
         ${sourcesHtml}
         <div style="font-size:8px;color:#3A3832;margin-top:8px;">heuristic — verify before acting</div>
       </div>`);
