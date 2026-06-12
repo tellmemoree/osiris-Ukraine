@@ -145,6 +145,9 @@ const SITES: Site[] = [
   // ── Petrochemical / military-industrial (struck June 2026) ──
   { id: 'ind-tolyattikauchuk', name: 'Tolyattikauchuk (Samara Oblast — synthetic rubber for armour/aviation)', category: 'oil', lat: 53.50, lng: 49.38 },
   { id: 'ind-nizhnekamskneftekhim', name: 'Nizhnekamskneftekhim (Tatarstan — polymers/rubber for VPK)', category: 'oil', lat: 55.64, lng: 51.55 },
+  // ── Nizhnekamsk refinery complex (struck June 2026, confirmed by UA General Staff) ──
+  { id: 'oil-taneco-nizhnekamsk', name: 'TANECO refinery (Nizhnekamsk, Tatarstan — 15M t/yr, TAIF Group)', category: 'oil', lat: 55.77, lng: 51.88 },
+  { id: 'oil-taifnk-nizhnekamsk', name: 'TAIF-NK refinery (Nizhnekamsk, Tatarstan — naphtha/fuel oil)', category: 'oil', lat: 55.64, lng: 51.82 },
 ];
 
 interface Fire { lat: number; lng: number; frp: number; brightness: number; date: string; time: string; ts: number; }
