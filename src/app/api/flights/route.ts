@@ -71,20 +71,38 @@ interface AdsbAircraft {
   nac_p?: number;
 }
 
-async function fetchRegion(region: typeof REGIONS[0]): Promise<AdsbAircraft[]> {
-  try {
-    const url = `https://api.adsb.lol/v2/lat/${region.lat}/lon/${region.lon}/dist/${region.dist}`;
-    const res = await stealthFetch(url, {
-      signal: AbortSignal.timeout(12000),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { ac?: AdsbAircraft[] };
-      return data.ac ?? [];
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// adsb.lol rate-limits bursty/parallel requests hard: firing all 6 regions at
+// once returns 429 for all but one, so only a single region's aircraft ever
+// reach the map (the "planes in one place only" bug). We therefore fetch
+// regions sequentially (see refreshAll) and retry a throttled region with
+// backoff. Returns null on failure so the caller can keep that region's
+// last-good aircraft instead of blanking it; returns [] only on a genuine
+// empty success.
+async function fetchRegion(region: typeof REGIONS[0]): Promise<AdsbAircraft[] | null> {
+  const url = `https://api.adsb.lol/v2/lat/${region.lat}/lon/${region.lon}/dist/${region.dist}`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await stealthFetch(url, { signal: AbortSignal.timeout(12000) });
+      if (res.status === 429) {
+        await sleep(1500);
+        continue;
+      }
+      if (res.ok) {
+        const data = (await res.json()) as { ac?: AdsbAircraft[] };
+        return data.ac ?? [];
+      }
+      return null; // non-429 HTTP error — don't clobber last-good data
+    } catch (e) {
+      if (attempt === 2) {
+        console.warn(`Region fetch failed for lat=${region.lat}:`, e);
+        return null;
+      }
+      await sleep(1000);
     }
-  } catch (e) {
-    console.warn(`Region fetch failed for lat=${region.lat}:`, e);
   }
-  return [];
+  return null; // exhausted 429 retries — keep last-good
 }
 
 function classifyFlight(f: AdsbAircraft) {
@@ -163,126 +181,129 @@ interface FlightResponse {
   timestamp: string;
 }
 
+const JAMMING_NACAP_THRESHOLD = 4;
+
+// Per-region last-good aircraft, keyed by REGIONS index. Persisting per region
+// (rather than one combined snapshot) means a transient 429/timeout on a single
+// region keeps that region's previous aircraft on the map instead of blanking
+// them — the combined view degrades gracefully instead of collapsing to whatever
+// one region happened to win the race.
+const regionCache = new Map<number, AdsbAircraft[]>();
+
 let cachedData: FlightResponse | null = null;
 let lastFetchTime = 0;
-const CACHE_TTL = 45000; // 45 seconds cache window
-let fetchPromise: Promise<FlightResponse> | null = null;
+const CACHE_TTL = 60000; // rebuild the combined snapshot at most once per minute
+const REGION_SPACING_MS = 1200; // pause between sequential region fetches
+let refreshing: Promise<void> | null = null;
+// Rotating start index for the sequential sweep. adsb.lol may throttle us partway
+// through a sweep, starving whichever regions come last; rotating the start each
+// sweep gives every region a turn at the front, and the per-region last-good
+// cache retains the others — so all six populate over successive sweeps.
+let sweepOffset = 0;
+
+// Build the classified response from every region's last-good aircraft, deduped
+// by ICAO hex across overlapping region radii.
+function buildResponse(): FlightResponse {
+  const allRaw: AdsbAircraft[] = [];
+  const seenHex = new Set<string>();
+  for (const regionAc of regionCache.values()) {
+    for (const ac of regionAc) {
+      const hex = (ac.hex || '').toLowerCase().trim();
+      if (hex && !seenHex.has(hex)) {
+        seenHex.add(hex);
+        allRaw.push(ac);
+      }
+    }
+  }
+
+  const commercial: ClassifiedFlight[] = [];
+  const privateFl: ClassifiedFlight[] = [];
+  const jets: ClassifiedFlight[] = [];
+  const military: ClassifiedFlight[] = [];
+  const gpsJamming: JammingPoint[] = [];
+
+  for (const raw of allRaw) {
+    const flight = classifyFlight(raw);
+    if (!flight) continue;
+
+    // GPS jamming detection
+    if (typeof flight.nac_p === 'number' && flight.nac_p <= JAMMING_NACAP_THRESHOLD && !flight.grounded) {
+      gpsJamming.push({
+        lat: flight.lat,
+        lng: flight.lng,
+        nac_p: flight.nac_p,
+        callsign: flight.callsign,
+      });
+    }
+
+    switch (flight.category) {
+      case 'military': military.push(flight); break;
+      case 'jet': jets.push(flight); break;
+      case 'private': privateFl.push(flight); break;
+      default: commercial.push(flight);
+    }
+  }
+
+  return {
+    commercial_flights: commercial,
+    private_flights: privateFl,
+    private_jets: jets,
+    military_flights: military,
+    gps_jamming: aggregateJamming(gpsJamming, JAMMING_NACAP_THRESHOLD),
+    total: allRaw.length,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+// Sweep all regions sequentially (adsb.lol 429s parallel bursts), updating each
+// region's last-good cache only on success, then rebuild the combined snapshot.
+async function refreshAll(): Promise<void> {
+  const start = sweepOffset;
+  sweepOffset = (sweepOffset + 1) % REGIONS.length;
+  for (let n = 0; n < REGIONS.length; n++) {
+    const i = (start + n) % REGIONS.length;
+    const ac = await fetchRegion(REGIONS[i]);
+    if (ac !== null) regionCache.set(i, ac); // null = keep last-good
+    if (n < REGIONS.length - 1) await sleep(REGION_SPACING_MS);
+  }
+  cachedData = buildResponse();
+  lastFetchTime = Date.now();
+}
 
 export async function GET() {
   const now = Date.now();
+  const stale = !cachedData || now - lastFetchTime > CACHE_TTL;
 
-  // Return cached data if within TTL
-  if (cachedData && now - lastFetchTime < CACHE_TTL) {
-    return NextResponse.json(cachedData, {
-      headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' },
-    });
+  // Kick a background refresh when stale; the guard ensures only one sweep runs
+  // at a time regardless of how many requests arrive during it.
+  if (stale && !refreshing) {
+    refreshing = refreshAll().finally(() => { refreshing = null; });
   }
 
-  // Coalesce concurrent requests: wait for the active fetch rather than starting a new one
-  if (fetchPromise) {
-    try {
-      const data = await fetchPromise;
-      return NextResponse.json(data, {
-        headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' },
-      });
-    } catch {
-      // Fallback to error if the pending fetch failed
-      return NextResponse.json({ error: 'Failed to fetch flight data' }, { status: 500 });
-    }
+  // Cold start: nothing cached yet — wait for the first sweep to populate so the
+  // initial load returns aircraft rather than an empty layer for a full poll
+  // cycle. Subsequent requests are served instantly from cache while refreshing.
+  if (!cachedData && refreshing) {
+    try { await refreshing; } catch { /* fall through to empty response */ }
   }
 
-  const JAMMING_NACAP_THRESHOLD = 4;
+  const body: FlightResponse = cachedData ?? {
+    commercial_flights: [],
+    private_flights: [],
+    private_jets: [],
+    military_flights: [],
+    gps_jamming: [],
+    total: 0,
+    timestamp: new Date().toISOString(),
+  };
 
-  // Start new global fetch
-  fetchPromise = (async () => {
-    // Fetch all 6 regions in parallel
-    const regionResults = await Promise.allSettled(
-      REGIONS.map(r => fetchRegion(r))
-    );
+  // Don't let a sparse/empty result (transient upstream failure) get cached
+  // downstream, so the next poll retries instead of serving it for the full TTL.
+  const cacheControl = body.total < 100
+    ? 'no-store, max-age=0'
+    : 'public, s-maxage=30, stale-while-revalidate=60';
 
-    const allRaw: AdsbAircraft[] = [];
-    const seenHex = new Set<string>();
-
-    for (const result of regionResults) {
-      if (result.status === 'fulfilled') {
-        for (const ac of result.value) {
-          const hex = (ac.hex || '').toLowerCase().trim();
-          if (hex && !seenHex.has(hex)) {
-            seenHex.add(hex);
-            allRaw.push(ac);
-          }
-        }
-      }
-    }
-
-    // Classify all flights
-    const commercial: ClassifiedFlight[] = [];
-    const privateFl: ClassifiedFlight[] = [];
-    const jets: ClassifiedFlight[] = [];
-    const military: ClassifiedFlight[] = [];
-    const gpsJamming: JammingPoint[] = [];
-
-    for (const raw of allRaw) {
-      const flight = classifyFlight(raw);
-      if (!flight) continue;
-
-      // GPS jamming detection
-      if (typeof flight.nac_p === 'number' && flight.nac_p <= JAMMING_NACAP_THRESHOLD && !flight.grounded) {
-        gpsJamming.push({
-          lat: flight.lat,
-          lng: flight.lng,
-          nac_p: flight.nac_p,
-          callsign: flight.callsign,
-        });
-      }
-
-      switch (flight.category) {
-        case 'military': military.push(flight); break;
-        case 'jet': jets.push(flight); break;
-        case 'private': privateFl.push(flight); break;
-        default: commercial.push(flight);
-      }
-    }
-
-    // Aggregate GPS jamming zones (grid-based)
-    const jammingZones = aggregateJamming(gpsJamming, JAMMING_NACAP_THRESHOLD);
-
-    return {
-      commercial_flights: commercial,
-      private_flights: privateFl,
-      private_jets: jets,
-      military_flights: military,
-      gps_jamming: jammingZones,
-      total: allRaw.length,
-      timestamp: new Date().toISOString(),
-    };
-  })();
-
-  try {
-    const data = await fetchPromise;
-    cachedData = data;
-    lastFetchTime = Date.now();
-    fetchPromise = null;
-
-    // Don't cache a near-empty result (transient upstream failure) so the next
-    // request retries instead of serving sparse data for the full TTL.
-    const cacheControl = data.total < 100
-      ? 'no-store, max-age=0'
-      : 'public, s-maxage=30, stale-while-revalidate=60';
-
-    return NextResponse.json(data, {
-      headers: {
-        'Cache-Control': cacheControl,
-      },
-    });
-  } catch (error) {
-    console.error('Flight fetch error:', error);
-    fetchPromise = null;
-    return NextResponse.json(
-      { error: 'Failed to fetch flight data' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json(body, { headers: { 'Cache-Control': cacheControl } });
 }
 
 function aggregateJamming(points: JammingPoint[], threshold: number) {
