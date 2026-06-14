@@ -130,6 +130,33 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     map.addImage(id, { width: size, height: size, data: new Uint8Array(ctx.getImageData(0, 0, size, size).data) });
   }, []);
 
+  // Create helicopter icon on canvas — a rotor-disc glyph (crossed blades over a
+  // hub) that reads clearly as a helicopter and is visually distinct from the
+  // fixed-wing arrow above. Near rotationally symmetric, so it stays legible
+  // regardless of heading.
+  const createHeliIcon = useCallback((map: maplibregl.Map, id: string, color: string, size: number) => {
+    if (map.hasImage(id)) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    const cx = size / 2, cy = size / 2;
+    const reach = size * 0.42 * 0.707; // half-diagonal of the rotor span
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = Math.max(2, size * 0.09);
+    ctx.lineCap = 'round';
+    // Rotor blades (X)
+    ctx.beginPath();
+    ctx.moveTo(cx - reach, cy - reach); ctx.lineTo(cx + reach, cy + reach);
+    ctx.moveTo(cx + reach, cy - reach); ctx.lineTo(cx - reach, cy + reach);
+    ctx.stroke();
+    // Fuselage hub
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.17, 0, Math.PI * 2);
+    ctx.fill();
+    map.addImage(id, { width: size, height: size, data: new Uint8Array(ctx.getImageData(0, 0, size, size).data) });
+  }, []);
+
   const createDot = useCallback((map: maplibregl.Map, id: string, color: string, size: number) => {
     if (map.hasImage(id)) return;
     const canvas = document.createElement('canvas');
@@ -216,6 +243,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createIcon(map, 'plane-pink', '#FF69B4', 24);
       createIcon(map, 'plane-red', '#FF3D3D', 24);
       createIcon(map, 'plane-grey', '#555555', 24);
+      // Helicopter variants (one per flight-category colour) — selected per
+      // feature via aircraft_category in the flight symbol layers below.
+      createHeliIcon(map, 'heli-cyan', '#00E5FF', 24);
+      createHeliIcon(map, 'heli-green', '#00E676', 24);
+      createHeliIcon(map, 'heli-pink', '#FF69B4', 24);
+      createHeliIcon(map, 'heli-red', '#FF3D3D', 24);
       createDot(map, 'dot-gold', '#D4AF37', 8);
       createDot(map, 'dot-red', '#FF3D3D', 10);
       createDot(map, 'dot-orange', '#FF9500', 10);
@@ -754,17 +787,22 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-offset': [0, 2], 'text-max-width': 14, 'text-allow-overlap': false,
       }, paint: { 'text-color': '#FF3D3D', 'text-halo-color': '#000', 'text-halo-width': 1.5, 'text-opacity': 0.9 }});
 
-      // Flight layers (WebGL symbol — GPU rendered, handles 50K+ smooth)
+      // Flight layers (WebGL symbol — GPU rendered, handles 50K+ smooth).
+      // Each layer picks a plane or helicopter glyph per feature via
+      // aircraft_category; helis aren't heading-rotated (their rotor glyph reads
+      // the same at any angle, and "direction" is meaningless for a hovering one).
       const flightLayers = [
-        { id: 'fl-commercial', src: 'flights', icon: 'plane-cyan' },
-        { id: 'fl-private', src: 'private-fl', icon: 'plane-green' },
-        { id: 'fl-jets', src: 'jets', icon: 'plane-pink' },
-        { id: 'fl-military', src: 'military', icon: 'plane-red' },
+        { id: 'fl-commercial', src: 'flights', plane: 'plane-cyan', heli: 'heli-cyan' },
+        { id: 'fl-private', src: 'private-fl', plane: 'plane-green', heli: 'heli-green' },
+        { id: 'fl-jets', src: 'jets', plane: 'plane-pink', heli: 'heli-pink' },
+        { id: 'fl-military', src: 'military', plane: 'plane-red', heli: 'heli-red' },
       ];
       flightLayers.forEach(l => {
         map.addLayer({ id: l.id, type: 'symbol', source: l.src, layout: {
-          'icon-image': l.icon, 'icon-size': ['interpolate',['linear'],['zoom'], 1,0.4, 5,0.7, 10,1],
-          'icon-rotate': ['get','heading'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true,
+          'icon-image': ['match', ['get','aircraft_category'], 'heli', l.heli, l.plane],
+          'icon-size': ['interpolate',['linear'],['zoom'], 1,0.4, 5,0.7, 10,1],
+          'icon-rotate': ['match', ['get','aircraft_category'], 'heli', 0, ['get','heading']],
+          'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true,
         }, paint: { 'icon-opacity': 0.85 }});
       });
 
@@ -1627,7 +1665,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       }
       return filtered.map((f: any) => ({
         type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [f.lng, f.lat] },
-        properties: { callsign: f.callsign, heading: f.heading || 0, alt: f.alt, model: f.model, speed_knots: f.speed_knots, registration: f.registration, icao24: f.icao24 },
+        properties: { callsign: f.callsign, heading: f.heading || 0, alt: f.alt, model: f.model, speed_knots: f.speed_knots, registration: f.registration, icao24: f.icao24, aircraft_category: f.aircraft_category || 'plane' },
       }));
     };
     setGeo('flights', activeLayers.flights ? toFeatures(data.commercial_flights, 10) : []);
