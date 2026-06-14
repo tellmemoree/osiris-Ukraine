@@ -12,6 +12,7 @@ import { getShadowFleetImos, getShadowFleetMmsis } from '@/lib/shadowFleet';
 // re-accumulate after every restart.
 const SHADOW_STATE_DIR = path.join(os.homedir(), '.osiris-data');
 const SHADOW_STATE_FILE = path.join(SHADOW_STATE_DIR, 'shadow-mmsi.json');
+const SHIPS_CACHE_FILE = path.join(SHADOW_STATE_DIR, 'ships-cache.json');
 
 /**
  * OSIRIS — Maritime Intelligence
@@ -144,8 +145,8 @@ if (!globalForAis.shipsCache) {
   globalForAis.isAisConnecting = false;
   globalForAis.shadowMmsi = new Set();
   globalForAis.shadowSaveTimer = null;
-  // Best-effort restore of the learned sanctioned-MMSI set. Mutates the same
-  // Set the `shadowMmsi` const below references, so additions land in it.
+
+  // Restore learned shadow-fleet MMSIs from disk.
   fs.readFile(SHADOW_STATE_FILE, 'utf8')
     .then((txt) => {
       const arr: unknown = JSON.parse(txt);
@@ -155,6 +156,35 @@ if (!globalForAis.shipsCache) {
       }
     })
     .catch(() => {/* no prior state — start empty */});
+
+  // Restore last-known ship positions from disk so the layer is immediately
+  // populated on startup — shadow fleet vessels show right away, and regular
+  // ships appear as stale until the AIS stream refreshes them.
+  fs.readFile(SHIPS_CACHE_FILE, 'utf8')
+    .then((txt) => {
+      const arr: unknown = JSON.parse(txt);
+      if (Array.isArray(arr)) {
+        let count = 0;
+        for (const ship of arr) {
+          if (ship && typeof (ship as Ship).mmsi === 'number') {
+            globalForAis.shipsCache.set((ship as Ship).mmsi, ship as Ship);
+            count++;
+          }
+        }
+        console.log(`[OSIRIS] ships-cache: restored ${count} vessels from disk`);
+      }
+    })
+    .catch(() => {/* no prior snapshot — starts empty, fills from AIS stream */});
+
+  // Persist the full ship cache every 5 minutes so restarts can recover quickly.
+  setInterval(async () => {
+    const ships = Array.from(globalForAis.shipsCache.values());
+    if (ships.length === 0) return;
+    try {
+      await fs.mkdir(SHADOW_STATE_DIR, { recursive: true });
+      await fs.writeFile(SHIPS_CACHE_FILE, JSON.stringify(ships), 'utf8');
+    } catch {/* best-effort */}
+  }, 5 * 60 * 1000);
 }
 
 const shipsCache = globalForAis.shipsCache;
