@@ -16,6 +16,7 @@ import { fetchFranceCameras } from './france';
 import { fetchSpainCameras } from './spain';
 import { fetchPolandCameras } from './poland';
 import { fetchJapanCameras } from './japan';
+import { fetchSwitzerlandCameras } from './switzerland';
 
 /**
  * OSIRIS — Worldwide CCTV Camera API v2
@@ -188,6 +189,23 @@ async function fetchCanadaCameras(): Promise<Camera[]> {
           id: `ab-${cam.Id || cams.length}`, lat: cam.Latitude, lng: cam.Longitude,
           name: cam.Location || 'Alberta Camera', city: 'Alberta', country: 'Canada',
           feed_url: cam.Views[0].Url, source: 'Alberta 511',
+        });
+      }
+    }
+  } catch { /* silent */ }
+
+  // British Columbia HighwayCams (DriveBC Live API)
+  try {
+    const res = await stealthFetch('https://drivebc.ca/api/webcams', { signal: AbortSignal.timeout(10000) });
+    if (res.ok) {
+      const data = await res.json();
+      for (const cam of (data || [])) {
+        if (!cam.location?.coordinates || !cam.links?.imageDisplay) continue;
+        const [lng, lat] = cam.location.coordinates;
+        cams.push({
+          id: `bc-cam-${cam.id}`, lat, lng,
+          name: cam.name || cam.caption || 'BC Highway Camera', city: 'British Columbia', country: 'Canada',
+          feed_url: `https://drivebc.ca${cam.links.imageDisplay}`, source: 'DriveBC',
         });
       }
     }
@@ -458,6 +476,7 @@ const REGION_FETCHERS: Record<string, () => Promise<Camera[]>> = {
   'spain': fetchSpainCameras,
   'poland': fetchPolandCameras,
   'japan': fetchJapanCameras,
+  'switzerland': fetchSwitzerlandCameras,
 };
 
 // Determine which regions to fetch based on viewport bounds
