@@ -111,7 +111,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (map.hasImage(id)) return;
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     const cx = size / 2, cy = size / 2;
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -138,7 +139,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (map.hasImage(id)) return;
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     const cx = size / 2, cy = size / 2;
     const reach = size * 0.42 * 0.707; // half-diagonal of the rotor span
     ctx.strokeStyle = color;
@@ -161,7 +163,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     if (map.hasImage(id)) return;
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(size/2, size/2, size/2 - 1, 0, Math.PI * 2);
@@ -237,24 +240,32 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
     map.on('load', () => {
       mapRef.current = map;
-      // Create icons
-      createIcon(map, 'plane-cyan', '#00E5FF', 24);
-      createIcon(map, 'plane-green', '#00E676', 24);
-      createIcon(map, 'plane-pink', '#FF69B4', 24);
-      createIcon(map, 'plane-red', '#FF3D3D', 24);
-      createIcon(map, 'plane-grey', '#555555', 24);
-      // Helicopter variants (one per flight-category colour) — selected per
-      // feature via aircraft_category in the flight symbol layers below.
-      createHeliIcon(map, 'heli-cyan', '#00E5FF', 24);
-      createHeliIcon(map, 'heli-green', '#00E676', 24);
-      createHeliIcon(map, 'heli-pink', '#FF69B4', 24);
-      createHeliIcon(map, 'heli-red', '#FF3D3D', 24);
-      createDot(map, 'dot-gold', '#D4AF37', 8);
-      createDot(map, 'dot-red', '#FF3D3D', 10);
-      createDot(map, 'dot-orange', '#FF9500', 10);
-      createDot(map, 'dot-green', '#00E676', 10);
-      createDot(map, 'dot-fire', '#FF6B00', 10);
-      createDot(map, 'dot-cctv', '#39FF14', 10);
+      // Create icons — isolated in a try/catch so a canvas/addImage failure
+      // (e.g. iOS Safari returning a null 2d context under memory/context
+      // pressure) can NEVER abort the rest of map init. Previously a throw here
+      // skipped every addSource/addLayer below, blanking all layers at once.
+      // Symbols with a missing icon-image simply don't render; data still loads.
+      try {
+        createIcon(map, 'plane-cyan', '#00E5FF', 24);
+        createIcon(map, 'plane-green', '#00E676', 24);
+        createIcon(map, 'plane-pink', '#FF69B4', 24);
+        createIcon(map, 'plane-red', '#FF3D3D', 24);
+        createIcon(map, 'plane-grey', '#555555', 24);
+        // Helicopter variants (one per flight-category colour) — selected per
+        // feature via aircraft_category in the flight symbol layers below.
+        createHeliIcon(map, 'heli-cyan', '#00E5FF', 24);
+        createHeliIcon(map, 'heli-green', '#00E676', 24);
+        createHeliIcon(map, 'heli-pink', '#FF69B4', 24);
+        createHeliIcon(map, 'heli-red', '#FF3D3D', 24);
+        createDot(map, 'dot-gold', '#D4AF37', 8);
+        createDot(map, 'dot-red', '#FF3D3D', 10);
+        createDot(map, 'dot-orange', '#FF9500', 10);
+        createDot(map, 'dot-green', '#00E676', 10);
+        createDot(map, 'dot-fire', '#FF6B00', 10);
+        createDot(map, 'dot-cctv', '#39FF14', 10);
+      } catch (e) {
+        console.error('[OsirisMap] icon init failed (continuing without icons):', e);
+      }
 
       // Sources
       const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality', 'ioda-outages', 'malware-nodes', 'thermal-aoi', 'captures', 'network-mesh'];
@@ -265,7 +276,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         const s = 20;
         const c = document.createElement('canvas');
         c.width = s; c.height = s;
-        const ctx = c.getContext('2d')!;
+        const ctx = c.getContext('2d');
+        if (!ctx) return;
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.moveTo(s/2, 1);
@@ -279,9 +291,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         ctx.fillText('!', s/2, s - 4);
         map.addImage(id, { width: s, height: s, data: new Uint8Array(ctx.getImageData(0, 0, s, s).data) });
       };
-      createWarningIcon('warn-icon', '#FF1744');
-      createWarningIcon('warn-orange', '#FF9500');
-      createWarningIcon('warn-yellow', '#FFD500');
+      try {
+        createWarningIcon('warn-icon', '#FF1744');
+        createWarningIcon('warn-orange', '#FF9500');
+        createWarningIcon('warn-yellow', '#FFD500');
+      } catch (e) {
+        console.error('[OsirisMap] warning-icon init failed (continuing):', e);
+      }
 
       map.addLayer({ id: 'conflict-icons', type: 'symbol', source: 'conflict-zones', layout: {
         'icon-image': ['match', ['get','severity'], 'war','warn-icon', 'high','warn-orange', 'warn-yellow'],
