@@ -13,9 +13,22 @@ interface LayerPanelProps {
   activeLayers: any;
   setActiveLayers: React.Dispatch<React.SetStateAction<any>>;
   isMobile?: boolean;
+  theme?: 'core' | 'ghost';
+  setTheme?: (theme: 'core' | 'ghost') => void;
 }
 
-const LAYER_GROUPS = [
+const getLayerGroups = (theme: 'core' | 'ghost') => {
+  const isGhost = theme === 'ghost';
+  const phantomPurple = '#B388FF';
+  const ghostPriv = '#CE93D8';
+  const ghostGov = '#D500F9';
+
+  const flightCom = isGhost ? phantomPurple : '#00E5FF';
+  const flightPriv = isGhost ? ghostPriv : '#FFD700';
+  const flightGov = isGhost ? ghostGov : '#FF9500';
+  const flightMil = '#FF3D3D';
+
+  return [
   {
     label: 'SDK',
     fullLabel: 'OSIRIS SDK',
@@ -27,12 +40,12 @@ const LAYER_GROUPS = [
   {
     label: 'AVIATION',
     fullLabel: 'AVIATION',
-    color: '#00E5FF',
+    color: flightCom,
     layers: [
-      { key: 'flights', label: 'Commercial', icon: Plane, color: '#00E5FF', dataKey: 'commercial_flights' },
-      { key: 'private', label: 'Private', icon: Plane, color: '#00E676', dataKey: 'private_flights' },
-      { key: 'jets', label: 'Private Jets', icon: Plane, color: '#FF69B4', dataKey: 'private_jets' },
-      { key: 'military', label: 'Military', icon: Shield, color: '#FF3D3D', dataKey: 'military_flights' },
+      { key: 'flights', label: 'Commercial', icon: Plane, color: flightCom, dataKey: 'commercial_flights' },
+      { key: 'private', label: 'Private', icon: Plane, color: flightPriv, dataKey: 'private_flights' },
+      { key: 'jets', label: 'Private Jets', icon: Plane, color: flightGov, dataKey: 'private_jets' },
+      { key: 'military', label: 'Military', icon: Shield, color: flightMil, dataKey: 'military_flights' },
     ],
   },
   {
@@ -50,11 +63,11 @@ const LAYER_GROUPS = [
   {
     label: 'SURVEIL',
     fullLabel: 'SURVEILLANCE',
-    color: '#39FF14',
+    color: isGhost ? '#9575CD' : '#39FF14',
     layers: [
-      { key: 'cctv', label: 'CCTV Cameras', icon: Camera, color: '#39FF14', dataKey: 'cameras' },
+      { key: 'cctv', label: 'CCTV Cameras', icon: Camera, color: isGhost ? '#B388FF' : '#39FF14', dataKey: 'cameras' },
       { key: 'live_news', label: 'Live News Feeds', icon: Tv, color: '#FF4081', dataKey: 'live_feeds' },
-      { key: 'news_intel', label: 'News Geo-Dots', icon: Newspaper, color: '#D4AF37', dataKey: 'news' },
+      { key: 'news_intel', label: 'News Geo-Dots', icon: Newspaper, color: isGhost ? phantomPurple : '#D4AF37', dataKey: 'news' },
     ],
   },
   {
@@ -104,9 +117,9 @@ const LAYER_GROUPS = [
   {
     label: 'NETWORK',
     fullLabel: 'NETWORK INTEL',
-    color: '#00E5FF',
+    color: isGhost ? phantomPurple : '#00E5FF',
     layers: [
-      { key: 'internet_outages', label: 'Internet Outages', icon: Network, color: '#00E5FF', dataKey: 'ioda_outages' },
+      { key: 'internet_outages', label: 'Internet Outages', icon: Network, color: isGhost ? phantomPurple : '#00E5FF', dataKey: 'ioda_outages' },
       { key: 'malware', label: 'Live Malware', icon: AlertTriangle, color: '#FF1744', dataKey: 'malware_threats' },
     ],
   },
@@ -118,9 +131,8 @@ const LAYER_GROUPS = [
       { key: 'day_night', label: 'Day / Night Cycle', icon: Sun, color: '#448AFF', dataKey: '' },
     ],
   },
-];
-
-const ALL_LAYERS = LAYER_GROUPS.flatMap(g => g.layers);
+  ];
+};
 
 // SVG component for Shield which was missing in the imports above
 function Shield(props: any) {
@@ -131,8 +143,10 @@ function Shield(props: any) {
   );
 }
 
-function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPanelProps) {
+function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme }: LayerPanelProps) {
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
+
+  const LAYER_GROUPS = getLayerGroups(theme);
 
   const toggle = (key: string) => setActiveLayers((prev: any) => ({ ...prev, [key]: !prev[key] }));
 
@@ -232,6 +246,35 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
           </div>
           );
         })}
+
+        {/* MOBILE GHOST MODE TOGGLE */}
+        {setTheme && (
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-[var(--border-primary)] px-2">
+            <div className="text-[10px] font-bold font-mono tracking-widest text-[var(--text-secondary)]">
+              GHOST MODE
+            </div>
+            <button
+              onClick={() => setTheme(theme === 'core' ? 'ghost' : 'core')}
+              className="relative w-12 h-6 rounded-full transition-all duration-500 ease-in-out border flex items-center px-0.5 cursor-pointer hover:shadow-lg"
+              style={{
+                backgroundColor: theme === 'ghost' ? 'rgba(179, 136, 255, 0.15)' : 'rgba(0,0,0,0.4)',
+                borderColor: theme === 'ghost' ? 'rgba(179, 136, 255, 0.5)' : 'rgba(255,255,255,0.1)',
+                boxShadow: theme === 'ghost' ? '0 0 15px rgba(179, 136, 255, 0.3), inset 0 0 8px rgba(179, 136, 255, 0.2)' : 'inset 0 0 5px rgba(0,0,0,0.5)',
+              }}
+            >
+              <motion.div
+                layout
+                className="w-4 h-4 rounded-full"
+                style={{
+                  backgroundColor: theme === 'ghost' ? '#B388FF' : 'rgba(255,255,255,0.4)',
+                  boxShadow: theme === 'ghost' ? '0 0 10px #B388FF' : 'none',
+                }}
+                animate={{ x: theme === 'ghost' ? 24 : 0 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+              />
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -354,6 +397,33 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile }: LayerPane
           );
         })}
       </div>
+
+      {/* GHOST PROTOCOL TOGGLE */}
+      {setTheme && (
+        <div className="mt-auto px-2 pt-6 pb-2 border-t border-[var(--border-primary)] flex flex-col items-center gap-3 relative z-50">
+          <div className="text-[9px] font-mono tracking-[0.25em] text-[var(--text-secondary)]">GHOST PROTOCOL</div>
+          <button
+            onClick={() => setTheme(theme === 'core' ? 'ghost' : 'core')}
+            className="relative w-14 h-7 rounded-full transition-all duration-500 ease-in-out border flex items-center px-1 cursor-pointer hover:shadow-lg"
+            style={{
+              backgroundColor: theme === 'ghost' ? 'rgba(179, 136, 255, 0.15)' : 'rgba(0,0,0,0.4)',
+              borderColor: theme === 'ghost' ? 'rgba(179, 136, 255, 0.5)' : 'rgba(255,255,255,0.1)',
+              boxShadow: theme === 'ghost' ? '0 0 15px rgba(179, 136, 255, 0.3), inset 0 0 8px rgba(179, 136, 255, 0.2)' : 'inset 0 0 5px rgba(0,0,0,0.5)',
+            }}
+          >
+            <motion.div
+              layout
+              className="w-5 h-5 rounded-full"
+              style={{
+                backgroundColor: theme === 'ghost' ? '#B388FF' : 'rgba(255,255,255,0.4)',
+                boxShadow: theme === 'ghost' ? '0 0 10px #B388FF' : 'none',
+              }}
+              animate={{ x: theme === 'ghost' ? 28 : 0 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+            />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

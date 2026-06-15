@@ -75,6 +75,7 @@ interface OsirisMapProps {
   sweepData?: any;
   scanTargets?: any[];
   demoMode?: boolean;
+  theme?: 'core' | 'ghost';
 }
 
 function computeSolarTerminator(): [number, number][] {
@@ -99,7 +100,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core' }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -210,18 +211,28 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
     map.on('load', () => {
       mapRef.current = map;
+
+      // Theme colors
+      const isGhost = theme === 'ghost';
+      const phantomPurple = '#B388FF';
+      const cameraColor = isGhost ? phantomPurple : '#00E676';
+      const flightCom = isGhost ? phantomPurple : '#00E5FF';
+      const flightPriv = isGhost ? phantomPurple : '#FFD700';
+      const flightGov = isGhost ? phantomPurple : '#FF9500';
+      const flightMil = isGhost ? phantomPurple : '#FF3D3D';
+
       // Create icons
-      createIcon(map, 'plane-cyan', '#00E5FF', 24);
-      createIcon(map, 'plane-green', '#00E676', 24);
-      createIcon(map, 'plane-pink', '#FF69B4', 24);
-      createIcon(map, 'plane-red', '#FF3D3D', 24);
-      createIcon(map, 'plane-grey', '#555555', 24);
-      createDot(map, 'dot-gold', '#D4AF37', 8);
+      createIcon(map, 'plane-cyan', flightCom, 24);
+      createIcon(map, 'plane-green', flightPriv, 24);
+      createIcon(map, 'plane-pink', flightGov, 24);
+      createIcon(map, 'plane-red', flightMil, 24);
+      createIcon(map, 'plane-grey', isGhost ? phantomPurple : '#555555', 24);
+      createDot(map, 'dot-gold', isGhost ? phantomPurple : '#D4AF37', 8);
       createDot(map, 'dot-red', '#FF3D3D', 10);
       createDot(map, 'dot-orange', '#FF9500', 10);
       createDot(map, 'dot-green', '#00E676', 10);
       createDot(map, 'dot-fire', '#FF6B00', 10);
-      createDot(map, 'dot-cctv', '#39FF14', 10);
+      createDot(map, 'dot-cctv', cameraColor, 10);
 
       // Sources
       const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality', 'ioda-outages', 'malware-nodes', 'thermal-aoi', 'captures', 'network-mesh'];
@@ -528,19 +539,19 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // CCTV — outer glow ring
       map.addLayer({ id: 'cctv-glow', type: 'circle', source: 'cctv', paint: {
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,5, 5,8, 10,14, 14,20],
-        'circle-color': '#39FF14', 'circle-opacity': 0.08, 'circle-blur': 1,
+        'circle-color': cameraColor, 'circle-opacity': 0.08, 'circle-blur': 1,
       }});
       // CCTV — main dot
       map.addLayer({ id: 'cctv-dots', type: 'circle', source: 'cctv', paint: {
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,3, 5,5, 10,8, 14,12],
-        'circle-color': '#39FF14', 'circle-opacity': 0.8,
-        'circle-stroke-width': 2, 'circle-stroke-color': '#39FF14', 'circle-stroke-opacity': 0.5,
+        'circle-color': cameraColor, 'circle-opacity': 0.8,
+        'circle-stroke-width': 2, 'circle-stroke-color': cameraColor, 'circle-stroke-opacity': 0.5,
       }});
       // CCTV — labels at zoom 10+
       map.addLayer({ id: 'cctv-label', type: 'symbol', source: 'cctv', minzoom: 10, layout: {
         'text-field': ['get','name'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 1.8], 'text-max-width': 12, 'text-allow-overlap': false,
-      }, paint: { 'text-color': '#39FF14', 'text-halo-color': '#000', 'text-halo-width': 1, 'text-opacity': 0.7 }});
+      }, paint: { 'text-color': cameraColor, 'text-halo-color': '#000', 'text-halo-width': 1, 'text-opacity': 0.7 }});
 
       // ══ NETWORK INTEL — IODA Internet Outages ══
       map.addLayer({ id: 'ioda-glow', type: 'circle', source: 'ioda-outages', paint: {
