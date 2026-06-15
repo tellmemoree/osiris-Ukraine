@@ -17,6 +17,7 @@ interface OsirisMapProps {
   sweepData?: any;
   scanTargets?: any[];
   demoMode?: boolean;
+  theme?: 'core' | 'ghost';
 }
 
 function computeSolarTerminator(): [number, number][] {
@@ -41,7 +42,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core' }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -134,9 +135,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    
+    // Select basemap style
+    const styleUrl = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      style: styleUrl,
       center: [25.48, 42.70], zoom: 6.5, minZoom: 1.5, maxZoom: 18,
       attributionControl: false,
       maxPitch: 85,
@@ -152,18 +157,29 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
     map.on('load', () => {
       mapRef.current = map;
+      
+      // Theme colors
+      const isGhost = theme === 'ghost';
+      const phantomPurple = '#B388FF';
+      const phantomDark = '#1A0040';
+      const cameraColor = isGhost ? '#B388FF' : '#00E676';
+      const flightCom = isGhost ? phantomPurple : '#00E5FF';
+      const flightPriv = isGhost ? phantomPurple : '#FFD700';
+      const flightGov = isGhost ? phantomPurple : '#FF9500';
+      const flightMil = isGhost ? phantomPurple : '#FF3D3D';
+
       // Create icons — OSIRIS Unified Palette
-      createIcon(map, 'plane-cyan', '#64B5F6', 24);   // Commercial — steel blue
-      createIcon(map, 'plane-green', '#B0BEC5', 24);   // Private — silver
-      createIcon(map, 'plane-pink', '#7E57C2', 24);    // Govt/VIP jets — violet
-      createIcon(map, 'plane-red', '#D32F2F', 24);     // Military — crimson
-      createIcon(map, 'plane-grey', '#546E7A', 24);    // Unknown — blue-grey
-      createDot(map, 'dot-gold', '#D4AF37', 8);
-      createDot(map, 'dot-red', '#D32F2F', 10);
-      createDot(map, 'dot-orange', '#E65100', 10);
-      createDot(map, 'dot-green', '#26A69A', 10);
-      createDot(map, 'dot-fire', '#E65100', 10);
-      createDot(map, 'dot-cctv', '#7E57C2', 10);
+      createIcon(map, 'plane-cyan', flightCom, 24);   
+      createIcon(map, 'plane-green', flightPriv, 24);   
+      createIcon(map, 'plane-pink', flightGov, 24);    
+      createIcon(map, 'plane-red', flightMil, 24);     
+      createIcon(map, 'plane-grey', isGhost ? phantomPurple : '#546E7A', 24);    
+      createDot(map, 'dot-gold', isGhost ? phantomPurple : '#D4AF37', 8);
+      createDot(map, 'dot-red', isGhost ? phantomPurple : '#D32F2F', 10);
+      createDot(map, 'dot-orange', isGhost ? phantomPurple : '#E65100', 10);
+      createDot(map, 'dot-green', isGhost ? phantomPurple : '#26A69A', 10);
+      createDot(map, 'dot-fire', isGhost ? phantomPurple : '#E65100', 10);
+      createDot(map, 'dot-cctv', cameraColor, 10);
 
       const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'malware-nodes', 'network-mesh'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
@@ -207,7 +223,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
 
       // Day/Night
-      map.addLayer({ id: 'day-night-fill', type: 'fill', source: 'day-night', paint: { 'fill-color': '#000022', 'fill-opacity': 0.35 }});
+      map.addLayer({ id: 'day-night-fill', type: 'fill', source: 'day-night', paint: { 'fill-color': isGhost ? '#0D0030' : '#000022', 'fill-opacity': 0.35 }});
 
       // Earthquakes — amber threat spectrum
       map.addLayer({ id: 'eq-circles', type: 'circle', source: 'earthquakes', paint: {
@@ -225,22 +241,22 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'circle-color': '#E65100', 'circle-opacity': 0.45, 'circle-blur': 0.5,
       }});
 
-      // CCTV — outer glow ring (black)
+      // CCTV — outer glow ring (black/white depending on theme)
       map.addLayer({ id: 'cctv-glow', type: 'circle', source: 'cctv', paint: {
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,5, 5,8, 10,14, 14,20],
-        'circle-color': '#000000', 'circle-opacity': 0.25, 'circle-blur': 1,
+        'circle-color': '#000000', 'circle-opacity': 0.35, 'circle-blur': 1,
       }});
-      // CCTV — main dot (black ring with purple center)
+      // CCTV — main dot
       map.addLayer({ id: 'cctv-dots', type: 'circle', source: 'cctv', paint: {
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,3, 5,5, 10,8, 14,12],
-        'circle-color': '#7E57C2', 'circle-opacity': 0.9,
+        'circle-color': cameraColor, 'circle-opacity': 0.9,
         'circle-stroke-width': 2.5, 'circle-stroke-color': '#000000', 'circle-stroke-opacity': 0.9,
       }});
       // CCTV — labels at zoom 10+
       map.addLayer({ id: 'cctv-label', type: 'symbol', source: 'cctv', minzoom: 10, layout: {
         'text-field': ['get','name'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 1.8], 'text-max-width': 12, 'text-allow-overlap': false,
-      }, paint: { 'text-color': '#7E57C2', 'text-halo-color': '#000', 'text-halo-width': 1.5, 'text-opacity': 0.8 }});
+      }, paint: { 'text-color': cameraColor, 'text-halo-color': '#000000', 'text-halo-width': 1.5, 'text-opacity': 0.8 }});
 
       // GDELT
 
@@ -1046,6 +1062,51 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('jets', activeLayers.jets ? toFeatures(data.private_jets, 2) : []);
     setGeo('military', activeLayers.military ? toFeatures(data.military_flights) : []);
   }, [mapReady, data.commercial_flights, data.private_flights, data.private_jets, data.military_flights, activeLayers.flights, activeLayers.private, activeLayers.jets, activeLayers.military]);
+
+    // Update aircraft icon colors dynamically on theme switch
+    useEffect(() => {
+      if (!mapReady || !mapRef.current) return;
+      const map = mapRef.current;
+      
+      const isGhost = theme === 'ghost';
+      const phantomPurple = '#B388FF';
+      const ghostPriv = '#CE93D8';
+      const ghostGov = '#D500F9';
+
+      const flightCom = isGhost ? phantomPurple : '#00E5FF';
+      const flightPriv = isGhost ? ghostPriv : '#FFD700';
+      const flightGov = isGhost ? ghostGov : '#FF9500';
+      const flightMil = '#FF0000';
+
+      const updateMapIcon = (id: string, color: string, size: number) => {
+        if (!map.hasImage(id)) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d')!;
+        const cx = size / 2, cy = size / 2;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - size * 0.4);
+        ctx.lineTo(cx - size * 0.12, cy + size * 0.1);
+        ctx.lineTo(cx - size * 0.4, cy + size * 0.2);
+        ctx.lineTo(cx - size * 0.4, cy + size * 0.3);
+        ctx.lineTo(cx - size * 0.12, cy + size * 0.15);
+        ctx.lineTo(cx, cy + size * 0.35);
+        ctx.lineTo(cx + size * 0.12, cy + size * 0.15);
+        ctx.lineTo(cx + size * 0.4, cy + size * 0.3);
+        ctx.lineTo(cx + size * 0.4, cy + size * 0.2);
+        ctx.lineTo(cx + size * 0.12, cy + size * 0.1);
+        ctx.closePath();
+        ctx.fill();
+        map.updateImage(id, { width: size, height: size, data: new Uint8Array(ctx.getImageData(0, 0, size, size).data) });
+      };
+
+      updateMapIcon('plane-cyan', flightCom, 24);
+      updateMapIcon('plane-green', flightPriv, 24);
+      updateMapIcon('plane-pink', flightGov, 24);
+      updateMapIcon('plane-red', flightMil, 24);
+      updateMapIcon('plane-grey', isGhost ? phantomPurple : '#546E7A', 24);
+    }, [mapReady, theme]);
 
   // ── DECOUPLED LAYER RENDERERS (Performance Optimized) ──
 

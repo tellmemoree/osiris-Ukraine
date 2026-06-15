@@ -16,6 +16,7 @@ import { fetchFranceCameras } from './france';
 import { fetchSpainCameras } from './spain';
 import { fetchPolandCameras } from './poland';
 import { fetchJapanCameras } from './japan';
+import { fetchSwitzerlandCameras } from './switzerland';
 
 /**
  * OSIRIS — Worldwide CCTV Camera API v2
@@ -175,6 +176,43 @@ async function fetchCanadaCameras(): Promise<any[]> {
     }
   } catch { /* silent */ }
 
+
+  // Toronto Open Data Municipal Traffic Cameras
+  try {
+    const res = await stealthFetch('https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/a3309088-5fd4-4d34-8297-77c8301840ac/resource/4a568300-c7f8-496d-b150-dff6f5dc6d4f/download/traffic-camera-list-4326.geojson', { signal: AbortSignal.timeout(10000) });
+    if (res.ok) {
+      const data = await res.json();
+      for (const feature of (data.features || [])) {
+        let coords = feature.geometry?.coordinates;
+        if (Array.isArray(coords) && Array.isArray(coords[0])) coords = coords[0];
+        const p = feature.properties;
+        if (!coords || !p || !p.IMAGEURL) continue;
+        cams.push({
+          id: `tor-open-${p.REC_ID}`, lat: coords[1], lng: coords[0],
+          name: `${p.MAINROAD} / ${p.CROSSROAD}`, city: 'Toronto', country: 'Canada',
+          feed_url: p.IMAGEURL, source: 'City of Toronto',
+        });
+      }
+    }
+  } catch { /* silent */ }
+
+  // British Columbia HighwayCams (Live JSON API)
+  try {
+    const res = await stealthFetch('https://drivebc.ca/api/webcams', { signal: AbortSignal.timeout(10000) });
+    if (res.ok) {
+      const data = await res.json();
+      for (const cam of (data || [])) {
+        if (!cam.location?.coordinates || !cam.links?.imageDisplay) continue;
+        const [lng, lat] = cam.location.coordinates;
+        cams.push({
+          id: `bc-cam-${cam.id}`, lat, lng,
+          name: cam.name || cam.caption || 'BC Highway Camera', city: 'British Columbia', country: 'Canada',
+          feed_url: `https://drivebc.ca${cam.links.imageDisplay}`, source: 'DriveBC',
+        });
+      }
+    }
+  } catch { /* silent */ }
+
   return cams.filter((c: any) => c.lat && c.lng);
 }
 
@@ -252,6 +290,7 @@ async function fetchUSEastCameras(): Promise<any[]> {
       }
     }
   } catch { /* silent */ }
+
 
   return cams.filter((c: any) => c.lat && c.lng);
 }
@@ -379,6 +418,7 @@ const REGION_FETCHERS: Record<string, () => Promise<any[]>> = {
   'spain': fetchSpainCameras,
   'poland': fetchPolandCameras,
   'japan': fetchJapanCameras,
+  'switzerland': fetchSwitzerlandCameras,
 };
 
 // Determine which regions to fetch based on viewport bounds
