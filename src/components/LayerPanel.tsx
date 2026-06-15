@@ -147,7 +147,6 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
 
   const LAYER_GROUPS = getLayerGroups(theme);
-  const ALL_LAYERS = LAYER_GROUPS.flatMap(g => g.layers);
 
   const toggle = (key: string) => setActiveLayers((prev: any) => ({ ...prev, [key]: !prev[key] }));
 

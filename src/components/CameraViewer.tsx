@@ -80,8 +80,9 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
       return;
     }
 
-    if (camera.feed_url) {
-      const url = camera.feed_url.includes('?') ? `${camera.feed_url}&_t=${Date.now()}` : `${camera.feed_url}?_t=${Date.now()}`;
+    const jpgSrc = camera.feed_url || (streamType === 'jpg' ? camera.stream_url : null);
+    if (jpgSrc) {
+      const url = jpgSrc.includes('?') ? `${jpgSrc}&_t=${Date.now()}` : `${jpgSrc}?_t=${Date.now()}`;
       setImageUrl(url);
     } else {
       setError(true);
@@ -90,10 +91,11 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
   }, [camera, refreshKey, streamType, externalOnly]);
 
   useEffect(() => {
-    if (streamType !== 'jpg' || !camera?.feed_url) return;
+    const jpgSrc = camera?.feed_url || (streamType === 'jpg' ? camera?.stream_url : null);
+    if (streamType !== 'jpg' || !jpgSrc) return;
     const iv = setInterval(() => setRefreshKey(k => k + 1), 5000);
     return () => clearInterval(iv);
-  }, [camera?.feed_url, streamType]);
+  }, [camera?.feed_url, camera?.stream_url, streamType]);
 
   if (!camera) return null;
 
