@@ -22,7 +22,11 @@ function extractEnglish(text: string): string {
 }
 
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  // Strip well-formed tags, then drop any leftover stray angle brackets so an
+  // UNTERMINATED tag (e.g. `<svg/onload=...` with no closing `>`) can't survive
+  // and be auto-completed by the browser's HTML parser downstream. The popup
+  // also escapes this value with esc(), but neutralise it server-side too.
+  return html.replace(/<[^>]*>/g, ' ').replace(/[<>]/g, ' ').replace(/\s{2,}/g, ' ').trim();
 }
 
 // Parse liberation date from name like "{{at:25.03}}" — all are 2022 (Kyiv/Kharkiv pullback)

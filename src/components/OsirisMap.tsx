@@ -1150,7 +1150,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const waveLabel = p.waveIndex > 0 ? ` · Wave ${p.waveIndex + 1}` : '';
       popup(coords, `<div style="${pStyle}border:1px solid rgba(206,147,216,0.45);max-width:300px;">
         <div style="color:#CE93D8;font-size:13px;font-weight:700;margin-bottom:6px;">🚁 DRONE / UAV${waveLabel}</div>
-        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${p.oblast||'Unknown region'}</div>
+        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${esc(p.oblast)||'Unknown region'}</div>
         <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">Waypoint ${p.sequence||'?'} · last 1.5h · OSINT Telegram</div>
         <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid rgba(206,147,216,0.4);padding-left:6px;">${esc(p.text)}</div>
         <div style="display:grid;grid-template-columns:1fr;gap:4px;font-size:9px;">
@@ -1168,13 +1168,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const coords = (e.features[0].geometry as any).coordinates;
       const waveLabel = p.waveIndex > 0 ? ` · Wave ${p.waveIndex + 1}` : '';
       popup(coords, `<div style="${pStyle}border:1px solid ${p.color}44;max-width:300px;">
-        <div style="color:${p.color};font-size:13px;font-weight:700;margin-bottom:6px;">🚀 ${p.weaponLabel||p.weaponType}${waveLabel}</div>
-        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${p.oblast||'Unknown region'}</div>
+        <div style="color:${p.color};font-size:13px;font-weight:700;margin-bottom:6px;">🚀 ${esc(p.weaponLabel||p.weaponType)}${waveLabel}</div>
+        <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${esc(p.oblast)||'Unknown region'}</div>
         <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">Waypoint ${p.sequence||'?'} · last 1.5h · OSINT Telegram</div>
-        <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid ${p.color}44;padding-left:6px;">${(p.text||'').replace(/</g,'&lt;')}</div>
+        <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid ${p.color}44;padding-left:6px;">${esc(p.text)}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
           <div><span style="color:#5C5A54;">REPORTED</span><br/><span style="color:#E8E6E0;">${p.ts ? new Date(p.ts).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
-          <div><span style="color:#5C5A54;">SOURCES</span><br/><span style="color:#E8E6E0;font-size:8px;">${p.sources||'—'}</span></div>
+          <div><span style="color:#5C5A54;">SOURCES</span><br/><span style="color:#E8E6E0;font-size:8px;">${esc(p.sources)||'—'}</span></div>
         </div>
         ${p.alarmConfirmed ? '<div style="margin-top:6px;padding:3px 6px;background:rgba(255,23,68,0.15);border:1px solid rgba(255,23,68,0.4);border-radius:3px;color:#FF1744;font-size:8px;font-weight:700;letter-spacing:0.05em;">AIR RAID ALARM CORROBORATED</div>' : ''}
         <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Confirmed sighting signal — verify before acting.</div>
@@ -1576,9 +1576,9 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
       const desc = (p.descriptionEn || '').replace(/Source:.*$/i, '').trim();
       popup([lngLat.lng, lngLat.lat], `<div style="${pStyle}border:1px solid ${color}40;min-width:220px;">
-        <div style="color:${color};font-size:13px;font-weight:700;letter-spacing:0.08em;">${isOccupied ? '⬛' : isLiberated ? '✅' : '❓'} ${label}</div>
+        <div style="color:${color};font-size:13px;font-weight:700;letter-spacing:0.08em;">${isOccupied ? '⬛' : isLiberated ? '✅' : '❓'} ${esc(label)}</div>
         ${durationHtml}
-        ${desc ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid ${color}20;font-size:10px;color:#ccc;line-height:1.55;">${desc}</div>` : ''}
+        ${desc ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid ${color}20;font-size:10px;color:#ccc;line-height:1.55;">${esc(desc)}</div>` : ''}
         <div style="margin-top:8px;font-size:9px;color:#5C5A54;">${lngLat.lat.toFixed(3)}°N ${lngLat.lng.toFixed(3)}°E</div>
       </div>`);
     });
