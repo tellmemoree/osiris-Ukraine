@@ -1,0 +1,92 @@
+name: Hotfix Auto-Merge
+
+# Triggers on any push to a hotfix/* branch.
+# Gate: type-check + production build must pass.
+# On success: merges the hotfix into osiris-Ukraine-merged and fires the
+#             Render prod deploy hook (if configured).
+#
+# Required secret: HOTFIX_PAT
+#   A GitHub Personal Access Token with Contents: write (fine-grained)
+#   or repo scope (classic), scoped to this repository.
+#   Add at: Settings → Secrets and variables → Actions → HOTFIX_PAT
+
+on:
+  push:
+    branches: ['hotfix/*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hotfix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  gate:
+    name: type-check · build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (tsc --noEmit)
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+  merge:
+    name: merge → osiris-Ukraine-merged
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (with PAT for push)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.HOTFIX_PAT }}
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "hotfix-bot"
+          git config user.email "noreply@github.com"
+
+      - name: Merge hotfix into osiris-Ukraine
+        run: |
+          git fetch origin osiris-Ukraine
+          git checkout osiris-Ukraine
+          git merge --no-ff origin/${{ github.ref_name }} \
+            -m "hotfix: merge ${{ github.ref_name }} into osiris-Ukraine [auto-CI]"
+          git push origin osiris-Ukraine
+
+      - name: Merge hotfix into osiris-Ukraine-merged
+        run: |
+          git fetch origin osiris-Ukraine-merged
+          git checkout osiris-Ukraine-merged
+          git merge --no-ff origin/${{ github.ref_name }} \
+            -m "hotfix: merge ${{ github.ref_name }} into osiris-Ukraine-merged [auto-CI]"
+          git push origin osiris-Ukraine-merged
+
+      - name: Trigger Render dev deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_DEV }}
+        run: '[ -n "$HOOK" ] && curl -fsSL "$HOOK" -o /dev/null || echo "Render dev hook not configured — skipping."'
+
+      - name: Trigger Render prod deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PROD }}
+        run: '[ -n "$HOOK" ] && curl -fsSL "$HOOK" -o /dev/null || echo "Render prod hook not configured — skipping."'
