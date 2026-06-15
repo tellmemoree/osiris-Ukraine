@@ -12,6 +12,18 @@ export const dynamic = 'force-dynamic';
 const HITS_FILE = path.join(process.env.HOME ?? '/root', '.osiris-data', 'thermal-hits.json');
 const HITS_TTL_MS = 48 * 60 * 60 * 1000;
 
+// ── Response cache + inflight coalescing ────────────────────────────────────
+// This is the heaviest route in the app (72-site corpus filter + news cross-ref
+// + blocking disk I/O). On a public, force-dynamic app every origin cache-miss
+// would otherwise re-run the whole pipeline. Match the news/missile/drone routes:
+// memoize the computed response briefly and share one computation across
+// concurrent misses (also serializes the thermal-hits.json read-modify-write).
+type ThermalResponse = { aois: unknown[]; counts: Record<string, number>; timestamp: string };
+const THERMAL_TTL_MS = 60_000;
+let cached: ThermalResponse | null = null;
+let cachedAt = 0;
+let inflight: Promise<ThermalResponse> | null = null;
+
 interface StoredHit {
   id: string; name: string; category: string;
   lat: number; lng: number;
@@ -406,7 +418,7 @@ function extractBestSnippet(title: string, desc: string, placeName?: string): st
   return best;
 }
 
-export async function GET(req: Request) {
+async function computeThermal(req: Request): Promise<ThermalResponse> {
   try {
     const [fires, news, tgCorpus] = await Promise.all([
       fetchTheaterFires(),
@@ -615,12 +627,31 @@ export async function GET(req: Request) {
 
     const siteHits = aois.filter(a => a.category !== 'news' && a.hit).length;
     const highConf = aois.filter(a => a.hit && a.confidence === 'high').length;
-    return NextResponse.json(
-      { aois, counts: { sites: SITES.length, site_hits: siteHits, news_hits: newsHits, high_confidence: highConf, fires_in_theater: fires.length }, timestamp: new Date().toISOString() },
-      { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=7200' } }
-    );
+    return { aois, counts: { sites: SITES.length, site_hits: siteHits, news_hits: newsHits, high_confidence: highConf, fires_in_theater: fires.length }, timestamp: new Date().toISOString() };
   } catch (error) {
     console.error('Strategic-thermal error:', error);
+    throw error;
+  }
+}
+
+const THERMAL_HEADERS = { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=7200' };
+
+export async function GET(req: Request) {
+  const now = Date.now();
+  if (cached && now - cachedAt < THERMAL_TTL_MS) {
+    return NextResponse.json(cached, { headers: THERMAL_HEADERS });
+  }
+  // Coalesce concurrent cache-misses onto a single computation.
+  if (!inflight) {
+    inflight = computeThermal(req)
+      .then(r => { cached = r; cachedAt = Date.now(); return r; })
+      .finally(() => { inflight = null; });
+  }
+  try {
+    return NextResponse.json(await inflight, { headers: THERMAL_HEADERS });
+  } catch {
+    // Serve stale cache if a refresh failed and we have one; else surface 500.
+    if (cached) return NextResponse.json(cached, { headers: THERMAL_HEADERS });
     return NextResponse.json({ aois: [], error: 'Failed to compute thermal AOIs' }, { status: 500 });
   }
 }
