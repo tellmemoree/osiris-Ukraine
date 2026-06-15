@@ -18,6 +18,7 @@ section of `ARCHITECTURE.md` in the *same* commit. A stale map is worse than non
 
 # Standing workflow rules (this repo)
 
+- **Never push without explicit user approval.** Do not push to any remote branch unless the user has explicitly reviewed the changes and said "go for it" (or equivalent). This is a hard rule — no exceptions.
 - **Rebuild after code changes.** After ANY code change, rebuild + restart the :3001
   dev server (see ARCHITECTURE.md → "Rebuild + restart :3001"). Committed/pushed code
   is NOT live until rebuilt — `next start` does not hot-reload.

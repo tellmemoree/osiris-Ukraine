@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +10,14 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — shared by all consumers (strate
 let newsCache: unknown = null;
 let newsCachedAt = 0;
 let newsInflight: Promise<unknown> | null = null;
+
+const DATA_DIR = path.join(os.homedir(), '.osiris-data');
+const DISK_CACHE_FILE = path.join(DATA_DIR, 'news-cache.json');
+const SCRAPE_WINDOW_MS    = 3  * 60 * 60 * 1000;  // 3h back per run
+const DISK_HORIZON_MS     = 24 * 60 * 60 * 1000;  // keep 24h of articles
+const REFRESH_INTERVAL_MS = 90 * 60 * 1000;       // min gap between disk refreshes
+let lastRefreshAt = 0;
+interface DiskCache { raw: ParsedArticle[]; updatedAt: number; }
 
 /**
  * OSIRIS — Military-Grade Intelligence API
@@ -26,7 +37,7 @@ const UA_CHANNELS = [
   // Ukrainian-language (Cyrillic)
   'suspilne_news', 'hromadske_ua', 'truexanewsua', 'serhii_flash',
   'operativnoZSU', 'butusovplus', 'Tsaplienko', 'lachentyt',
-  'ssternenko', 'informnapalm',
+  'ssternenko', 'informnapalm', 'gruntmedia',
 ];
 
 // Russian milblogger / MoD channels — monitored for the adversary picture.
@@ -72,6 +83,7 @@ const CONFLICT_TERMS_CYR = [
   'мобіліз', 'мобилиз', 'війн', 'войн', 'бій', 'бой', 'взрыв', 'вибух', 'пво',
   'ппо', 'хаймарс', 'авіаудар', 'авиаудар', 'оборон', 'загарбник', 'загиб',
   'поранен', 'танк', 'артилер', 'артиллер', 'бойов', 'боев', 'атак',
+  'хлопк',  // Russian informal "bang" (хлопок/хлопка) — common euphemism for explosion in ru state/milblog posts
 ];
 
 // NOTE: tuples are [lat, lng] here — the OPPOSITE of gdelt/route.ts's GEO_DICT.
@@ -128,6 +140,16 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'murmansk': [68.958, 33.083], 'kazan': [55.796, 49.109], 'samara': [53.196, 50.100],
   'dzhankoi': [45.709, 34.393], 'saky': [45.134, 33.599],
   'kronstadt': [59.990, 29.760], 'кронштадт': [59.990, 29.760],
+  // Ukrainian / slang spellings of Russian cities seen in UA-language posts
+  'пітер': [59.931, 30.361],   // Rus slang for Saint Petersburg
+  'пітєр': [59.931, 30.361],   // Ukrainian є-spelling of Piter
+  'новоросійськ': [44.724, 37.768], // Ukrainian spelling of Novorossiysk
+  // Russian cities absent from gazetteer (new UA strike targets)
+  'кизилюрт': [43.209, 46.868],  // Kizlyurt, Dagestan
+  'чебоксар': [56.144, 47.249],  // Cheboksary (incl. declined Чебоксарах)
+  'самар': [53.196, 50.100],     // Samara declined forms (Самарі, Самарою)
+  'владімірськ': [56.130, 40.411], // Vladimir Oblast — Ukrainian adjectival stem
+  'владимирск': [56.130, 40.411], // Vladimir Oblast — Russian adjectival stem
   'ust-labinsk': [45.220, 39.710], 'усть-лабинск': [45.220, 39.710], 'усть-лабінськ': [45.220, 39.710],
   'zugres': [48.010, 38.510], 'зугрес': [48.010, 38.510], 'зугрэс': [48.010, 38.510],
   'зуївська тес': [48.010, 38.510],
@@ -205,6 +227,10 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'toropets': [56.500, 31.633], 'торопец': [56.500, 31.633], 'торопц': [56.500, 31.633],
   'tikhoretsk': [45.856, 40.126], 'тихорецк': [45.856, 40.126],
   'dyagilevo': [54.643, 39.570], 'olenya': [68.152, 33.464],
+  // Nizhnekamsk industrial cluster (TANECO + TAIF-NK + Nizhnekamskneftekhim — struck June 2026)
+  'nizhnekamsk': [55.64, 51.83], 'нижнекамск': [55.64, 51.83], 'нижнєкамськ': [55.64, 51.83],
+  'taneco': [55.77, 51.88], 'танеко': [55.77, 51.88],
+  'taif-nk': [55.64, 51.82], 'таіф-нк': [55.64, 51.82], 'taif': [55.64, 51.82], 'таіф': [55.64, 51.82],
   // Maritime / sea areas (ships in Black/Azov Sea are frequent strike targets)
   'black sea': [43.300, 33.800], 'чорне море': [43.300, 33.800], 'чёрное море': [43.300, 33.800],
   'azov sea': [46.200, 37.500], 'azov': [46.200, 37.500],
@@ -271,10 +297,12 @@ function keywordRegex(keyword: string): RegExp {
 
 // Compile every gazetteer entry once at module load — findCoords runs this over
 // hundreds of articles per request, so the regexes must not be rebuilt per call.
+// `keyword` is kept so consumers can do location-aware text extraction.
 const COMPILED_GAZETTEER = Object.entries(KEYWORD_COORDS).map(([keyword, coords]) => ({
   re: keywordRegex(keyword),
   coords,
   rank: BROAD_KEYS.has(keyword) ? 1 : 2, // a named city beats a country
+  keyword,
 }));
 
 /**
@@ -296,18 +324,23 @@ function findCoords(text: string): [number, number] | null {
   return best ? best.coords : null;
 }
 
-// Every distinct place a story names (raw gazetteer centroids, un-jittered). Used by
-// cross-reference consumers (e.g. /api/strategic-thermal) that must check ALL mentioned
-// locations, not just the single primary one findCoords returns.
-function findAllCoords(text: string): [number, number][] {
+// Every distinct SPECIFIC place a story names (raw gazetteer centroids, un-jittered).
+// Returns both coords and the matched keyword so callers can do location-aware text
+// extraction (e.g. find the sentence that mentions "belgorod" specifically).
+// Deliberately excludes broad country/sea centroids (rank=1).
+function findAllPlaces(text: string): { coords: [number, number]; name: string }[] {
   const lower = text.toLowerCase();
   const seen = new Set<string>();
-  const out: [number, number][] = [];
-  for (const { re, coords } of COMPILED_GAZETTEER) {
+  const out: { coords: [number, number]; name: string }[] = [];
+  for (const { re, coords, rank, keyword } of COMPILED_GAZETTEER) {
+    if (rank < 2) continue;
     const key = `${coords[0]},${coords[1]}`;
-    if (!seen.has(key) && re.test(lower)) { seen.add(key); out.push(coords); }
+    if (!seen.has(key) && re.test(lower)) { seen.add(key); out.push({ coords, name: keyword }); }
   }
   return out;
+}
+function findAllCoords(text: string): [number, number][] {
+  return findAllPlaces(text).map(p => p.coords);
 }
 
 // Spread several stories about the same place into a small (~0–8 km) cluster
@@ -348,6 +381,7 @@ interface ParsedArticle {
   link: string;
   pubDate: string;
   source: string;
+  hasVideo: boolean;
 }
 
 function parseTelegramHTML(html: string, channel: string): ParsedArticle[] {
@@ -372,10 +406,55 @@ function parseTelegramHTML(html: string, channel: string): ParsedArticle[] {
     const pubDate = dateMatch ? dateMatch[2] : new Date().toISOString();
 
     const title = text.split('\n')[0].substring(0, 100);
+    const hasVideo = /tgme_widget_message_video|tgme_widget_message_roundvideo|<video[\s>]/i.test(blockHtml);
 
-    items.push({ title, description: text, link, pubDate, source: `t.me/${channel}` });
+    items.push({ title, description: text, link, pubDate, source: `t.me/${channel}`, hasVideo });
   }
   return items;
+}
+
+async function fetchChannelWithPagination(channel: string, cutoffMs: number): Promise<ParsedArticle[]> {
+  const all: ParsedArticle[] = [];
+  let beforeId: number | null = null;
+  for (let page = 0; page < 5; page++) {
+    const url = beforeId
+      ? `https://t.me/s/${channel}?before=${beforeId}`
+      : `https://t.me/s/${channel}`;
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+      });
+      if (!res.ok) break;
+      const html = await res.text();
+      const posts = parseTelegramHTML(html, channel);
+      if (!posts.length) break;
+      all.push(...posts.filter(p => new Date(p.pubDate).getTime() > cutoffMs));
+      const oldestMs = Math.min(...posts.map(p => new Date(p.pubDate).getTime()));
+      if (oldestMs <= cutoffMs) break;
+      const ids = posts.flatMap(p => { const m = p.link.match(/\/(\d+)$/); return m ? [parseInt(m[1], 10)] : []; });
+      if (!ids.length) break;
+      beforeId = Math.min(...ids);
+    } catch { break; }
+  }
+  return all;
+}
+
+async function readDiskCache(): Promise<DiskCache | null> {
+  try {
+    const txt = await fs.readFile(DISK_CACHE_FILE, 'utf8');
+    const d = JSON.parse(txt);
+    return Array.isArray(d.raw) && typeof d.updatedAt === 'number' ? d as DiskCache : null;
+  } catch { return null; }
+}
+
+async function writeDiskCache(raw: ParsedArticle[]): Promise<void> {
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(DISK_CACHE_FILE, JSON.stringify({ raw, updatedAt: Date.now() }), 'utf8');
+  } catch (e) {
+    console.warn('[OSIRIS] news: disk cache write failed', e instanceof Error ? e.message : e);
+  }
 }
 
 function parseRSSItems(xml: string, sourceName: string): ParsedArticle[] {
@@ -398,7 +477,8 @@ function parseRSSItems(xml: string, sourceName: string): ParsedArticle[] {
       description: desc,
       link: getTag('link'),
       pubDate: getTag('pubDate') || new Date().toISOString(),
-      source: sourceName
+      source: sourceName,
+      hasVideo: false,
     });
   }
   return items;
@@ -406,24 +486,52 @@ function parseRSSItems(xml: string, sourceName: string): ParsedArticle[] {
 
 async function buildNews(): Promise<unknown> {
   try {
-  const feedPromises = TELEGRAM_CHANNELS.map(async (channel) => {
-      try {
-        const res = await fetch(`https://t.me/s/${channel}`, { 
-          signal: AbortSignal.timeout(8000), 
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } 
-        });
-        if (!res.ok) return [];
-        const html = await res.text();
-        return parseTelegramHTML(html, channel).slice(-8);
-      } catch { return []; }
-    });
+    // --- Disk cache layer ---
+    const disk = await readDiskCache();
+    const now = Date.now();
+    let rawArticles: ParsedArticle[];
 
-    const feedResults = await Promise.allSettled(feedPromises);
-    const allArticles: ParsedArticle[] = [];
-
-    for (const result of feedResults) {
-      if (result.status === 'fulfilled') allArticles.push(...result.value);
+    if (disk && now - disk.updatedAt < REFRESH_INTERVAL_MS) {
+      // Cache is fresh — use it directly
+      rawArticles = disk.raw.filter(a => new Date(a.pubDate).getTime() > now - DISK_HORIZON_MS);
+      // Kick off a background refresh when cache is getting stale (> 45 min) so next request sees fresh data
+      if (now - disk.updatedAt > 45 * 60 * 1000 && now - lastRefreshAt > REFRESH_INTERVAL_MS) {
+        lastRefreshAt = now;
+        (async () => {
+          try {
+            const cutoff = Date.now() - SCRAPE_WINDOW_MS;
+            const fresh: ParsedArticle[] = (await Promise.allSettled(
+              TELEGRAM_CHANNELS.map(ch => fetchChannelWithPagination(ch, cutoff))
+            )).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+            const horizon = Date.now() - DISK_HORIZON_MS;
+            const byLink = new Map<string, ParsedArticle>();
+            for (const a of [...disk.raw, ...fresh]) {
+              const key = a.link || `${a.source}:${a.pubDate}`;
+              if (!byLink.has(key) && new Date(a.pubDate).getTime() > horizon) byLink.set(key, a);
+            }
+            await writeDiskCache(Array.from(byLink.values()));
+          } catch { /* background — swallow */ }
+        })();
+      }
+    } else {
+      // Cache is missing or stale — full synchronous refresh
+      lastRefreshAt = now;
+      const cutoff = now - SCRAPE_WINDOW_MS;
+      const fresh: ParsedArticle[] = (await Promise.allSettled(
+        TELEGRAM_CHANNELS.map(ch => fetchChannelWithPagination(ch, cutoff))
+      )).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+      const horizon = now - DISK_HORIZON_MS;
+      const byLink = new Map<string, ParsedArticle>();
+      const existing = disk?.raw ?? [];
+      for (const a of [...existing, ...fresh]) {
+        const key = a.link || `${a.source}:${a.pubDate}`;
+        if (!byLink.has(key) && new Date(a.pubDate).getTime() > horizon) byLink.set(key, a);
+      }
+      rawArticles = Array.from(byLink.values());
+      await writeDiskCache(rawArticles);
     }
+
+    const allArticles: ParsedArticle[] = rawArticles;
 
     // FAILSAFE: If Telegram completely blocks the IP, fall back to traditional RSS
     if (allArticles.length === 0) {
@@ -453,7 +561,12 @@ async function buildNews(): Promise<unknown> {
       const riskScore = scoreRisk(searchText);
       const id = crypto.createHash('md5').update((article.link || '') + (article.pubDate || '')).digest('hex');
       const coords = findCoords(searchText);
+      const allPlaces = findAllPlaces(searchText); // specific places only (no country centroids)
       const placed = coords ? jitterAround(coords, id) : null;
+      // coords_default = true when there are no SPECIFIC place matches. A country/sea
+      // centroid as the only match is too imprecise to use as a thermal fire candidate —
+      // it just means "this story is about Russia/Ukraine" not "strike happened here".
+      const coordsDefault = !coords || allPlaces.length === 0;
 
       return {
         id,
@@ -465,9 +578,10 @@ async function buildNews(): Promise<unknown> {
         side: sideForSource(article.source),
         risk_score: riskScore,
         coords: placed,
-        coords_default: !coords,
-        places: findAllCoords(searchText),
-        machine_assessment: null, // populated by 5.9 AI enrichment when GEMINI_API_KEY_* is set
+        coords_default: coordsDefault,
+        places: allPlaces.map(p => p.coords),
+        place_names: allPlaces.map(p => p.name),
+        hasVideo: article.hasVideo,
       };
     });
 

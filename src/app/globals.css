@@ -364,7 +364,7 @@ html, body {
 /* Small phones */
 @media (max-width: 390px) {
   :root { --edge-pad: 4px; }
-  .mobile-nav-btn { padding: 4px 3px; font-size: 5px; }
+  .mobile-nav-btn { padding: 4px 2px; font-size: 7px; }
   .mobile-nav-btn svg { width: 14px; height: 14px; }
 }
 

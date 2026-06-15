@@ -39,6 +39,10 @@ next-env.d.ts
 *Manual*.md
 
 # Claude Code local agent config + worktrees (machine-local, not committed)
-.claude/settings.json
-.claude/settings.local.json
-.claude/worktrees/
+.claude/
+
+# Local-only docs (backlog, handoff notes, camera sources — never commit)
+docs/
+
+# Architecture map is machine-local — agents keep it current; don't commit churn
+ARCHITECTURE.md
