@@ -86,19 +86,36 @@ const PORTS = [
   { name: 'Novorossiysk (Black Sea Fleet)', country: 'RU', lat: 44.724, lng: 37.769, type: 'naval', fleet: 'Russian Black Sea Fleet (relocated from Sevastopol)' },
 ];
 
-const CHOKEPOINTS = [
-  { name: 'Strait of Hormuz', lat: 26.57, lng: 56.25, traffic: '21M bpd oil', risk: 'HIGH' },
-  { name: 'Strait of Malacca', lat: 2.50, lng: 101.50, traffic: '16M bpd oil', risk: 'MODERATE' },
-  { name: 'Suez Canal', lat: 30.43, lng: 32.34, traffic: '12% world trade', risk: 'ELEVATED' },
-  { name: 'Bab el-Mandeb', lat: 12.58, lng: 43.33, traffic: '6.2M bpd oil', risk: 'CRITICAL' },
-  { name: 'Panama Canal', lat: 9.08, lng: -79.68, traffic: '5% world trade', risk: 'LOW' },
-  { name: 'Turkish Straits', lat: 41.12, lng: 29.07, traffic: '3M bpd oil', risk: 'MODERATE' },
-  { name: 'Danish Straits', lat: 55.70, lng: 12.60, traffic: '3.2M bpd oil', risk: 'LOW' },
-  { name: 'Cape of Good Hope', lat: -34.36, lng: 18.47, traffic: 'Alt route Suez', risk: 'LOW' },
-  { name: 'Taiwan Strait', lat: 24.00, lng: 119.00, traffic: '88% large ships', risk: 'ELEVATED' },
-  { name: 'Lombok Strait', lat: -8.47, lng: 115.72, traffic: 'Alt Malacca', risk: 'LOW' },
-  { name: 'Kerch Strait', lat: 45.354, lng: 36.470, traffic: 'Black Sea–Azov transit', risk: 'CRITICAL' },
-  // Note: Bosphorus (Istanbul) skipped — already covered by 'Turkish Straits' entry above (same coordinates).
+interface Chokepoint {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  radius_km: number;
+  traffic: string;
+  baseline_risk: string;
+}
+
+const CHOKEPOINTS: Chokepoint[] = [
+  { id: 'hormuz',            name: 'Strait of Hormuz',       lat: 26.5,   lng: 56.5,   radius_km: 80,  traffic: '21M bpd oil',          baseline_risk: 'HIGH' },
+  { id: 'bab_el_mandeb',     name: 'Bab el-Mandeb',          lat: 12.6,   lng: 43.4,   radius_km: 60,  traffic: '6.2M bpd oil',          baseline_risk: 'HIGH' },
+  { id: 'suez_north',        name: 'Suez Canal (North)',      lat: 30.7,   lng: 32.3,   radius_km: 30,  traffic: '12% world trade (N)',    baseline_risk: 'MODERATE' },
+  { id: 'suez_south',        name: 'Suez Canal (South)',      lat: 29.9,   lng: 32.6,   radius_km: 30,  traffic: '12% world trade (S)',    baseline_risk: 'MODERATE' },
+  { id: 'malacca',           name: 'Strait of Malacca',       lat: 2.5,    lng: 102.0,  radius_km: 100, traffic: '16M bpd oil',           baseline_risk: 'MODERATE' },
+  { id: 'gibraltar',         name: 'Strait of Gibraltar',     lat: 35.9,   lng: -5.4,   radius_km: 40,  traffic: 'Med–Atlantic gateway',  baseline_risk: 'LOW' },
+  { id: 'dover',             name: 'Dover Strait',            lat: 51.0,   lng: 1.5,    radius_km: 40,  traffic: 'Busiest shipping lane',  baseline_risk: 'LOW' },
+  { id: 'oresund',           name: 'Øresund (Danish Str.)',   lat: 55.6,   lng: 12.7,   radius_km: 30,  traffic: '3.2M bpd oil',          baseline_risk: 'LOW' },
+  { id: 'kerch',             name: 'Kerch Strait',            lat: 45.3,   lng: 36.5,   radius_km: 30,  traffic: 'Black Sea–Azov transit', baseline_risk: 'HIGH' },
+  { id: 'bosphorus',         name: 'Bosphorus',               lat: 41.1,   lng: 29.0,   radius_km: 20,  traffic: '3M bpd oil',            baseline_risk: 'MODERATE' },
+  { id: 'dardanelles',       name: 'Dardanelles',             lat: 40.2,   lng: 26.4,   radius_km: 20,  traffic: 'Black Sea gateway',      baseline_risk: 'MODERATE' },
+  { id: 'panama',            name: 'Panama Canal',            lat: 9.1,    lng: -79.7,  radius_km: 30,  traffic: '5% world trade',         baseline_risk: 'LOW' },
+  { id: 'lombok',            name: 'Lombok Strait',           lat: -8.5,   lng: 115.7,  radius_km: 40,  traffic: 'Alt Malacca',            baseline_risk: 'LOW' },
+  { id: 'sunda',             name: 'Sunda Strait',            lat: -6.0,   lng: 105.8,  radius_km: 40,  traffic: 'Alt Malacca (minor)',    baseline_risk: 'LOW' },
+  { id: 'taiwan',            name: 'Taiwan Strait',           lat: 24.5,   lng: 119.5,  radius_km: 80,  traffic: '88% large ships',        baseline_risk: 'MODERATE' },
+  { id: 'korea',             name: 'Korea Strait',            lat: 34.6,   lng: 129.3,  radius_km: 60,  traffic: 'Japan Sea gateway',      baseline_risk: 'LOW' },
+  { id: 'luzon',             name: 'Luzon Strait',            lat: 20.0,   lng: 121.5,  radius_km: 80,  traffic: 'Pacific–S.China Sea',    baseline_risk: 'LOW' },
+  { id: 'cape_good_hope',    name: 'Cape of Good Hope',       lat: -34.2,  lng: 18.5,   radius_km: 60,  traffic: 'Alt route Suez',         baseline_risk: 'LOW' },
+  { id: 'mozambique',        name: 'Mozambique Channel',      lat: -17.0,  lng: 41.0,   radius_km: 120, traffic: 'E.Africa tanker route',  baseline_risk: 'LOW' },
 ];
 
 // Shadow-fleet IMO watchlist is sourced dynamically — see src/lib/shadowFleet.ts.
@@ -371,19 +388,26 @@ export async function GET() {
   const dynamicChokepoints = CHOKEPOINTS.map(choke => {
     let nearbyCount = 0;
     for (let i = 0; i < ships.length; i++) {
-      if (getDistanceKm(choke.lat, choke.lng, ships[i].lat, ships[i].lng) < 100) nearbyCount++;
+      if (getDistanceKm(choke.lat, choke.lng, ships[i].lat, ships[i].lng) < choke.radius_km) nearbyCount++;
     }
-    
-    // Dynamically adjust risk based on live ship concentration
-    let dynamicRisk = choke.risk;
-    if (nearbyCount > 50) dynamicRisk = 'CRITICAL';
-    else if (nearbyCount > 20 && dynamicRisk !== 'CRITICAL') dynamicRisk = 'HIGH';
-    else if (nearbyCount > 5 && dynamicRisk === 'LOW') dynamicRisk = 'ELEVATED';
+
+    // Risk is a pure function of live ship count; baseline_risk is metadata only.
+    let risk: string;
+    if (nearbyCount === 0)      risk = 'LOW';
+    else if (nearbyCount <= 2)  risk = 'MODERATE';
+    else if (nearbyCount <= 5)  risk = 'HIGH';
+    else                        risk = 'CRITICAL';
 
     return {
-      ...choke,
+      id: choke.id,
+      name: choke.name,
+      lat: choke.lat,
+      lng: choke.lng,
+      radius_km: choke.radius_km,
+      baseline_risk: choke.baseline_risk,
       traffic: `${choke.traffic} | LIVE SHIPS: ${nearbyCount}`,
-      risk: dynamicRisk
+      live_ships: nearbyCount,
+      risk,
     };
   });
 
