@@ -43,6 +43,11 @@ const TYPE_ICONS: Record<string, typeof Plane> = {
   ip: Wifi,
 };
 
+// ── EXPANDABLE TYPES ──
+// 'event' and 'sanction' nodes appear in the graph but have no intel resolver —
+// attempting to expand them causes a 400 "Invalid type" from /api/entity/expand.
+const EXPANDABLE_TYPES = new Set(['aircraft', 'vessel', 'company', 'person', 'ip', 'country']);
+
 // ── PROPS ──
 
 interface Props {
@@ -137,6 +142,7 @@ function EntityGraphPanel({ entity, onClose }: Props) {
   const handleNodeClick = useCallback((node: any) => {
     const n = node as EntityNode;
     setSelectedNode(n);
+    if (!EXPANDABLE_TYPES.has(n.type)) return; // 'event' and 'sanction' have no resolver
     const rawId = n.id.includes(':') ? n.id.split(':').slice(1).join(':') : n.id;
     if (!expandedIds.has(`${n.type}:${rawId}`)) expandEntity(n.type, rawId);
   }, [expandedIds, expandEntity]);

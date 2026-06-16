@@ -4,6 +4,8 @@ import { fetchDeepState, extractFeatures, type GeoJSONFeatureCollection } from '
 
 export const dynamic = 'force-dynamic';
 
+let staleCache: { frontlines: GeoJSONFeatureCollection; timestamp: string } | null = null;
+
 // Militaryland (militaryland.net/ua/front-line/geojson) returns 404 — endpoint is dead.
 
 function parseStatus(name: string): { statusKey: string; statusLabel: string } {
@@ -68,6 +70,12 @@ export async function GET() {
     deepStateData = await fetchDeepState();
   } catch (reason) {
     console.error('Frontlines fetch error (DeepState):', reason);
+    if (staleCache) {
+      return NextResponse.json(
+        { ...staleCache, sources: ['DeepState'], stale: true },
+        { headers: { 'Cache-Control': 'no-store', 'X-Stale': 'true' } }
+      );
+    }
     return NextResponse.json(
       { frontlines: null, error: 'DeepState unavailable' },
       { status: 502 }
@@ -89,11 +97,14 @@ export async function GET() {
     features: filtered,
   };
 
+  const timestamp = new Date().toISOString();
+  staleCache = { frontlines, timestamp };
+
   return NextResponse.json(
     {
       frontlines,
       sources: ['DeepState'],
-      timestamp: new Date().toISOString(),
+      timestamp,
     },
     {
       headers: {

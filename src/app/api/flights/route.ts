@@ -278,6 +278,12 @@ export async function GET() {
   } catch (error) {
     console.error('Flight fetch error:', error);
     fetchPromise = null;
+    if (cachedData) {
+      return NextResponse.json(
+        { ...cachedData, stale: true },
+        { headers: { 'Cache-Control': 'no-store', 'X-Stale': 'true' } }
+      );
+    }
     return NextResponse.json(
       { error: 'Failed to fetch flight data' },
       { status: 500 }
