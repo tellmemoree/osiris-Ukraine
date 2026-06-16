@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
  * frequently walked back. Markers carry the article so the claim can be verified.
  */
 
-interface NewsItem { title?: string; description?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; places?: [number, number][]; published?: string; }
+interface NewsItem { title?: string; description?: string; source?: string; side?: string; link?: string; coords?: [number, number] | null; coords_default?: boolean; places?: [number, number][]; place_names?: string[]; published?: string; }
 
 // Active contact zone only. Covers Kherson/Zaporizhzhia north through the Kursk
 // incursion axis. Excludes deep Russia (Bryansk 53°N, Adygea 44°N, Rostov east of 40°E).
@@ -80,12 +80,50 @@ function captureSide(item: NewsItem): 'ru' | 'ua' | null {
   return null;
 }
 
+// Cyrillic aliases for Latin gazetteer keys — covers frontline cities that appear
+// in Cyrillic-title milblogger posts. Title-match in allCentroids() is script-aware:
+// a Latin gazetteer key like 'kostiantynivka' won't substring-match a Cyrillic title.
+// Each entry maps the Latin gazetteer key → Cyrillic forms seen in UA/RU Telegram posts.
+const CYR_ALIASES: Record<string, string[]> = {
+  'kostiantynivka': ['константинівка', 'константиновка', 'костянтинівка'],
+  'pokrovsk':       ['покровськ', 'покровск'],
+  'chasiv yar':     ['часів яр', 'часовой яр', 'часовий яр'],
+  'toretsk':        ['торецьк', 'торецк', 'дзержинськ'],
+  'vovchansk':      ['вовчанськ', 'вовчанск'],
+  'kupiansk':       ['куп\'янськ', 'купянск'],
+  'lyman':          ['лиман'],
+  'bakhmut':        ['бахмут', 'артемівськ'],
+  'avdiivka':       ['авдіївка', 'авдеевка'],
+  'kurakhove':      ['курахове', 'курахово'],
+  'velyka novosilka': ['велика новосілка', 'великая новосёлка'],
+  'orikhiv':        ['оріхів', 'орехов'],
+  'robotyne':       ['роботине', 'работино'],
+  'hulyaipole':     ['гуляйполе'],
+  'donetsk':        ['донецьк', 'донецк'],
+  'kherson':        ['херсон'],
+  'zaporizhzhia':   ['запоріжжя', 'запорожье'],
+  'kharkiv':        ['харків', 'харьков'],
+  'kramatorsk':     ['краматорськ', 'краматорск'],
+  'sloviansk':      ['слов\'янськ', 'славянск'],
+};
+
 // Return only the PRIMARY place centroid for an article. Using all places[] would
 // scatter markers to every geographic mention in the body — comparison cities, political
 // context, Kyiv-as-capital references — none of which represent the claimed territory.
-// Primary = first gazetteer hit (highest rank); fall back to jittered coords.
+// Primary = first place whose name appears in the title (Latin or Cyrillic alias);
+// fall back to places[0] or jittered coords if no title match is found.
 function allCentroids(item: NewsItem): [number, number][] {
-  const primary = item.places?.[0] ?? item.coords;
+  const { places, place_names, title, coords } = item;
+  if (places && place_names && places.length === place_names.length && places.length > 0) {
+    const lowerTitle = (title || '').toLowerCase();
+    const titleMatch = place_names.findIndex(name => {
+      if (lowerTitle.includes(name.toLowerCase())) return true;
+      // Cyrillic titles: check aliases for this Latin gazetteer key
+      return (CYR_ALIASES[name.toLowerCase()] || []).some(cyr => lowerTitle.includes(cyr));
+    });
+    if (titleMatch !== -1) return [places[titleMatch]];
+  }
+  const primary = places?.[0] ?? coords;
   return primary ? [primary] : [];
 }
 
@@ -106,6 +144,11 @@ export async function GET(req: Request) {
       id: string; lat: number; lng: number; side: 'ru' | 'ua'; name: string;
       source?: string; side_reported?: string; link?: string; date?: string; count: number;
       description?: string;
+      conflicted: boolean;
+      other_name?: string;
+      other_link?: string;
+      other_source?: string;
+      other_side?: 'ru' | 'ua';
     };
     // Dedup per place+side (~0.05°/~5 km). Same settlement claimed by the same side =
     // one marker (count the corroborating reports); a contested place claimed by BOTH
@@ -129,8 +172,37 @@ export async function GET(req: Request) {
           name: (item.title || 'Territorial change').slice(0, 120),
           source: item.source, side_reported: item.side, link: item.link, date: item.published, count: 1,
           description: item.description?.slice(0, 220),
+          conflicted: false,
         });
       }
+    }
+
+    // Conflicted-claim post-pass: group by bare lat/lng cell (ignoring side).
+    // If both ru and ua have a marker at the same cell, flag both as conflicted
+    // and cross-populate the partner's attribution fields.
+    const byBareCell = new Map<string, Capture[]>();
+    for (const capture of byCell.values()) {
+      const bareKey = `${capture.lat.toFixed(2)},${capture.lng.toFixed(2)}`;
+      const bucket = byBareCell.get(bareKey);
+      if (bucket) { bucket.push(capture); } else { byBareCell.set(bareKey, [capture]); }
+    }
+    for (const bucket of byBareCell.values()) {
+      if (bucket.length < 2) continue;
+      // byCell deduplicates same-side same-cell reports into one marker (count++),
+      // so each bucket has at most one ru and one ua entry — find() is safe here.
+      const ru = bucket.find(c => c.side === 'ru');
+      const ua = bucket.find(c => c.side === 'ua');
+      if (!ru || !ua) continue;
+      ru.conflicted = true;
+      ru.other_name = ua.name;
+      ru.other_link = ua.link;
+      ru.other_source = ua.source;
+      ru.other_side = 'ua';
+      ua.conflicted = true;
+      ua.other_name = ru.name;
+      ua.other_link = ru.link;
+      ua.other_source = ru.source;
+      ua.other_side = 'ru';
     }
 
     const captures = [...byCell.values()];
