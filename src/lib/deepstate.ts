@@ -64,7 +64,7 @@ export function extractFeatures(d: GeoJSONFeatureCollection | undefined): unknow
 
 export async function fetchDeepState(): Promise<GeoJSONFeatureCollection> {
   const res = await stealthFetch('https://deepstatemap.live/api/history/last', {
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(25000),
   });
   if (!res.ok) throw new Error(`DeepState returned ${res.status}`);
   return res.json();
