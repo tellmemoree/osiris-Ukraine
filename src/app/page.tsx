@@ -931,7 +931,10 @@ export default function Dashboard() {
           sweepData={sweepData}
           scanTargets={scanTargets}
           demoMode={demoMode}
+<<<<<<< HEAD
           theme={osirisTheme}
+=======
+>>>>>>> origin/hotfix/rendering-entity-intel
         />
       </ErrorBoundary>
 

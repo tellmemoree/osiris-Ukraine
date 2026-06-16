@@ -361,10 +361,17 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // Glow radius scales with FRP: low-FRP fires get base radius, high-FRP
       // (depot/refinery infernos) bloom larger so they read from low zoom.
       map.addLayer({ id: 'thermal-aoi-glow', type: 'circle', source: 'thermal-aoi', paint: {
+<<<<<<< HEAD
         'circle-radius': ['*',
           ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 16, 10, 24],
           ['interpolate', ['linear'], ['coalesce', ['get', 'maxFrp'], 0],
             0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5],
+=======
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          1, ['*', 10, ['interpolate', ['linear'], ['coalesce', ['get', 'maxFrp'], 0], 0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5]],
+          5, ['*', 16, ['interpolate', ['linear'], ['coalesce', ['get', 'maxFrp'], 0], 0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5]],
+          10, ['*', 24, ['interpolate', ['linear'], ['coalesce', ['get', 'maxFrp'], 0], 0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5]],
+>>>>>>> origin/hotfix/rendering-entity-intel
         ] as any,
         'circle-color': thermalCatColor,
         'circle-opacity': ['case', ['boolean', ['get', 'confirmed'], false], 0.12, 0.03] as any,
