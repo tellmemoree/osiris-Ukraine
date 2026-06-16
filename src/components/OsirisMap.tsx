@@ -393,10 +393,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         filter: ['!', ['boolean', ['get', 'confirmed'], false]],
         layout: { 'text-field': '?', 'text-size': 14, 'text-font': ['Open Sans Bold'], 'text-offset': [0, 0], 'text-anchor': 'center', 'text-allow-overlap': true },
         paint: { 'text-color': '#FF8C00', 'text-halo-color': '#000', 'text-halo-width': 1.5 }});
-      // Territorial Captures — RU red, UA blue.
+      // Territorial Captures — RU red, UA blue, Conflicted neutral gold.
       map.addLayer({ id: 'capture-glow', type: 'circle', source: 'captures', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 12, 5, 20, 10, 30],
-        'circle-color': ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888'],
+        'circle-color': ['case', ['boolean', ['get', 'conflicted'], false],
+          '#FFD700', // Gold for conflicted
+          ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888']
+        ],
         'circle-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.05, 3, 0.14],
         'circle-blur': 1,
       }});
@@ -407,10 +410,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           5,  ['interpolate', ['linear'], ['get', 'count'], 1, 4, 4, 8],
           10, ['interpolate', ['linear'], ['get', 'count'], 1, 6, 4, 12],
         ],
-        'circle-color': ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888'],
+        'circle-color': ['case', ['boolean', ['get', 'conflicted'], false],
+          '#FFD700', // Gold for conflicted
+          ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888']
+        ],
         'circle-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.40, 3, 0.88],
-        'circle-stroke-width': 1.5,
-        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': ['case', ['boolean', ['get', 'conflicted'], false], 2.5, 1.5],
+        'circle-stroke-color': ['case', ['boolean', ['get', 'conflicted'], false], '#FF8C00', '#ffffff'],
         'circle-stroke-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.15, 3, 0.45],
       }});
 
@@ -1103,15 +1109,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const coords = (e.features[0].geometry as any).coordinates;
       const sideFlag = p.side === 'ru' ? '🇷🇺' : p.side === 'ua' ? '🇺🇦' : '⚔️';
       const sideColor = p.side === 'ru' ? '#FF3D3D' : p.side === 'ua' ? '#2979FF' : '#888';
-      popup(coords, `<div style="${pStyle}border:1px solid ${sideColor}40;">
+      const statusText = p.conflicted ? 'CONFLICTED CLAIMS' : (p.side === 'ru' ? 'RU ADVANCE' : p.side === 'ua' ? 'UA ADVANCE' : 'CONTESTED');
+      const statusColor = p.conflicted ? '#FFD700' : sideColor;
+      popup(coords, `<div style="${pStyle}border:1px solid ${statusColor}40;">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
           <span style="font-size:14px;">${sideFlag}</span>
-          <span style="color:${sideColor};font-size:9px;letter-spacing:0.08em;">${p.side === 'ru' ? 'RU ADVANCE' : p.side === 'ua' ? 'UA ADVANCE' : 'CONTESTED'}</span>
+          <span style="color:${statusColor};font-size:9px;letter-spacing:0.08em;font-weight:600;">${statusText}</span>
           ${p.count > 1 ? `<span style="color:#888;font-size:9px;">${Number(p.count)||0} reports</span>` : ''}
         </div>
+        ${p.conflicted ? `<div style="font-size:9px;color:#FFD700;margin-bottom:6px;padding:4px;background:#FFD70020;border-radius:3px;">⚠️ Both RU and UA claim this location</div>` : ''}
         <div style="font-size:11px;color:#E8E6E0;margin-bottom:6px;">${esc(p.name)||'Unknown location'}</div>
         ${p.description ? `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;font-style:italic;">${esc(p.description)}</div>` : ''}
-        ${p.link ? `<a href="${safeUrl(p.link)}" target="_blank" style="${linkStyle}color:${sideColor};border:1px solid ${sideColor}40;background:${sideColor}11;">📡 SOURCE</a>` : ''}
+        ${p.link ? `<a href="${safeUrl(p.link)}" target="_blank" style="${linkStyle}color:${statusColor};border:1px solid ${statusColor}40;background:${statusColor}11;">📡 SOURCE</a>` : ''}
         <div style="font-size:8px;color:#444;margin-top:6px;">milblogger claim — verify before acting</div>
       </div>`);
     });
@@ -1709,7 +1718,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('captures', visible.map((c: any) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-      properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description },
+      properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description, conflicted: c.conflicted },
     })));
   }, [mapReady, data.captures, activeLayers.captures, setGeo]);
 

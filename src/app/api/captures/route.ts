@@ -105,12 +105,13 @@ export async function GET(req: Request) {
     type Capture = {
       id: string; lat: number; lng: number; side: 'ru' | 'ua'; name: string;
       source?: string; side_reported?: string; link?: string; date?: string; count: number;
-      description?: string;
+      description?: string; conflicted?: boolean;
     };
     // Dedup per place+side (~0.05°/~5 km). Same settlement claimed by the same side =
     // one marker (count the corroborating reports); a contested place claimed by BOTH
     // sides keeps two markers, which is itself the signal.
     const byCell = new Map<string, Capture>();
+    const locationSides = new Map<string, Set<'ru' | 'ua'>>(); // track which sides claim each location
     let n = 0;
     for (const item of news) {
       if (!isTerritorialAdvance(item)) continue;
@@ -121,7 +122,11 @@ export async function GET(req: Request) {
       // and should produce 3 markers, one at each.
       for (const [lat, lng] of allCentroids(item)) {
         if (lat < CONTACT_BBOX.latMin || lat > CONTACT_BBOX.latMax || lng < CONTACT_BBOX.lngMin || lng > CONTACT_BBOX.lngMax) continue;
-        const key = `${lat.toFixed(2)},${lng.toFixed(2)}|${side}`;
+        const locKey = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+        if (!locationSides.has(locKey)) locationSides.set(locKey, new Set());
+        locationSides.get(locKey)!.add(side);
+
+        const key = `${locKey}|${side}`;
         const existing = byCell.get(key);
         if (existing) { existing.count++; continue; }
         byCell.set(key, {
@@ -133,7 +138,11 @@ export async function GET(req: Request) {
       }
     }
 
-    const captures = [...byCell.values()];
+    // Mark captures as conflicted if location has both RU and UA claims
+    const captures = [...byCell.values()].map(cap => ({
+      ...cap,
+      conflicted: locationSides.get(`${cap.lat.toFixed(2)},${cap.lng.toFixed(2)}`)!.size > 1,
+    }));
     return NextResponse.json(
       {
         captures,
