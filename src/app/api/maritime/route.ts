@@ -6,12 +6,21 @@ import WebSocket from 'ws';
 import { flagFromMmsi } from '@/lib/mmsi-flags';
 import { getShadowFleetImos, getShadowFleetMmsis } from '@/lib/shadowFleet';
 
+export const dynamic = 'force-dynamic';
+
 // Learned sanctioned-MMSI set is persisted here so a server restart doesn't
 // blind the shadow-fleet layer. IMO↔MMSI links are learned from the infrequent
 // type-5 ShipStaticData message; without persistence they'd take hours to
 // re-accumulate after every restart.
 const SHADOW_STATE_DIR = path.join(os.homedir(), '.osiris-data');
 const SHADOW_STATE_FILE = path.join(SHADOW_STATE_DIR, 'shadow-mmsi.json');
+
+// Shadow-fleet track ring-buffer constants.
+// 288 samples at 5-min intervals = 24h of positions per vessel.
+const TRACK_MAX = 288;
+const TRACK_SAMPLE_MS = 5 * 60 * 1000;
+const TRACK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SHADOW_TRACKS_FILE = path.join(SHADOW_STATE_DIR, 'shadow-fleet-tracks.json');
 
 /**
  * OSIRIS — Maritime Intelligence
@@ -137,6 +146,10 @@ const globalForAis = globalThis as unknown as {
   shadowMmsi: Set<number>;
   // Throttle handle for the debounced disk-write of shadowMmsi.
   shadowSaveTimer: ReturnType<typeof setTimeout> | null;
+  // 24h position ring-buffer per shadow-fleet vessel (sampled at TRACK_SAMPLE_MS).
+  shadowTracks: Map<number, { ts: number; lat: number; lng: number }[]>;
+  // Throttle handle for the debounced disk-write of shadowTracks.
+  tracksSaveTimer: ReturnType<typeof setTimeout> | null;
 };
 
 if (!globalForAis.shipsCache) {
@@ -144,6 +157,8 @@ if (!globalForAis.shipsCache) {
   globalForAis.isAisConnecting = false;
   globalForAis.shadowMmsi = new Set();
   globalForAis.shadowSaveTimer = null;
+  globalForAis.shadowTracks = new Map();
+  globalForAis.tracksSaveTimer = null;
   // Best-effort restore of the learned sanctioned-MMSI set. Mutates the same
   // Set the `shadowMmsi` const below references, so additions land in it.
   fs.readFile(SHADOW_STATE_FILE, 'utf8')
@@ -155,10 +170,30 @@ if (!globalForAis.shipsCache) {
       }
     })
     .catch(() => {/* no prior state — start empty */});
+  // Best-effort restore of the 24h position ring-buffers. Drops entries older
+  // than TRACK_MAX_AGE_MS so a stale snapshot doesn't show ancient tracks.
+  fs.readFile(SHADOW_TRACKS_FILE, 'utf8')
+    .then((txt) => {
+      const arr: unknown = JSON.parse(txt);
+      if (!Array.isArray(arr)) return;
+      const cutoff = Date.now() - TRACK_MAX_AGE_MS;
+      let restored = 0;
+      for (const entry of arr) {
+        if (typeof entry?.mmsi !== 'number' || !Array.isArray(entry?.positions)) continue;
+        const fresh = (entry.positions as { ts: number; lat: number; lng: number }[]).filter(p => p.ts >= cutoff);
+        if (fresh.length > 0) {
+          globalForAis.shadowTracks.set(entry.mmsi, fresh);
+          restored++;
+        }
+      }
+      if (restored > 0) console.log(`[OSIRIS] shadow-fleet-tracks: restored ${restored} vessel tracks from disk`);
+    })
+    .catch(() => {/* no prior state — start empty */});
 }
 
 const shipsCache = globalForAis.shipsCache;
 const shadowMmsi = globalForAis.shadowMmsi;
+const shadowTracks = globalForAis.shadowTracks;
 
 // Persist the learned MMSI set, coalescing bursts into at most one write / 10s.
 function persistShadowMmsi() {
@@ -169,6 +204,19 @@ function persistShadowMmsi() {
       await fs.mkdir(SHADOW_STATE_DIR, { recursive: true });
       await fs.writeFile(SHADOW_STATE_FILE, JSON.stringify([...shadowMmsi]), 'utf8');
     } catch {/* best-effort — losing the cache only costs re-accumulation */}
+  }, 10000);
+}
+
+// Persist the 24h position ring-buffers, coalescing bursts into at most one write / 10s.
+function persistShadowTracks() {
+  if (globalForAis.tracksSaveTimer) return;
+  globalForAis.tracksSaveTimer = setTimeout(async () => {
+    globalForAis.tracksSaveTimer = null;
+    try {
+      await fs.mkdir(SHADOW_STATE_DIR, { recursive: true });
+      const payload = [...shadowTracks].map(([mmsi, positions]) => ({ mmsi, positions }));
+      await fs.writeFile(SHADOW_TRACKS_FILE, JSON.stringify(payload), 'utf8');
+    } catch {/* best-effort — losing the cache only costs a gap in the track trail */}
   }, 10000);
 }
 
@@ -261,7 +309,25 @@ function connectAisStream() {
         existing.speed = report.Sog;
         existing.heading = report.TrueHeading || report.Cog;
         existing.timestamp = Date.now();
-      } 
+
+        // Append to the 24h ring-buffer for shadow-fleet vessels only.
+        // Sample at most once per TRACK_SAMPLE_MS to avoid storing thousands
+        // of near-duplicate positions from vessels that broadcast every 2–10s.
+        if (shadowMmsi.has(mmsi)) {
+          const track = shadowTracks.get(mmsi) ?? [];
+          const now = Date.now();
+          if (track.length === 0 || now - track[track.length - 1].ts >= TRACK_SAMPLE_MS) {
+            track.push({ ts: now, lat: report.Latitude, lng: report.Longitude });
+            if (track.length > TRACK_MAX) track.splice(0, track.length - TRACK_MAX);
+            // Trim entries older than 24h.
+            const cutoff = now - TRACK_MAX_AGE_MS;
+            let i = 0; while (i < track.length && track[i].ts < cutoff) i++;
+            if (i > 0) track.splice(0, i);
+            shadowTracks.set(mmsi, track);
+            persistShadowTracks();
+          }
+        }
+      }
       else if (parsed.MessageType === "ShipStaticData" && parsed.Message?.ShipStaticData) {
         const staticData = parsed.Message.ShipStaticData;
         existing.name = staticData.Name ? staticData.Name.trim() : existing.name;
@@ -313,7 +379,25 @@ connectAisStream();
 // position is itself intelligence and should not expire until they transmit again.
 const STALE_MS = 10 * 60 * 1000;
 
-export async function GET() {
+export async function GET(req: Request) {
+  // ?tracks=1 — return the 24h position ring-buffers for shadow-fleet vessels.
+  // No stale-cache needed here: the data lives in-process (globalForAis.shadowTracks)
+  // and is reconstructed from disk on restart, so it's always as fresh as the WS feed.
+  const { searchParams } = new URL(req.url);
+  if (searchParams.get('tracks') === '1') {
+    const tracks = [...shadowTracks.entries()]
+      .filter(([, positions]) => positions.length >= 2)
+      .map(([mmsi, positions]) => ({
+        mmsi,
+        name: shipsCache.get(mmsi)?.name,
+        positions,
+      }));
+    return NextResponse.json(
+      { tracks, total: tracks.length, timestamp: new Date().toISOString() },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
+
   const now = Date.now();
   for (const [mmsi, ship] of shipsCache.entries()) {
     // Use the live watchlist too, not just the stored flag, so a vessel learned

@@ -167,6 +167,7 @@ export default function Dashboard() {
     maritime: true,
     ships: true,
     shadow_fleet: false,
+    shadow_fleet_tracks: false,
     satellites: false,
     balloons: false,
     cctv: true,
@@ -198,6 +199,7 @@ export default function Dashboard() {
     thermal_aoi_fires_only: false,
     internet_outages: false,
     malware: false,
+    oblast_pressure: false,
   });
   // Persist active layer toggles across restarts — read on mount, write on every change.
   // Skip the first write (count=1, initial defaults) so we don't overwrite saved state
@@ -445,6 +447,8 @@ export default function Dashboard() {
     thermal_aoi: () => fetchEndpoint('/api/strategic-thermal', d => ({ thermal_aoi: d.aois })),
     internet_outages: () => fetchEndpoint('/api/radar', d => ({ ioda_outages: d.outages })),
     malware: () => fetchEndpoint('/api/malware', d => ({ malware_threats: d.threats })),
+    oblast_pressure: () => fetchEndpoint('/api/oblast-pressure', (d: any) => ({ oblast_pressure: d.oblasts ?? [] })),
+    shadow_fleet_tracks: () => fetchEndpoint('/api/maritime?tracks=1', (d: any) => ({ shadow_fleet_tracks: d.tracks ?? [] })),
   }), [fetchEndpoint]);
 
   // Fetch a source at most once (does NOT toggle the layer on).
@@ -494,6 +498,8 @@ export default function Dashboard() {
     if (activeLayers.thermal_aoi) loadOnce('thermal_aoi');
     if (activeLayers.internet_outages) loadOnce('internet_outages');
     if (activeLayers.malware) loadOnce('malware');
+    if (activeLayers.oblast_pressure) loadOnce('oblast_pressure');
+    if (activeLayers.shadow_fleet_tracks) loadOnce('shadow_fleet_tracks');
   }, [activeLayers, loadOnce]);
 
   // Background pre-fetch: populate LayerPanel counts for every layer
@@ -575,6 +581,12 @@ export default function Dashboard() {
     }
     if (activeLayers.global_incidents) {
       intervals.push(setInterval(() => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })), 300000)); // 5 min
+    }
+    if (activeLayers.oblast_pressure) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/oblast-pressure', (d: any) => ({ oblast_pressure: d.oblasts ?? [] })), 60_000)); // 1 min
+    }
+    if (activeLayers.shadow_fleet_tracks) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/maritime?tracks=1', (d: any) => ({ shadow_fleet_tracks: d.tracks ?? [] })), 300_000)); // 5 min
     }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);
