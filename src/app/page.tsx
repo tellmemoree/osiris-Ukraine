@@ -910,6 +910,8 @@ export default function Dashboard() {
         notifications={notificationLog}
         onClear={() => setNotificationLog([])}
         onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setNotifOpen(false); }}
+        onDismiss={(id) => setNotificationLog(prev => prev.filter(n => n.id !== id))}
+        onDismissGroup={(ids) => { const s = new Set(ids); setNotificationLog(prev => prev.filter(n => !s.has(n.id))); }}
       />
 
       {/* ── MAP ── */}
