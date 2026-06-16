@@ -57,6 +57,7 @@ function EntityGraphPanel({ entity, onClose }: Props) {
   const [selectedNode, setSelectedNode] = useState<EntityNode | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [containerDim, setContainerDim] = useState({ width: 480, height: 400 });
   const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -97,6 +98,28 @@ function EntityGraphPanel({ entity, onClose }: Props) {
     } catch (e) { setError(e instanceof Error ? e.message : 'Expansion failed'); }
     finally { setLoading(false); }
   }, [expandedIds, mergeGraph]);
+
+  // Measure container on mount and observe size changes
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateDims = () => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setContainerDim({ width: rect.width, height: rect.height });
+      }
+    };
+
+    // Initial measurement
+    updateDims();
+
+    // Observe resize
+    const observer = new ResizeObserver(updateDims);
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!entity) return;
@@ -279,8 +302,8 @@ function EntityGraphPanel({ entity, onClose }: Props) {
               ref={graphRef} graphData={graphData} nodeId="id"
               nodeCanvasObject={paintNode} linkCanvasObject={paintLink}
               onNodeClick={handleNodeClick} backgroundColor="rgba(0,0,0,0)"
-              width={containerRef.current?.clientWidth || 480}
-              height={containerRef.current?.clientHeight || 400}
+              width={containerDim.width}
+              height={containerDim.height}
               d3AlphaDecay={0.05} d3VelocityDecay={0.4} cooldownTicks={100}
               linkDirectionalParticles={1} linkDirectionalParticleWidth={1.5}
               linkDirectionalParticleSpeed={0.003}
