@@ -111,7 +111,7 @@ export default function Dashboard() {
   const data = dataRef.current;
 
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
-  const [mapView, setMapView] = useState({ zoom: 2.5, latitude: 20 });
+  const [mapView, setMapView] = useState({ zoom: 2.5, latitude: 20, longitude: 25.48 });
   const [flyToLocation, setFlyToLocation] = useState<{ lat: number; lng: number; ts: number } | null>(null);
   const [highlight, setHighlight] = useState<{ lat: number; lng: number; ts: number } | null>(null);
   // Searchable index over every live entity array (rebuilt when data changes).
@@ -924,6 +924,8 @@ export default function Dashboard() {
           onMouseCoords={handleMouseCoords}
           onRightClick={handleRightClick}
           onViewStateChange={setMapView}
+          initialCenter={[mapView.longitude, mapView.latitude]}
+          initialZoom={mapView.zoom}
           flyToLocation={flyToLocation}
           highlight={highlight}
           sweepData={sweepData}
