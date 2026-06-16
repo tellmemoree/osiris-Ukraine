@@ -104,6 +104,7 @@ const getLayerGroups = (theme: 'core' | 'ghost') => {
       { key: 'drone_threats', label: 'Drone / UAV Swarms', icon: Plane, color: '#CE93D8', dataKey: 'drone_threats' },
       { key: 'missile_threats', label: 'Missile Threats', icon: Zap, color: '#FF4444', dataKey: 'missile_routes' },
       { key: 'power_outages', label: 'Power Outages', icon: Zap, color: '#FFD500', dataKey: 'power_outages' },
+      { key: 'oblast_pressure', label: 'Oblast Pressure', icon: Activity, color: '#FF7043', dataKey: 'oblast_pressure' },
     ],
   },
   {
