@@ -60,6 +60,7 @@ const REGION_STEMS: Array<[string, string]> = [
   ['івано-франківськ',  'Ivano-Frankivska Oblast'],
   ['київськ',           'Kyivska Oblast'],
   ['київщин',           'Kyivska Oblast'],    // Київщині
+  ['києв',              'Kyiv City'],         // locative: У Києві
   ['київ',              'Kyiv City'],
   ['кіровоград',        'Kirovohradska Oblast'],
   ['кропивниц',         'Kirovohradska Oblast'],
@@ -184,9 +185,21 @@ function extractRegions(text: string): string[] {
   const lower = text.toLowerCase();
   const found: string[] = [];
   for (const [stem, oblast] of REGION_STEMS) {
-    if (lower.includes(stem) && !found.includes(oblast)) {
-      found.push(oblast);
+    if (!lower.includes(stem)) continue;
+    if (found.includes(oblast)) continue;
+    // Bare 'київ' must not fire when every occurrence is part of 'київщин'/'київськ'.
+    // 'києв' (locative) has no such collision and is handled first in REGION_STEMS.
+    if (stem === 'київ') {
+      let hasStandaloneCity = false;
+      let idx = 0;
+      while ((idx = lower.indexOf('київ', idx)) !== -1) {
+        const next = lower[idx + 4] ?? '';
+        if (next !== 'щ' && next !== 'с') { hasStandaloneCity = true; break; }
+        idx++;
+      }
+      if (!hasStandaloneCity) continue;
     }
+    found.push(oblast);
   }
   return found;
 }
