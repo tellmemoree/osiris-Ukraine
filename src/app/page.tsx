@@ -431,7 +431,7 @@ export default function Dashboard() {
     live_news: () => fetchEndpoint('/api/live-news', d => ({ live_feeds: d.feeds })),
     weather: () => fetchEndpoint('/api/weather', d => ({ weather_events: d.events })),
     infrastructure: () => fetchEndpoint('/api/infrastructure', d => ({ infrastructure: d.infrastructure })),
-    gdelt: () => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })),
+    gdelt: () => fetchEndpoint('/api/conflict-events', d => ({ gdelt: d.events })),
     air_raids: () => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })),
     power_outages: () => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })),
     kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })),
@@ -574,7 +574,7 @@ export default function Dashboard() {
       intervals.push(setInterval(() => fetchEndpoint('/api/captures', d => ({ captures: d.captures })), 300000)); // 5 min
     }
     if (activeLayers.global_incidents) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })), 300000)); // 5 min
+      intervals.push(setInterval(() => fetchEndpoint('/api/conflict-events', d => ({ gdelt: d.events })), 300000)); // 5 min
     }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);
