@@ -158,6 +158,11 @@ export const CONFLICT_KEYWORDS = [
 
 // ── Geo mapper ───────────────────────────────────────────────────────────────
 
+// Pre-compiled at module load — avoids rebuilding 90+ RegExps on every call.
+const GEO_MATCHERS: Array<[RegExp, [number, number]]> = Object.entries(GEO_DICT).map(
+  ([loc, point]) => [new RegExp(`\\b${loc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'), point],
+);
+
 /**
  * Scans text for the first GEO_DICT keyword using word-boundary matching.
  * Returns a raw [lng, lat] tuple or null if no keyword matches.
@@ -165,46 +170,45 @@ export const CONFLICT_KEYWORDS = [
  */
 export function geoMapText(text: string): [number, number] | null {
   const lower = text.toLowerCase();
-  for (const [location, point] of Object.entries(GEO_DICT)) {
-    const regex = new RegExp(`\\b${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (regex.test(lower)) {
-      return point;
-    }
+  for (const [regex, point] of GEO_MATCHERS) {
+    if (regex.test(lower)) return point;
   }
   return null;
 }
 
 // ── Deduplication + confidence tiering ───────────────────────────────────────
 
-/** Simple djb2-derived stable id from a bucket key string. */
+// Source families: sources within the same family share one upstream.
+// 'confirmed' requires ≥2 distinct families, not just ≥2 source labels.
+const SOURCE_FAMILY: Record<string, string> = {
+  'gdelt':      'gdelt',
+  'gdelt-rss':  'gdelt',   // same upstream as gdelt geo — not independent
+  'telegram':   'telegram',
+  'ucdp':       'ucdp',
+  'reliefweb':  'reliefweb',
+};
+
 function bucketId(key: string): string {
-  return Buffer.from(key).toString('base64url').slice(0, 12);
+  // btoa is Web-standard and edge-safe; avoids Node-only Buffer.
+  return btoa(key).replace(/[+/=]/g, c => ({ '+': '-', '/': '_', '=': '' }[c] ?? c)).slice(0, 12);
 }
 
 /**
- * Clusters an array of raw ConflictEvents by spatial+temporal bucket:
- *   0.3° spatial grid  ×  2-hour temporal window
- *
- * Merge rules per cluster:
- *   - lat/lng: centroid of all events in bucket
- *   - name: longest name string
- *   - published: earliest ISO timestamp
- *   - sources: union of all source arrays
- *   - deaths: sum
- *   - url/html: first non-empty value wins
- *   - eventType: first value wins (ordering is caller-determined)
+ * Clusters raw ConflictEvents by 0.3° spatial + 2-hour temporal bucket.
+ * Single-pass merge per cluster; confidence is based on distinct source
+ * *families* so gdelt + gdelt-rss (both GDELT-derived) count as one family.
  *
  * Confidence tiers:
- *   - confirmed   — merged sources has ≥ 2 distinct values
- *   - unverified  — only source present is 'telegram'
- *   - reported    — everything else
+ *   confirmed   — ≥ 2 distinct source families present
+ *   unverified  — sole family is 'telegram'
+ *   reported    — everything else
  */
 export function clusterEvents(raw: ConflictEvent[]): ConflictEvent[] {
   const buckets = new Map<string, ConflictEvent[]>();
 
   for (const ev of raw) {
     const ts = ev.published ? new Date(ev.published).getTime() : Date.now();
-    const timeBucket = Number.isNaN(ts) ? 0 : Math.floor(ts / 7_200_000);
+    const timeBucket = Number.isNaN(ts) ? Math.floor(Date.now() / 7_200_000) : Math.floor(ts / 7_200_000);
     const key = `${Math.round(ev.lat / 0.3)}|${Math.round(ev.lng / 0.3)}|${timeBucket}`;
     const bucket = buckets.get(key) ?? [];
     bucket.push(ev);
@@ -214,35 +218,40 @@ export function clusterEvents(raw: ConflictEvent[]): ConflictEvent[] {
   const merged: ConflictEvent[] = [];
 
   for (const [key, cluster] of buckets) {
-    const latSum = cluster.reduce((s, e) => s + e.lat, 0);
-    const lngSum = cluster.reduce((s, e) => s + e.lng, 0);
-    const centLat = latSum / cluster.length;
-    const centLng = lngSum / cluster.length;
-
-    const allSources = Array.from(new Set(cluster.flatMap(e => e.sources)));
-
-    const publishedTimes = cluster
-      .filter(e => e.published)
-      .map(e => new Date(e.published!).getTime())
-      .filter(t => !Number.isNaN(t));
-    const earliestPublished = publishedTimes.length
-      ? new Date(Math.min(...publishedTimes)).toISOString()
-      : undefined;
-
-    const longestName = cluster.reduce(
-      (best, e) => (e.name.length > best.length ? e.name : best),
-      '',
-    );
-
-    const totalDeaths = cluster.reduce((s, e) => s + (e.deaths ?? 0), 0);
-    const firstUrl = cluster.find(e => e.url)?.url;
-    const firstHtml = cluster.find(e => e.html)?.html;
+    // Single pass: accumulate everything needed for the merged event.
+    let latSum = 0, lngSum = 0, totalDeaths = 0;
+    let longestName = '';
+    let earliestTs = Infinity;
+    let firstUrl: string | undefined;
+    let firstHtml: string | undefined;
     const firstEventType = cluster[0].eventType;
+    const familySet = new Set<string>();
+    const sourceSet = new Set<string>();
+
+    for (const e of cluster) {
+      latSum += e.lat;
+      lngSum += e.lng;
+      totalDeaths += e.deaths ?? 0;
+      if (e.name.length > longestName.length) longestName = e.name;
+      if (e.published) {
+        const t = new Date(e.published).getTime();
+        if (!Number.isNaN(t) && t < earliestTs) earliestTs = t;
+      }
+      if (!firstUrl && e.url) firstUrl = e.url;
+      if (!firstHtml && e.html) firstHtml = e.html;
+      for (const s of e.sources) {
+        sourceSet.add(s);
+        familySet.add(SOURCE_FAMILY[s] ?? s);
+      }
+    }
+
+    const allSources = Array.from(sourceSet);
+    const earliestPublished = isFinite(earliestTs) ? new Date(earliestTs).toISOString() : undefined;
 
     let confidence: Confidence;
-    if (allSources.length >= 2) {
+    if (familySet.size >= 2) {
       confidence = 'confirmed';
-    } else if (allSources.length === 1 && allSources[0] === 'telegram') {
+    } else if (familySet.size === 1 && familySet.has('telegram')) {
       confidence = 'unverified';
     } else {
       confidence = 'reported';
@@ -250,8 +259,8 @@ export function clusterEvents(raw: ConflictEvent[]): ConflictEvent[] {
 
     merged.push({
       id: bucketId(key),
-      lat: centLat,
-      lng: centLng,
+      lat: latSum / cluster.length,
+      lng: lngSum / cluster.length,
       name: longestName || 'Conflict event',
       url: firstUrl,
       html: firstHtml,

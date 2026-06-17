@@ -666,7 +666,7 @@ export default function Dashboard() {
     // GDELT events
     if (data.gdelt?.length) {
       for (const g of data.gdelt) {
-        if (!g.lat || !g.lng) continue;
+        if (g.lat == null || g.lng == null) continue;
         sdkEntities.push({
           type: 'Feature', geometry: { type: 'Point', coordinates: [g.lng, g.lat] },
           properties: { domain: 'INTEL', name: g.name || 'GDELT Event', source: 'GDELT Project' },

@@ -23,7 +23,6 @@ import { stealthFetch } from '@/lib/stealthFetch';
 import {
   ConflictEvent,
   EventType,
-  GEO_DICT,
   RSS_FEEDS,
   CONFLICT_KEYWORDS,
   geoMapText,
@@ -114,73 +113,67 @@ async function fetchGdelt(): Promise<ConflictEvent[]> {
 // ── GDELT RSS fallback ───────────────────────────────────────────────────────
 
 async function fetchGdeltRss(): Promise<ConflictEvent[]> {
+  // Fan out all 12 feeds in parallel — sequential awaits stack 5s timeouts each.
+  const results = await Promise.allSettled(
+    RSS_FEEDS.map(feed => fetch(feed.url, { signal: AbortSignal.timeout(5000) })
+      .then(res => res.ok ? res.text() : null)
+      .catch(() => null)
+      .then(xml => ({ feed, xml }))),
+  );
+
   const allEvents: ConflictEvent[] = [];
   let eventId = 0;
 
-  for (const feed of RSS_FEEDS) {
-    try {
-      const res = await fetch(feed.url, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) continue;
-      const xml = await res.text();
+  for (const r of results) {
+    if (r.status !== 'fulfilled' || !r.value.xml) continue;
+    const { feed, xml } = r.value;
 
-      const items = xml.match(/<item>([\s\S]*?)<\/item>/gi) ?? [];
+    const items = xml.match(/<item>([\s\S]*?)<\/item>/gi) ?? [];
 
-      for (const item of items) {
-        const titleMatch =
-          item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i) ??
-          item.match(/<title>(.*?)<\/title>/i);
-        const linkMatch = item.match(/<link>(.*?)<\/link>/i);
-        const descMatch =
-          item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/i) ??
-          item.match(/<description>(.*?)<\/description>/i);
-        const dateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/i);
+    for (const item of items) {
+      const titleMatch =
+        item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i) ??
+        item.match(/<title>(.*?)<\/title>/i);
+      const linkMatch = item.match(/<link>(.*?)<\/link>/i);
+      const descMatch =
+        item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/i) ??
+        item.match(/<description>(.*?)<\/description>/i);
+      const dateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/i);
 
-        if (!titleMatch || !linkMatch) continue;
+      if (!titleMatch || !linkMatch) continue;
 
-        const parsed = dateMatch ? new Date(dateMatch[1]) : new Date();
-        const published = Number.isNaN(parsed.getTime())
-          ? new Date().toISOString()
-          : parsed.toISOString();
-        const ageHours = (Date.now() - new Date(published).getTime()) / 3_600_000;
-        if (ageHours > 24) continue;
+      const parsed = dateMatch ? new Date(dateMatch[1]) : new Date();
+      const published = Number.isNaN(parsed.getTime())
+        ? new Date().toISOString()
+        : parsed.toISOString();
+      const ageHours = (Date.now() - new Date(published).getTime()) / 3_600_000;
+      if (ageHours > 24) continue;
 
-        const title = titleMatch[1];
-        const link = linkMatch[1];
-        const desc = descMatch ? descMatch[1] : '';
+      const title = titleMatch[1];
+      const link = linkMatch[1];
+      const desc = descMatch ? descMatch[1] : '';
 
-        const textToSearch = (title + ' ' + desc).toLowerCase();
-        const isConflict = CONFLICT_KEYWORDS.some(kw => textToSearch.includes(kw));
-        if (!isConflict) continue;
+      const textToSearch = (title + ' ' + desc).toLowerCase();
+      const isConflict = CONFLICT_KEYWORDS.some(kw => textToSearch.includes(kw));
+      if (!isConflict) continue;
 
-        // Geo-map with deterministic jitter so events sharing a country don't overlap
-        let coords: [number, number] | null = null;
-        for (const [location, point] of Object.entries(GEO_DICT)) {
-          const regex = new RegExp(`\\b${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-          if (regex.test(textToSearch)) {
-            const jitterLng = ((eventId * 137.5) % 200 - 100) / 100 * 1.5;
-            const jitterLat = ((eventId * 251.3) % 200 - 100) / 100 * 1.5;
-            coords = [point[0] + jitterLng, point[1] + jitterLat];
-            break;
-          }
-        }
+      const point = geoMapText(textToSearch);
+      if (!point) continue;
 
-        if (coords) {
-          allEvents.push({
-            id: `osint-${feed.source.replace(/\s+/g, '')}-${eventId++}`,
-            lat: coords[1],
-            lng: coords[0],
-            name: `[${feed.source}] ${title}`,
-            url: link,
-            html: `<a href="${link}" target="_blank">${title}</a><br/><i>Source: ${feed.source}</i>`,
-            eventType: 'conflict',
-            sources: ['gdelt-rss'],
-            confidence: 'reported',
-            published,
-          });
-        }
-      }
-    } catch {
-      console.warn(`[conflict-events] RSS fetch failed: ${feed.source}`);
+      const jitterLng = ((eventId * 137.5) % 200 - 100) / 100 * 1.5;
+      const jitterLat = ((eventId * 251.3) % 200 - 100) / 100 * 1.5;
+      allEvents.push({
+        id: `osint-${feed.source.replace(/\s+/g, '')}-${eventId++}`,
+        lat: point[1] + jitterLat,
+        lng: point[0] + jitterLng,
+        name: `[${feed.source}] ${title}`,
+        url: link,
+        html: `<a href="${link}" target="_blank">${title}</a><br/><i>Source: ${feed.source}</i>`,
+        eventType: 'conflict',
+        sources: ['gdelt-rss'],
+        confidence: 'reported',
+        published,
+      });
     }
   }
 
@@ -231,35 +224,36 @@ async function fetchUcdp(): Promise<ConflictEvent[]> {
         type_of_violence?: number;
         deaths_a?: number;
         deaths_b?: number;
+        deaths_civilians?: number;
+        deaths_unknown?: number;
         date_start?: string;
       }[];
     };
 
     const results = data.Result ?? [];
-    return results
-      .filter(r => r.latitude != null && r.longitude != null)
-      .map((r, i) => {
-        const lat = typeof r.latitude === 'string' ? parseFloat(r.latitude) : (r.latitude ?? 0);
-        const lng = typeof r.longitude === 'string' ? parseFloat(r.longitude) : (r.longitude ?? 0);
-        const typeMap: Record<number, EventType> = {
-          1: 'battle',
-          2: 'conflict',
-          3: 'one-sided',
-        };
-        const eventType: EventType = typeMap[r.type_of_violence ?? 0] ?? 'conflict';
-        const deaths = (r.deaths_a ?? 0) + (r.deaths_b ?? 0);
-        return {
-          id: `ucdp-${i}`,
-          lat,
-          lng,
-          name: r.where_description ?? 'UCDP Event',
-          eventType,
-          sources: ['ucdp'],
-          confidence: 'reported' as const,
-          published: r.date_start ? new Date(r.date_start).toISOString() : undefined,
-          deaths: deaths > 0 ? deaths : undefined,
-        };
+    const events: ConflictEvent[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r.latitude == null || r.longitude == null) continue;
+      const lat = typeof r.latitude === 'string' ? parseFloat(r.latitude) : r.latitude;
+      const lng = typeof r.longitude === 'string' ? parseFloat(r.longitude) : r.longitude;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const typeMap: Record<number, EventType> = { 1: 'battle', 2: 'conflict', 3: 'one-sided' };
+      const eventType: EventType = typeMap[r.type_of_violence ?? 0] ?? 'conflict';
+      const deaths = (r.deaths_a ?? 0) + (r.deaths_b ?? 0) + (r.deaths_civilians ?? 0) + (r.deaths_unknown ?? 0);
+      events.push({
+        id: `ucdp-${i}`,
+        lat,
+        lng,
+        name: r.where_description ?? 'UCDP Event',
+        eventType,
+        sources: ['ucdp'],
+        confidence: 'reported' as const,
+        published: r.date_start ? new Date(r.date_start).toISOString() : undefined,
+        deaths: deaths > 0 ? deaths : undefined,
       });
+    }
+    return events;
   } catch {
     return [];
   }
@@ -324,23 +318,22 @@ export async function GET(): Promise<NextResponse> {
     );
   }
 
-  const settled = await Promise.allSettled([
-    fetchGdelt().catch(() => [] as ConflictEvent[]),
-    fetchGdeltRss().catch(() => [] as ConflictEvent[]),
-    extractTelegramEvents().catch(() => [] as ConflictEvent[]),
-    fetchUcdp().catch(() => [] as ConflictEvent[]),
-    fetchReliefWeb().catch(() => [] as ConflictEvent[]),
-  ]);
+  const fetchers = [fetchGdelt(), fetchGdeltRss(), extractTelegramEvents(), fetchUcdp(), fetchReliefWeb()];
+  const settled = await Promise.allSettled(fetchers);
 
   const flat: ConflictEvent[] = [];
+  let rejectedCount = 0;
   for (const r of settled) {
     if (r.status === 'fulfilled') {
       flat.push(...r.value);
+    } else {
+      rejectedCount++;
     }
   }
 
-  if (flat.length === 0 && cachedData) {
-    // All sources failed — serve stale cache rather than an empty response
+  // Only fall back to stale cache when every source threw — not when they
+  // legitimately returned zero events (genuine silence should clear the map).
+  if (rejectedCount === fetchers.length && cachedData) {
     const uniqueSources = Array.from(new Set(cachedData.flatMap(e => e.sources)));
     return NextResponse.json(
       { events: cachedData, total: cachedData.length, timestamp: new Date(lastFetch).toISOString(), sources: uniqueSources, stale: true },
