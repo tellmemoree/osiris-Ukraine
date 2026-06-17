@@ -531,28 +531,38 @@ async function buildNews(): Promise<unknown> {
       await writeDiskCache(rawArticles);
     }
 
+    // Always fetch the curated RSS feeds in parallel — they are the source of
+    // WORLD-tab articles. Previously these were only fetched when Telegram
+    // completely failed, which meant the WORLD tab was always empty in normal
+    // operation. We limit to 8 items per source to keep the feed balanced.
+    const rssPromises = Object.entries(FALLBACK_FEEDS).map(async ([source, url]) => {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) return [];
+        const xml = await res.text();
+        return parseRSSItems(xml, source).slice(0, 8);
+      } catch { return []; }
+    });
+    const rssResults = await Promise.allSettled(rssPromises);
+    const rssArticles: ParsedArticle[] = rssResults.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+
     const allArticles: ParsedArticle[] = rawArticles;
 
-    // FAILSAFE: If Telegram completely blocks the IP, fall back to traditional RSS
+    // FAILSAFE: If Telegram completely blocks the IP, add extra RSS items so
+    // the feed is never fully empty.
     if (allArticles.length === 0) {
-      const fallbackPromises = Object.entries(FALLBACK_FEEDS).map(async ([source, url]) => {
-        try {
-          const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-          if (!res.ok) return [];
-          const xml = await res.text();
-          return parseRSSItems(xml, source).slice(0, 5);
-        } catch { return []; }
-      });
-      
-      const fallbackResults = await Promise.allSettled(fallbackPromises);
-      for (const result of fallbackResults) {
-        if (result.status === 'fulfilled') allArticles.push(...result.value);
-      }
+      allArticles.push(...rssArticles);
     }
 
-    // Keep only war/conflict items (bilingual). Drops channel ads, promos,
-    // sport, weather, and other off-topic posts that these OSINT feeds also carry.
-    const conflictArticles = allArticles.filter(a => isConflict(`${a.title} ${a.description}`));
+    // Keep only war/conflict items from Telegram (bilingual). Drops channel ads,
+    // promos, sport, weather, and other off-topic posts. RSS/world articles are
+    // from curated news sources, so they pass through without the conflict filter
+    // — they always show up in the WORLD tab.
+    const rssSourceSet = new Set(rssArticles.map(a => a.source));
+    const conflictArticles = [
+      ...allArticles.filter(a => !rssSourceSet.has(a.source) && isConflict(`${a.title} ${a.description}`)),
+      ...rssArticles,
+    ];
 
     const newsItems = conflictArticles.map(article => {
       // Concatenate title + description so place names appearing only in the
