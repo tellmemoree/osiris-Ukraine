@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { parseThermalLatest } from '@/lib/osint-utils';
 
 // ── Popup XSS escaping ──
 // Map popups are assembled as raw HTML strings and injected via Popup.setHTML,
@@ -1681,14 +1682,17 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     const visible = all.filter((a: any) => {
       if (firesOnly && !a.hit) return false; // hide cold sites when fires-only is on
       if (!a.latest) {
-        if (a.category === 'news') return replayTime === null; // news-only: visible in live mode, hidden in replay (no timestamp to filter against)
+        // News-category AOIs have no per-item timestamp; always show as reference context
+        // so the histogram density spikes (from data.news) correspond to visible map markers.
         return true;
       }
-      const parts = (a.latest as string).trim().split(' ');
-      if (parts.length < 2) return true;
-      const t4 = parts[1].padStart(4, '0');
-      const ts = new Date(`${parts[0]}T${t4.slice(0,2)}:${t4.slice(2,4)}:00Z`).getTime();
-      return ts <= cutoffMs && (cutoffMs - ts) < 86400000;
+      const ts = parseThermalLatest(a.latest);
+      if (ts === null) return true; // unparseable timestamp → always show
+      if (ts > cutoffMs) return false;
+      // 24h rolling window: only applied in live mode. In replay the operator may
+      // be studying events >24h old; the hard window would hide them at the cursor.
+      if (!replayTime && (cutoffMs - ts) >= 86400000) return false;
+      return true;
     });
     setGeo('thermal-aoi', visible.map((a: any) => ({
       type: 'Feature',

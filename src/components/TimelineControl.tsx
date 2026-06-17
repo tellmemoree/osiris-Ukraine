@@ -21,7 +21,7 @@ const SPEEDS = [
   { label: '12×', hps: 12 },
 ];
 const RANGES = [6, 12, 24, 48];
-const TICK_MS = 50;
+const TICK_MS = 200; // 5fps — enough for smooth playback, avoids 20×/sec MapLibre source uploads
 
 function fmtUtc(ms: number): string {
   const d = new Date(ms);
@@ -72,11 +72,20 @@ export default function TimelineControl({ replayTime, timelineRangeH, events, on
   // ── Playback interval ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!playing) return;
-    const advanceMs = SPEEDS[speedIdx].hps * 3_600_000 * (TICK_MS / 1000);
+    // Clamp so the full window takes at least 10 real seconds — prevents 12× blowing
+    // through a 6h window in 0.5s.
+    const rawAdvance = SPEEDS[speedIdx].hps * 3_600_000 * (TICK_MS / 1000);
+    const minTicks = 10_000 / TICK_MS; // 10s minimum traversal
+    const advanceMs = Math.min(rawAdvance, (rangeHRef.current * 3_600_000) / minTicks);
     const iv = setInterval(() => {
       const cur = replayRef.current;
-      const base = cur ? cur.getTime() : (Date.now() - rangeHRef.current * 3_600_000);
-      const next = base + advanceMs;
+      if (cur === null) {
+        // Playing with no replayTime — stop cleanly rather than teleporting to window start.
+        onScrub(null);
+        setPlaying(false);
+        return;
+      }
+      const next = cur.getTime() + advanceMs;
       if (next >= Date.now()) {
         onScrub(null);    // reached "now" → switch to live
         setPlaying(false);
@@ -85,15 +94,21 @@ export default function TimelineControl({ replayTime, timelineRangeH, events, on
       }
     }, TICK_MS);
     return () => clearInterval(iv);
-  }, [playing, speedIdx, onScrub]);
+  }, [playing, speedIdx, onScrub]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Scrub helpers ──────────────────────────────────────────────────────────
   function scrubToX(clientX: number) {
     if (!trackRef.current) return;
+    // Recompute rangeStart fresh here — render-time nowMs can be stale by several
+    // seconds when there's no data update, which would shrink the effective snap-to-live
+    // tolerance below the intended 5s.
+    const freshNow = Date.now();
+    const freshRangeMs = rangeHRef.current * 3_600_000;
+    const freshRangeStart = freshNow - freshRangeMs;
     const rect = trackRef.current.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const targetMs = rangeStart + ratio * rangeMs;
-    onScrub(targetMs >= Date.now() - 5_000 ? null : new Date(targetMs));
+    const targetMs = freshRangeStart + ratio * freshRangeMs;
+    onScrub(targetMs >= freshNow - 5_000 ? null : new Date(targetMs));
   }
 
   function handlePointerDown(e: React.PointerEvent) {
@@ -187,6 +202,7 @@ export default function TimelineControl({ replayTime, timelineRangeH, events, on
       <div
         ref={trackRef}
         className="relative h-7 cursor-pointer rounded overflow-hidden"
+        style={{ touchAction: 'none' }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

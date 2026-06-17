@@ -18,6 +18,7 @@ import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 import FrontlineTracker from '@/components/FrontlineTracker';
 import TimelineControl, { TimelineEvent } from '@/components/TimelineControl';
+import { parseThermalLatest } from '@/lib/osint-utils';
 import AxisBriefing from '@/components/AxisBriefing';
 import ThresholdToasts from '@/components/ThresholdToasts';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
@@ -121,18 +122,12 @@ export default function Dashboard() {
   // Timestamped events for the timeline density histogram.
   const timelineEvents = useMemo((): TimelineEvent[] => {
     const evs: TimelineEvent[] = [];
-    (data.news   || []).forEach((n: any) => n.published  && evs.push({ t: new Date(n.published).getTime(),  type: 'news'  }));
-    (data.kab_threats || []).forEach((k: any) => k.startedAt && evs.push({ t: new Date(k.startedAt).getTime(), type: 'kab'  }));
-    (data.gdelt  || []).forEach((e: any) => e.published  && evs.push({ t: new Date(e.published).getTime(),  type: 'gdelt' }));
-    (data.thermal_aoi || []).forEach((a: any) => {
-      if (!a.latest) return;
-      const parts = (a.latest as string).trim().split(' ');
-      if (parts.length < 2) return;
-      const t4 = parts[1].padStart(4, '0');
-      const ms = new Date(`${parts[0]}T${t4.slice(0,2)}:${t4.slice(2,4)}:00Z`).getTime();
-      if (!isNaN(ms)) evs.push({ t: ms, type: 'thermal' });
-    });
-    (data.captures || []).forEach((c: any) => c.date && evs.push({ t: new Date(c.date).getTime(), type: 'capture' }));
+    const push = (t: number, type: TimelineEvent['type']) => { if (Number.isFinite(t)) evs.push({ t, type }); };
+    (data.news        || []).forEach((n: any) => n.published  && push(new Date(n.published).getTime(),  'news'));
+    (data.kab_threats || []).forEach((k: any) => k.startedAt  && push(new Date(k.startedAt).getTime(), 'kab'));
+    (data.gdelt       || []).forEach((e: any) => e.published  && push(new Date(e.published).getTime(),  'gdelt'));
+    (data.thermal_aoi || []).forEach((a: any) => { const ms = parseThermalLatest(a.latest); if (ms) push(ms, 'thermal'); });
+    (data.captures    || []).forEach((c: any) => c.date       && push(new Date(c.date).getTime(),       'capture'));
     return evs;
   }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -169,6 +164,11 @@ export default function Dashboard() {
   const [replayTime, setReplayTime] = useState<Date | null>(null);
   const [timelineRangeH, setTimelineRangeH] = useState(24);
   const [showTimeline, setShowTimeline] = useState(false);
+  // Return to live when the timeline panel is closed so the map doesn't stay
+  // frozen in replay with no visible control to escape.
+  useEffect(() => {
+    if (!showTimeline && mobilePanel !== 'timeline') setReplayTime(null);
+  }, [showTimeline, mobilePanel]);
   const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlert[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notificationLog, setNotificationLog] = useState<NotificationRecord[]>([]);
