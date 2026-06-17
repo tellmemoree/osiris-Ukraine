@@ -78,6 +78,7 @@ interface OsirisMapProps {
   theme?: 'core' | 'ghost';
   initialCenter?: [number, number];
   initialZoom?: number;
+  replayTime?: Date | null;
 }
 
 function computeSolarTerminator(): [number, number][] {
@@ -102,7 +103,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom, replayTime = null }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -1673,14 +1674,14 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
-    const cutoff = new Date();
+    const cutoff = replayTime ?? new Date();
     const cutoffMs = cutoff.getTime();
     const all: any[] = activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi : [];
     const firesOnly = activeLayers.thermal_aoi_fires_only;
     const visible = all.filter((a: any) => {
       if (firesOnly && !a.hit) return false; // hide cold sites when fires-only is on
       if (!a.latest) {
-        if (a.category === 'news') return true;
+        if (a.category === 'news') return replayTime === null; // news-only: visible in live mode, hidden in replay (no timestamp to filter against)
         return true;
       }
       const parts = (a.latest as string).trim().split(' ');
@@ -1703,11 +1704,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         sources: a.sources ? JSON.stringify(a.sources) : '[]',
       },
     })));
-  }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, activeLayers.thermal_aoi_fires_only, setGeo]);
+  }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, activeLayers.thermal_aoi_fires_only, setGeo, replayTime]);
 
   useEffect(() => {
     if (!mapReady) return;
-    const cutoff = new Date();
+    const cutoff = replayTime ?? new Date();
     const cutoffMs = cutoff.getTime();
     const all: any[] = activeLayers.captures && data.captures ? data.captures : [];
     const visible = all.filter((c: any) => {
@@ -1720,7 +1721,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
       properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description, conflicted: c.conflicted },
     })));
-  }, [mapReady, data.captures, activeLayers.captures, setGeo]);
+  }, [mapReady, data.captures, activeLayers.captures, setGeo, replayTime]);
 
   // Air quality (Open-Meteo) — colored PM2.5 station dots.
   useEffect(() => {
@@ -1735,13 +1736,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
-    const cutoff = new Date();
+    const cutoff = replayTime ?? new Date();
     setGeo('gdelt', activeLayers.global_incidents && data.gdelt ? data.gdelt.filter((e: any) => {
       if (!e.published) return true;
       const t = new Date(e.published).getTime();
       return t <= cutoff.getTime() && (cutoff.getTime() - t) < 86400000;
     }).map((e: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lng, e.lat] }, properties: { name: e.name, url: e.url, published: e.published } })) : []);
-  }, [mapReady, data.gdelt, activeLayers.global_incidents, setGeo]);
+  }, [mapReady, data.gdelt, activeLayers.global_incidents, setGeo, replayTime]);
 
   // IODA Internet Outages
   useEffect(() => {
@@ -1910,7 +1911,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // KAB / glide-bomb threats (Telegram-derived, oblast-level point markers).
   useEffect(() => {
     if (!mapReady) return;
-    const cutoff = new Date();
+    const cutoff = replayTime ?? new Date();
     const allThreats = activeLayers.kab_threats && data.kab_threats ? data.kab_threats : [];
     const threats = allThreats.filter((t: any) =>
       t.lat && t.lng && (!t.startedAt || new Date(t.startedAt).getTime() <= cutoff.getTime())
@@ -1922,7 +1923,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         startedAt: t.startedAt, text: t.text, sources: t.sources, alertType: t.alertType,
       },
     })));
-  }, [mapReady, data.kab_threats, activeLayers.kab_threats, setGeo]);
+  }, [mapReady, data.kab_threats, activeLayers.kab_threats, setGeo, replayTime]);
 
   // Drone threats — keep flowing to drone-threats source for backward compat.
   useEffect(() => {
@@ -2046,7 +2047,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   useEffect(() => {
     if (!mapReady) return;
     const items = data.news || [];
-    const cutoff = new Date();
+    const cutoff = replayTime ?? new Date();
     setGeo('sigint-news', activeLayers.news_intel && items.length > 0
       ? items.filter((n: any) => {
           if (n.coords?.length !== 2) return false;
@@ -2059,7 +2060,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           properties: { title: n.title, source: n.source, risk_score: n.risk_score, link: n.link, published: n.published }
         }))
       : []);
-  }, [mapReady, data.news, activeLayers.news_intel, setGeo]);
+  }, [mapReady, data.news, activeLayers.news_intel, setGeo, replayTime]);
 
   useEffect(() => {
     if (!mapReady) return;
