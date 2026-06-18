@@ -19,9 +19,11 @@ export const dynamic = 'force-dynamic';
  */
 
 // UA-focused channels that routinely report inbound KAB/UMPK launches.
+// GeneralStaffUA / Militaryland / ukraine_now removed — they scrape 0 messages
+// and/or post after-action summaries rather than real-time warnings.
 const UA_THREAT_CHANNELS = [
-  'GeneralStaffUA', 'DeepStateUA', 'Militaryland', 'UkraineWarReport',
-  'ukraine_now', 'ua_forces', 'kpszsu', 'war_monitor',
+  'DeepStateUA', 'UkraineWarReport',
+  'ua_forces', 'kpszsu', 'war_monitor',
 ];
 
 // KAB / guided-glide-bomb mentions across UK / RU / EN. The \p{L} look-arounds give

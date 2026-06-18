@@ -501,10 +501,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         paint: {
           'circle-radius': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 6, 4],
           'circle-color': ['get', 'color'],
-          'circle-opacity': 0.9,
-          'circle-stroke-width': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 2.5, 1.5],
+          'circle-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 0.9, 0.45],
+          'circle-stroke-width': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 2.5, 1.0],
           'circle-stroke-color': ['case', ['boolean', ['get', 'alarmConfirmed'], false], '#FF1744', ['get', 'color']],
-          'circle-stroke-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.5],
+          'circle-stroke-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.3],
         }});
       map.addLayer({ id: 'missile-route-label', type: 'symbol', source: 'missile-routes', minzoom: 4,
         filter: ['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'isLatest'], true]],
@@ -1970,21 +1970,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('drone-route', features);
   }, [mapReady, data.drone_waves, data.air_raids, activeLayers.drone_threats, setGeo]);
 
-  // Missile threat routes (CRUISE, BALLISTIC, KINZHAL, KH22) — one line per wave per type.
-  // Same alarm-clearing logic as drone route: waypoints drop when their oblast goes quiet.
+  // Missile routes — all waypoints shown regardless of current alarm state.
+  // Cruise missiles cross Ukraine in 30-90 min; by the time they hit, transit-oblast
+  // alarms have cleared. Applying the drone-swarm alarm filter here was stripping
+  // routes to 0-1 waypoints (line needs ≥2). Show all; use alarmConfirmed for
+  // visual dimming via data-driven paint expressions on missile-route-nodes.
   useEffect(() => {
     if (!mapReady) return;
     const routes: any[] = activeLayers.missile_threats && data.missile_routes ? data.missile_routes : [];
-    const alarmedOblasts: Set<string> | null = data.air_raids
-      ? new Set((data.air_raids as any[]).map((a: any) => a.oblast.toLowerCase()))
-      : null;
     const features: any[] = [];
     for (const route of routes) {
       for (const wave of (route.waves || [])) {
-        const allWps: any[] = wave.waypoints || [];
-        const wps = alarmedOblasts
-          ? allWps.filter((w: any) => alarmedOblasts.has(w.oblast.toLowerCase()))
-          : allWps;
+        const wps: any[] = wave.waypoints || [];
         if (wps.length === 0) continue;
         if (wps.length >= 2) {
           features.push({
@@ -2008,7 +2005,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       }
     }
     setGeo('missile-routes', features);
-  }, [mapReady, data.missile_routes, data.air_raids, activeLayers.missile_threats, setGeo]);
+  }, [mapReady, data.missile_routes, activeLayers.missile_threats, setGeo]);
 
   // RU Oblast Alerts (Russian border oblast drone/strike incursions).
   useEffect(() => {

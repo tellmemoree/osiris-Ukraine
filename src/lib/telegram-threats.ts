@@ -15,9 +15,11 @@ import { stealthFetch } from '@/lib/stealthFetch';
 
 // ── channels ────────────────────────────────────────────────────────────────
 
+// GeneralStaffUA / Militaryland / ukraine_now removed: scrape 0 messages and/or
+// post after-action summaries rather than real-time warnings.
 export const UA_THREAT_CHANNELS = [
-  'GeneralStaffUA', 'DeepStateUA', 'Militaryland', 'UkraineWarReport',
-  'ukraine_now', 'ua_forces', 'kpszsu', 'war_monitor',
+  'DeepStateUA', 'UkraineWarReport',
+  'ua_forces', 'kpszsu', 'war_monitor',
 ] as const;
 
 // ── types ───────────────────────────────────────────────────────────────────
@@ -101,8 +103,11 @@ const WEAPON_VOCAB: Record<WeaponType, RegExp[]> = {
   CRUISE: [
     /(?<!\p{L})калібр(?!\p{L})/iu,
     /(?<!\p{L})kh?-?101(?!\p{L})/iu,
+    /(?<!\p{L})х-?101(?!\p{L})/iu,    // Cyrillic Х — UA writers use Х not Latin K
     /(?<!\p{L})kh?-?555(?!\p{L})/iu,
+    /(?<!\p{L})х-?555(?!\p{L})/iu,
     /крилата ракета/iu,
+    /(?<!\p{L})ракетн/iu,             // generic fallback: ракетна загроза / ракетний удар
   ],
   BALLISTIC: [
     /(?<!\p{L})іскандер(?!\p{L})/iu,
@@ -292,9 +297,11 @@ function firstOblastInText(text: string): OblastRef | null {
   return result;
 }
 
-// A 25-minute gap between consecutive sighting messages is treated as a new
-// wave (separate attack group / drone swarm).
-const WAVE_GAP_MS = 25 * 60 * 1000;
+// A 45-minute gap between consecutive sighting messages is treated as a new
+// wave. Cruise missiles cross Ukraine in 30-90 min; different channels report
+// the same missile 20-30 min apart. 25 min was splitting single strikes into
+// multiple "waves".
+const WAVE_GAP_MS = 45 * 60 * 1000;
 
 /**
  * Builds temporal route waves for a given weapon type.
