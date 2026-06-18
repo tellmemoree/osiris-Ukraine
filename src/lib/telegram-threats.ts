@@ -20,6 +20,13 @@ export const UA_THREAT_CHANNELS = [
   'ukraine_now', 'ua_forces', 'kpszsu', 'war_monitor',
 ] as const;
 
+// Strike-report channels: post after-action summaries, not real-time threat alerts.
+// Kept separate from UA_THREAT_CHANNELS so drone/missile route builders never see
+// multi-oblast summary posts as waypoints of an active wave.
+export const STRIKE_REPORT_CHANNELS = [
+  'ssternenko',
+] as const;
+
 // ── types ───────────────────────────────────────────────────────────────────
 
 export interface TgMessage {
@@ -149,6 +156,15 @@ let corpus:         TgMessage[] | null = null;
 let corpusAt                           = 0;
 let corpusInflight: Promise<TgMessage[]> | null = null;
 
+// Strike-report corpus: longer window (6h) + longer TTL (30 min) — summaries
+// arrive later than live alerts and don't need to be re-scraped as often.
+const REPORT_WINDOW_MS  = 6 * 60 * 60 * 1000;
+const REPORT_CACHE_TTL_MS = 30 * 60 * 1000;
+
+let reportCorpus:         TgMessage[] | null = null;
+let reportCorpusAt                           = 0;
+let reportCorpusInflight: Promise<TgMessage[]> | null = null;
+
 // ── internal helpers ─────────────────────────────────────────────────────────
 
 // Extract { text, ts, channel } per message from a Telegram /s/ HTML page.
@@ -232,6 +248,41 @@ export async function getThreatCorpus(): Promise<TgMessage[]> {
   }
 }
 
+async function fetchReportCorpus(): Promise<TgMessage[]> {
+  const cutoff = Date.now() - REPORT_WINDOW_MS;
+  const settled = await Promise.allSettled(
+    STRIKE_REPORT_CHANNELS.map((c) => fetchChannel(c)),
+  );
+  const messages: TgMessage[] = [];
+  for (const r of settled) {
+    if (r.status !== 'fulfilled') continue;
+    for (const msg of r.value) {
+      if (msg.ts >= cutoff) messages.push(msg);
+    }
+  }
+  return messages;
+}
+
+/**
+ * Returns the last 6h of messages from STRIKE_REPORT_CHANNELS.
+ * Separate cache from getThreatCorpus() — longer window, longer TTL.
+ * Only used by /api/strategic-thermal; never fed into route builders.
+ */
+export async function getStrikeReportCorpus(): Promise<TgMessage[]> {
+  const now = Date.now();
+  if (reportCorpus && now - reportCorpusAt < REPORT_CACHE_TTL_MS) return reportCorpus;
+  if (reportCorpusInflight) return reportCorpusInflight;
+  reportCorpusInflight = fetchReportCorpus();
+  try {
+    const data = await reportCorpusInflight;
+    reportCorpus   = data;
+    reportCorpusAt = Date.now();
+    return data;
+  } finally {
+    reportCorpusInflight = null;
+  }
+}
+
 /**
  * Returns which WeaponType(s) are mentioned in a message.
  * All regex sets are precompiled at module load — this is a pure classifier.
@@ -254,6 +305,102 @@ export function matchOblasts(text: string): OblastRef[] {
   return OBLAST_MATCHERS
     .filter(({ regexes }) => regexes.some((re) => re.test(text)))
     .map(({ ref }) => ref);
+}
+
+// ── geo event extraction ─────────────────────────────────────────────────────
+
+// Bilingual event keywords (Cyrillic + Latin) for conflict detection.
+const EVENT_KEYWORDS = [
+  'вибух', 'удар', 'обстріл', 'атака', 'приліт', 'бій', 'штурм', 'наступ',
+  'окупанти', 'зайняли', 'звільнили', 'втрати', 'загинули', 'поранені',
+  'explosion', 'strike', 'shelling', 'assault', 'offensive', 'captured', 'liberated', 'casualties',
+];
+
+// Max events extracted from the Telegram corpus per call.
+const GEO_EVENT_CAP = 50;
+
+// Lazily imported to avoid circular dependency (conflict-geo imports nothing from here).
+// We use a dynamic import pattern to keep the module graph clean.
+let _geoMapText: ((text: string) => [number, number] | null) | null = null;
+
+async function getGeoMapText(): Promise<(text: string) => [number, number] | null> {
+  if (!_geoMapText) {
+    const m = await import('@/lib/conflict-geo');
+    _geoMapText = m.geoMapText;
+  }
+  return _geoMapText;
+}
+
+/**
+ * Extracts geo-located conflict events from the cached Telegram corpus.
+ * Reuses getThreatCorpus() — does NOT launch new channel fetches.
+ *
+ * Returns up to GEO_EVENT_CAP events, each with a coordinate, event type,
+ * ISO published timestamp, and sources array tagged ['telegram'].
+ */
+export async function extractGeoEvents(): Promise<{
+  lat: number;
+  lng: number;
+  name: string;
+  eventType: string;
+  published: string;
+  sources: string[];
+}[]> {
+  const geoMap = await getGeoMapText();
+  const msgs = await getThreatCorpus();
+
+  const out: {
+    lat: number;
+    lng: number;
+    name: string;
+    eventType: string;
+    published: string;
+    sources: string[];
+  }[] = [];
+
+  for (const msg of msgs) {
+    if (out.length >= GEO_EVENT_CAP) break;
+
+    const lowerText = msg.text.toLowerCase();
+    const hasEvent = EVENT_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase()));
+    if (!hasEvent) continue;
+
+    // Prefer Cyrillic-aware oblast matching; fall back to Latin GEO_DICT scan.
+    const oblastRef = firstOblastInText(msg.text);
+    let lat: number;
+    let lng: number;
+
+    if (oblastRef) {
+      [lng, lat] = oblastRef.coords; // coords are [lng, lat] in OBLAST_REFS
+    } else {
+      const coords = geoMap(msg.text);
+      if (!coords) continue;
+      [lng, lat] = coords; // geoMapText returns [lng, lat]
+    }
+
+    // eventType mapping
+    let eventType: string;
+    if (/штурм|наступ|assault|offensive/i.test(msg.text)) {
+      eventType = 'battle';
+    } else if (/удар|приліт|strike|обстріл|shelling/i.test(msg.text)) {
+      eventType = 'strike';
+    } else {
+      eventType = 'conflict';
+    }
+
+    const published = new Date(msg.ts).toISOString();
+
+    out.push({
+      lat,
+      lng,
+      name: msg.text.slice(0, 120),
+      eventType,
+      published,
+      sources: ['telegram'],
+    });
+  }
+
+  return out;
 }
 
 // ── route building ───────────────────────────────────────────────────────────
