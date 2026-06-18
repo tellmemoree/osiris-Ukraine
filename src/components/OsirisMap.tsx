@@ -78,6 +78,7 @@ interface OsirisMapProps {
   theme?: 'core' | 'ghost';
   initialCenter?: [number, number];
   initialZoom?: number;
+  onMapReady?: () => void;
 }
 
 function computeSolarTerminator(): [number, number][] {
@@ -102,7 +103,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom, onMapReady }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -906,6 +907,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       });
 
       setMapReady(true);
+      onMapReady?.();
     });
 
     // Events
