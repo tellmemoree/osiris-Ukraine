@@ -16,8 +16,9 @@ import { stealthFetch } from '@/lib/stealthFetch';
 // ── channels ────────────────────────────────────────────────────────────────
 
 export const UA_THREAT_CHANNELS = [
-  'GeneralStaffUA', 'DeepStateUA', 'Militaryland', 'UkraineWarReport',
-  'ukraine_now', 'ua_forces', 'kpszsu', 'war_monitor',
+  'DeepStateUA', 'UkraineWarReport',
+  'ua_forces', 'kpszsu', 'war_monitor',
+  'vanek_nikolaev', // RU-language UA channel; uses "мопед" as Shahed alias
 ] as const;
 
 // Strike-report channels: post after-action summaries, not real-time threat alerts.
@@ -108,8 +109,11 @@ const WEAPON_VOCAB: Record<WeaponType, RegExp[]> = {
   CRUISE: [
     /(?<!\p{L})калібр(?!\p{L})/iu,
     /(?<!\p{L})kh?-?101(?!\p{L})/iu,
+    /(?<!\p{L})х-?101(?!\p{L})/iu,    // Cyrillic Х (кириличний) — UA writers use Х not K
     /(?<!\p{L})kh?-?555(?!\p{L})/iu,
+    /(?<!\p{L})х-?555(?!\p{L})/iu,
     /крилата ракета/iu,
+    /(?<!\p{L})ракетн/iu,             // generic missile fallback: ракетна загроза / ракетний удар
   ],
   BALLISTIC: [
     /(?<!\p{L})іскандер(?!\p{L})/iu,
@@ -123,6 +127,7 @@ const WEAPON_VOCAB: Record<WeaponType, RegExp[]> = {
     /(?<!\p{L})geran(?!\p{L})/iu,
     /(?<!\p{L})бпла(?!\p{L})/iu,
     /дрон-?камікадз/iu,
+    /(?<!\p{L})мопед/iu,  // vanek_nikolaev alias for Shahed ("мопед", "мопедів", etc.)
   ],
   KINZHAL: [
     /(?<!\p{L})кинджал(?!\p{L})/iu,
@@ -439,9 +444,11 @@ function firstOblastInText(text: string): OblastRef | null {
   return result;
 }
 
-// A 25-minute gap between consecutive sighting messages is treated as a new
-// wave (separate attack group / drone swarm).
-const WAVE_GAP_MS = 25 * 60 * 1000;
+// A 45-minute gap between consecutive sighting messages is treated as a new
+// wave (separate attack group / drone swarm). 45 min is used because different
+// channels post about the same cruise missile 20-30 min apart; 25 min was
+// splitting single strikes into multiple "waves".
+const WAVE_GAP_MS = 45 * 60 * 1000;
 
 /**
  * Builds temporal route waves for a given weapon type.

@@ -177,7 +177,7 @@ export default function AxisBriefing({ show }: AxisBriefingProps) {
       )}
 
       {data && data.axes.length > 0 && (
-        <div>
+        <div className="max-h-[55vh] overflow-y-auto">
           {data.axes.map((axis) => (
             <AxisRow key={axis.name} axis={axis} />
           ))}

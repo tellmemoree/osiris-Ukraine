@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { getThreatCorpus, classifyWeapons, matchOblasts, buildRoute } from '@/lib/telegram-threats';
 import type { OblastRef, RouteWave } from '@/lib/telegram-threats';
 import { readAlarmHistory, isOblastAlarmed } from '@/lib/alarm-history';
+import {
+  DRONE_TRACKS_FILE, DRONE_TRACK_TTL_MS,
+  loadTrackEntries, mergeAndSaveTracks, buildWavesFromEntries, wavesToTrackEntries,
+} from '@/lib/threat-tracks';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,8 +14,11 @@ export const dynamic = 'force-dynamic';
  *
  * Thin route on top of the shared telegram-threats corpus.
  * Filters the 1.5-h message window for DRONE weapon mentions
- * (Shahed / Geran / БПЛА / drone-kamikaze patterns), then aggregates
- * one DroneEvent per affected oblast (keeping the most recent message).
+ * (Shahed / Geran / БПЛА / drone-kamikaze / мопед patterns), then:
+ *   1. Aggregates one DroneEvent per affected oblast (active threats).
+ *   2. Extracts route waypoints and persists them to drone-route-tracks.json.
+ *   3. Returns routes built from the full 24h accumulated history so the
+ *      complete attack trajectory is visible, not just the last 1.5 h.
  *
  * Cache: 60 s route-level (processed result).
  * The underlying corpus is cached 15 min in telegram-threats.ts, so actual
@@ -19,7 +26,7 @@ export const dynamic = 'force-dynamic';
  */
 
 const WINDOW_HOURS = 1.5;
-const CACHE_TTL_MS = 60_000; // 60 s — short because drone activity is fast-moving
+const CACHE_TTL_MS = 60_000;
 
 interface DroneEvent {
   oblast:      string;
@@ -29,24 +36,27 @@ interface DroneEvent {
   lat:         number;
   lng:         number;
   count:       number;
-  startedAt:   string;   // ISO of the most-recent mention
-  text:        string;   // snippet ≤220 chars
-  sources:     string[]; // e.g. ["t.me/war_monitor"]
+  startedAt:   string;
+  text:        string;
+  sources:     string[];
 }
 
 interface DroneResponse {
   threats:      DroneEvent[];
-  waves:        RouteWave[];   // one per distinct attack group; empty when no confirmed sightings
+  waves:        RouteWave[];
   total:        number;
   window_hours: number;
   timestamp:    string;
 }
 
-// ── module-level cache ───────────────────────────────────────────────────────
+// ── module-level cache + cold-start seed ─────────────────────────────────────
 
 let cached:   DroneResponse | null = null;
 let cachedAt                       = 0;
 let inflight: Promise<DroneResponse> | null = null;
+
+// Seed in-memory with stored history on module load so first request is instant
+let trackSeed = loadTrackEntries(DRONE_TRACKS_FILE);
 
 // ── builder ──────────────────────────────────────────────────────────────────
 
@@ -104,17 +114,21 @@ async function buildDroneResponse(): Promise<DroneResponse> {
     }))
     .sort((x, y) => new Date(y.startedAt).getTime() - new Date(x.startedAt).getTime());
 
-  const waves = buildRoute(messages, 'DRONE');
-
-  // Cross-reference each waypoint against air-raid alarm history.
-  // Drones are slow (~150 km/h) and stay in an oblast for 20-40 min;
-  // a ±45-min window catches the alarm reliably.
+  // Build current-corpus waves and annotate with alarm history
+  const currentWaves = buildRoute(messages, 'DRONE');
   const alarmHistory = await readAlarmHistory();
-  for (const wave of waves) {
+  for (const wave of currentWaves) {
     for (const wp of wave.waypoints) {
       wp.alarmConfirmed = isOblastAlarmed(wp.oblast, wp.ts, alarmHistory);
     }
   }
+
+  // Merge new waypoints into 24h track history
+  const newEntries = wavesToTrackEntries(currentWaves, 'DRONE');
+  const accumulated = await mergeAndSaveTracks(DRONE_TRACKS_FILE, DRONE_TRACK_TTL_MS, newEntries);
+
+  // Return routes built from full 24h history (supersedes the 1.5h currentWaves)
+  const waves = buildWavesFromEntries(accumulated);
 
   return {
     threats,
@@ -136,17 +150,42 @@ export async function GET() {
     });
   }
 
+  // Serve stale immediately while recomputing (cold-start: serve seed if available)
+  if (!cached) {
+    const seed = await trackSeed;
+    if (seed.length > 0) {
+      const seedWaves = buildWavesFromEntries(seed);
+      cached = {
+        threats:      [],
+        waves:        seedWaves,
+        total:        0,
+        window_hours: WINDOW_HOURS,
+        timestamp:    new Date().toISOString(),
+      };
+    }
+  }
+
   if (inflight) {
     try {
       return NextResponse.json(await inflight, {
         headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
       });
     } catch {
+      if (cached) return NextResponse.json(cached, { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } });
       return NextResponse.json(
-        { threats: [], total: 0, window_hours: WINDOW_HOURS, error: 'Failed to fetch drone threats' },
+        { threats: [], waves: [], total: 0, window_hours: WINDOW_HOURS, error: 'Failed to fetch drone threats' },
         { status: 500 },
       );
     }
+  }
+
+  // Stale-while-revalidate: return stale immediately, compute in background
+  if (cached) {
+    inflight = buildDroneResponse();
+    inflight.then(data => { cached = data; cachedAt = Date.now(); }).catch(() => {}).finally(() => { inflight = null; });
+    return NextResponse.json(cached, {
+      headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
+    });
   }
 
   inflight = buildDroneResponse();
@@ -162,6 +201,7 @@ export async function GET() {
     return NextResponse.json(
       {
         threats:      [],
+        waves:        [],
         total:        0,
         window_hours: WINDOW_HOURS,
         error:        error instanceof Error ? error.message : 'Failed to fetch drone threats',
