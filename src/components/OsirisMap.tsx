@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { parseThermalLatest } from '@/lib/osint-utils';
 
 // ── Popup XSS escaping ──
 // Map popups are assembled as raw HTML strings and injected via Popup.setHTML,
@@ -85,6 +86,7 @@ interface OsirisMapProps {
   theme?: 'core' | 'ghost';
   initialCenter?: [number, number];
   initialZoom?: number;
+  replayTime?: Date | null;
   onMapReady?: () => void;
 }
 
@@ -110,7 +112,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom, onMapReady }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom, replayTime = null, onMapReady }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -1865,21 +1867,24 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
-    const cutoff = new Date();
+    const cutoff = replayTime ?? new Date();
     const cutoffMs = cutoff.getTime();
     const all: any[] = activeLayers.thermal_aoi && data.thermal_aoi ? data.thermal_aoi : [];
     const firesOnly = activeLayers.thermal_aoi_fires_only;
     const visible = all.filter((a: any) => {
       if (firesOnly && !a.hit) return false; // hide cold sites when fires-only is on
       if (!a.latest) {
-        if (a.category === 'news') return true;
+        // News-category AOIs have no per-item timestamp; always show as reference context
+        // so the histogram density spikes (from data.news) correspond to visible map markers.
         return true;
       }
-      const parts = (a.latest as string).trim().split(' ');
-      if (parts.length < 2) return true;
-      const t4 = parts[1].padStart(4, '0');
-      const ts = new Date(`${parts[0]}T${t4.slice(0,2)}:${t4.slice(2,4)}:00Z`).getTime();
-      return ts <= cutoffMs && (cutoffMs - ts) < 86400000;
+      const ts = parseThermalLatest(a.latest);
+      if (ts === null) return true; // unparseable timestamp → always show
+      if (ts > cutoffMs) return false;
+      // 24h rolling window: only applied in live mode. In replay the operator may
+      // be studying events >24h old; the hard window would hide them at the cursor.
+      if (!replayTime && (cutoffMs - ts) >= 86400000) return false;
+      return true;
     });
     setGeo('thermal-aoi', visible.map((a: any) => ({
       type: 'Feature',
@@ -1895,11 +1900,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         sources: a.sources ? JSON.stringify(a.sources) : '[]',
       },
     })));
-  }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, activeLayers.thermal_aoi_fires_only, setGeo]);
+  }, [mapReady, data.thermal_aoi, activeLayers.thermal_aoi, activeLayers.thermal_aoi_fires_only, setGeo, replayTime]);
 
   useEffect(() => {
     if (!mapReady) return;
-    const cutoff = new Date();
+    const cutoff = replayTime ?? new Date();
     const cutoffMs = cutoff.getTime();
     const all: any[] = activeLayers.captures && data.captures ? data.captures : [];
     const visible = all.filter((c: any) => {
@@ -1912,7 +1917,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
       properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description, conflicted: c.conflicted, other_name: c.other_name, other_link: c.other_link, other_source: c.other_source, other_side: c.other_side },
     })));
-  }, [mapReady, data.captures, activeLayers.captures, setGeo]);
+  }, [mapReady, data.captures, activeLayers.captures, setGeo, replayTime]);
 
   // Air quality (Open-Meteo) — colored PM2.5 station dots.
   useEffect(() => {
@@ -1927,7 +1932,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
-    const cutoff = new Date();
+    const cutoff = replayTime ?? new Date();
     setGeo('gdelt', activeLayers.global_incidents && data.gdelt ? data.gdelt.filter((e: any) => {
       if (!e.published) return true;
       const t = new Date(e.published).getTime();
@@ -1944,7 +1949,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         eventType: e.eventType ?? 'conflict',
       },
     })) : []);
-  }, [mapReady, data.gdelt, activeLayers.global_incidents, setGeo]);
+  }, [mapReady, data.gdelt, activeLayers.global_incidents, setGeo, replayTime]);
 
   // IODA Internet Outages
   useEffect(() => {
@@ -2180,7 +2185,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // KAB / glide-bomb threats (Telegram-derived, oblast-level point markers).
   useEffect(() => {
     if (!mapReady) return;
-    const cutoff = new Date();
+    const cutoff = replayTime ?? new Date();
     const allThreats = activeLayers.kab_threats && data.kab_threats ? data.kab_threats : [];
     const threats = allThreats.filter((t: any) =>
       t.lat && t.lng && (!t.startedAt || new Date(t.startedAt).getTime() <= cutoff.getTime())
@@ -2192,7 +2197,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         startedAt: t.startedAt, text: t.text, sources: t.sources, alertType: t.alertType,
       },
     })));
-  }, [mapReady, data.kab_threats, activeLayers.kab_threats, setGeo]);
+  }, [mapReady, data.kab_threats, activeLayers.kab_threats, setGeo, replayTime]);
 
   // Drone threats — keep flowing to drone-threats source for backward compat.
   useEffect(() => {
@@ -2313,7 +2318,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   useEffect(() => {
     if (!mapReady) return;
     const items = data.news || [];
-    const cutoff = new Date();
+    const cutoff = replayTime ?? new Date();
     setGeo('sigint-news', activeLayers.news_intel && items.length > 0
       ? items.filter((n: any) => {
           if (n.coords?.length !== 2) return false;
@@ -2326,7 +2331,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           properties: { title: n.title, source: n.source, risk_score: n.risk_score, link: n.link, published: n.published }
         }))
       : []);
-  }, [mapReady, data.news, activeLayers.news_intel, setGeo]);
+  }, [mapReady, data.news, activeLayers.news_intel, setGeo, replayTime]);
 
   useEffect(() => {
     if (!mapReady) return;
