@@ -227,6 +227,11 @@ const KEYWORD_COORDS: Record<string, [number, number]> = {
   'toropets': [56.500, 31.633], 'торопец': [56.500, 31.633], 'торопц': [56.500, 31.633],
   'tikhoretsk': [45.856, 40.126], 'тихорецк': [45.856, 40.126],
   'dyagilevo': [54.643, 39.570], 'olenya': [68.152, 33.464],
+  // Krasnodar Krai refineries (Slavyansk-na-Kubani cluster, Taman Peninsula terminals) — struck June 2026
+  'poltavskaya': [45.26, 38.13], 'полтавська': [45.26, 38.13], 'полтавская': [45.26, 38.13],
+  'slavyansk-na-kubani': [45.26, 38.13], 'славянськ': [45.26, 38.13], 'славянск-на-кубани': [45.26, 38.13],
+  'taman': [45.201, 36.728], 'таман': [45.201, 36.728],
+  'tamanneftegaz': [45.201, 36.728], 'таманнефтегаз': [45.201, 36.728], 'таманэфтегаз': [45.201, 36.728],
   // Nizhnekamsk industrial cluster (TANECO + TAIF-NK + Nizhnekamskneftekhim — struck June 2026)
   'nizhnekamsk': [55.64, 51.83], 'нижнекамск': [55.64, 51.83], 'нижнєкамськ': [55.64, 51.83],
   'taneco': [55.77, 51.88], 'танеко': [55.77, 51.88],
