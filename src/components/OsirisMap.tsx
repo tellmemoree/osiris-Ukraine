@@ -67,7 +67,7 @@ interface OsirisMapProps {
   onEntityClick?: (entity: any) => void;
   onMouseCoords?: (coords: { lat: number; lng: number }) => void;
   onRightClick?: (coords: { lat: number; lng: number }) => void;
-  onViewStateChange?: (vs: { zoom: number; latitude: number }) => void;
+  onViewStateChange?: (vs: { zoom: number; latitude: number; longitude: number }) => void;
   flyToLocation?: { lat: number; lng: number; ts: number } | null;
   highlight?: { lat: number; lng: number; ts: number } | null;
   projection?: 'mercator' | 'globe';
@@ -75,6 +75,9 @@ interface OsirisMapProps {
   sweepData?: any;
   scanTargets?: any[];
   demoMode?: boolean;
+  theme?: 'core' | 'ghost';
+  initialCenter?: [number, number];
+  initialZoom?: number;
 }
 
 function computeSolarTerminator(): [number, number][] {
@@ -99,7 +102,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -225,7 +228,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-      center: [25.48, 42.70], zoom: 6.5, minZoom: 1.5, maxZoom: 18,
+      center: initialCenter ?? [25.48, 42.70], zoom: initialZoom ?? 6.5, minZoom: 1.5, maxZoom: 18,
       attributionControl: false,
       maxPitch: 85,
       transformRequest: (url: string) => {
@@ -240,29 +243,37 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
     map.on('load', () => {
       mapRef.current = map;
+
+      // Theme colors
+      const isGhost = theme === 'ghost';
+      const phantomPurple = '#B388FF';
+      const cameraColor = isGhost ? phantomPurple : '#00E676';
+      const flightCom = isGhost ? phantomPurple : '#00E5FF';
+      const flightPriv = isGhost ? phantomPurple : '#FFD700';
+      const flightGov = isGhost ? phantomPurple : '#FF9500';
+      const flightMil = isGhost ? phantomPurple : '#FF3D3D';
+
       // Create icons — isolated in a try/catch so a canvas/addImage failure
       // (e.g. iOS Safari returning a null 2d context under memory/context
-      // pressure) can NEVER abort the rest of map init. Previously a throw here
-      // skipped every addSource/addLayer below, blanking all layers at once.
-      // Symbols with a missing icon-image simply don't render; data still loads.
+      // pressure) can NEVER abort the rest of map init.
       try {
-        createIcon(map, 'plane-cyan', '#00E5FF', 24);
-        createIcon(map, 'plane-green', '#00E676', 24);
-        createIcon(map, 'plane-pink', '#FF69B4', 24);
-        createIcon(map, 'plane-red', '#FF3D3D', 24);
-        createIcon(map, 'plane-grey', '#555555', 24);
+        createIcon(map, 'plane-cyan', flightCom, 24);
+        createIcon(map, 'plane-green', flightPriv, 24);
+        createIcon(map, 'plane-pink', flightGov, 24);
+        createIcon(map, 'plane-red', flightMil, 24);
+        createIcon(map, 'plane-grey', isGhost ? phantomPurple : '#555555', 24);
         // Helicopter variants (one per flight-category colour) — selected per
         // feature via aircraft_category in the flight symbol layers below.
-        createHeliIcon(map, 'heli-cyan', '#00E5FF', 24);
-        createHeliIcon(map, 'heli-green', '#00E676', 24);
-        createHeliIcon(map, 'heli-pink', '#FF69B4', 24);
-        createHeliIcon(map, 'heli-red', '#FF3D3D', 24);
-        createDot(map, 'dot-gold', '#D4AF37', 8);
+        createHeliIcon(map, 'heli-cyan', flightCom, 24);
+        createHeliIcon(map, 'heli-green', flightPriv, 24);
+        createHeliIcon(map, 'heli-pink', flightGov, 24);
+        createHeliIcon(map, 'heli-red', flightMil, 24);
+        createDot(map, 'dot-gold', isGhost ? phantomPurple : '#D4AF37', 8);
         createDot(map, 'dot-red', '#FF3D3D', 10);
         createDot(map, 'dot-orange', '#FF9500', 10);
         createDot(map, 'dot-green', '#00E676', 10);
         createDot(map, 'dot-fire', '#FF6B00', 10);
-        createDot(map, 'dot-cctv', '#39FF14', 10);
+        createDot(map, 'dot-cctv', cameraColor, 10);
       } catch (e) {
         console.error('[OsirisMap] icon init failed (continuing without icons):', e);
       }
@@ -397,10 +408,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // Glow radius scales with FRP: low-FRP fires get base radius, high-FRP
       // (depot/refinery infernos) bloom larger so they read from low zoom.
       map.addLayer({ id: 'thermal-aoi-glow', type: 'circle', source: 'thermal-aoi', paint: {
-        'circle-radius': ['*',
-          ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 16, 10, 24],
-          ['interpolate', ['linear'], ['coalesce', ['get', 'maxFrp'], 0],
-            0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5],
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          1, ['*', 10, ['interpolate', ['linear'], ['coalesce', ['get', 'maxFrp'], 0], 0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5]],
+          5, ['*', 16, ['interpolate', ['linear'], ['coalesce', ['get', 'maxFrp'], 0], 0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5]],
+          10, ['*', 24, ['interpolate', ['linear'], ['coalesce', ['get', 'maxFrp'], 0], 0, 1, 5, 1.5, 20, 2.4, 100, 3.8, 500, 5.5]],
         ] as any,
         'circle-color': thermalCatColor,
         'circle-opacity': ['case', ['boolean', ['get', 'confirmed'], false], 0.12, 0.03] as any,
@@ -432,7 +443,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // Territorial Captures — RU red, UA blue.
       map.addLayer({ id: 'capture-glow', type: 'circle', source: 'captures', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 12, 5, 20, 10, 30],
-        'circle-color': ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888'],
+        'circle-color': ['case', ['boolean', ['get', 'conflicted'], false],
+          '#FFB300',
+          ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888'],
+        ],
         'circle-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.05, 3, 0.14],
         'circle-blur': 1,
       }});
@@ -443,10 +457,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           5,  ['interpolate', ['linear'], ['get', 'count'], 1, 4, 4, 8],
           10, ['interpolate', ['linear'], ['get', 'count'], 1, 6, 4, 12],
         ],
-        'circle-color': ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888'],
+        'circle-color': ['case', ['boolean', ['get', 'conflicted'], false],
+          '#FFB300',
+          ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888'],
+        ],
         'circle-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.40, 3, 0.88],
-        'circle-stroke-width': 1.5,
-        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': ['case', ['boolean', ['get', 'conflicted'], false], 2.5, 1.5],
+        'circle-stroke-color': ['case', ['boolean', ['get', 'conflicted'], false], '#FF8C00', '#ffffff'],
         'circle-stroke-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.15, 3, 0.45],
       }});
 
@@ -577,19 +594,19 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       // CCTV — outer glow ring
       map.addLayer({ id: 'cctv-glow', type: 'circle', source: 'cctv', paint: {
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,5, 5,8, 10,14, 14,20],
-        'circle-color': '#39FF14', 'circle-opacity': 0.08, 'circle-blur': 1,
+        'circle-color': cameraColor, 'circle-opacity': 0.08, 'circle-blur': 1,
       }});
       // CCTV — main dot
       map.addLayer({ id: 'cctv-dots', type: 'circle', source: 'cctv', paint: {
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,3, 5,5, 10,8, 14,12],
-        'circle-color': '#39FF14', 'circle-opacity': 0.8,
-        'circle-stroke-width': 2, 'circle-stroke-color': '#39FF14', 'circle-stroke-opacity': 0.5,
+        'circle-color': cameraColor, 'circle-opacity': 0.8,
+        'circle-stroke-width': 2, 'circle-stroke-color': cameraColor, 'circle-stroke-opacity': 0.5,
       }});
       // CCTV — labels at zoom 10+
       map.addLayer({ id: 'cctv-label', type: 'symbol', source: 'cctv', minzoom: 10, layout: {
         'text-field': ['get','name'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 1.8], 'text-max-width': 12, 'text-allow-overlap': false,
-      }, paint: { 'text-color': '#39FF14', 'text-halo-color': '#000', 'text-halo-width': 1, 'text-opacity': 0.7 }});
+      }, paint: { 'text-color': cameraColor, 'text-halo-color': '#000', 'text-halo-width': 1, 'text-opacity': 0.7 }});
 
       // ══ NETWORK INTEL — IODA Internet Outages ══
       map.addLayer({ id: 'ioda-glow', type: 'circle', source: 'ioda-outages', paint: {
@@ -953,7 +970,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       }
     });
     map.on('contextmenu', e => { e.preventDefault(); onRightClick?.({ lat: e.lngLat.lat, lng: e.lngLat.lng }); });
-    map.on('moveend', () => { const c = map.getCenter(); onViewStateChange?.({ zoom: map.getZoom(), latitude: c.lat }); });
+    map.on('moveend', () => { const c = map.getCenter(); onViewStateChange?.({ zoom: map.getZoom(), latitude: c.lat, longitude: c.lng }); });
 
     // ── POPUP HELPER ──
     const popup = (coords: any, html: string) => {
@@ -1142,17 +1159,29 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       if (!e.features?.length) return;
       const p = e.features[0].properties as any;
       const coords = (e.features[0].geometry as any).coordinates;
+      const isConflicted = p.conflicted === true || p.conflicted === 'true';
       const sideFlag = p.side === 'ru' ? '🇷🇺' : p.side === 'ua' ? '🇺🇦' : '⚔️';
-      const sideColor = p.side === 'ru' ? '#FF3D3D' : p.side === 'ua' ? '#2979FF' : '#888';
+      const sideColor = isConflicted ? '#FFB300' : (p.side === 'ru' ? '#FF3D3D' : p.side === 'ua' ? '#2979FF' : '#888');
+      const headerLabel = isConflicted ? '⚔️ CONFLICTED CLAIMS' : (p.side === 'ru' ? 'RU ADVANCE' : p.side === 'ua' ? 'UA ADVANCE' : 'CONTESTED');
+      const otherFlag = p.other_side === 'ru' ? '🇷🇺' : p.other_side === 'ua' ? '🇺🇦' : '⚔️';
       popup(coords, `<div style="${pStyle}border:1px solid ${sideColor}40;">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-          <span style="font-size:14px;">${sideFlag}</span>
-          <span style="color:${sideColor};font-size:9px;letter-spacing:0.08em;">${p.side === 'ru' ? 'RU ADVANCE' : p.side === 'ua' ? 'UA ADVANCE' : 'CONTESTED'}</span>
+          <span style="font-size:14px;">${isConflicted ? '⚔️' : sideFlag}</span>
+          <span style="color:${sideColor};font-size:9px;letter-spacing:0.08em;">${headerLabel}</span>
           ${p.count > 1 ? `<span style="color:#888;font-size:9px;">${Number(p.count)||0} reports</span>` : ''}
         </div>
+        ${isConflicted ? `<div style="font-size:9px;color:#FFB300;background:rgba(255,179,0,0.08);border:1px solid rgba(255,179,0,0.3);border-radius:3px;padding:3px 6px;margin-bottom:6px;">⚠️ Both RU and UA claim this location</div>` : ''}
+        <div style="font-size:9px;color:#888;margin-bottom:2px;">${isConflicted ? `${sideFlag} ${p.side === 'ru' ? 'RU' : p.side === 'ua' ? 'UA' : ''} CLAIM` : ''}</div>
         <div style="font-size:11px;color:#E8E6E0;margin-bottom:6px;">${esc(p.name)||'Unknown location'}</div>
         ${p.description ? `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;font-style:italic;">${esc(p.description)}</div>` : ''}
         ${p.link ? `<a href="${safeUrl(p.link)}" target="_blank" style="${linkStyle}color:${sideColor};border:1px solid ${sideColor}40;background:${sideColor}11;">📡 SOURCE</a>` : ''}
+        ${isConflicted && p.other_name ? `
+        <div style="border-top:1px solid rgba(255,179,0,0.2);margin:8px 0 6px;"></div>
+        <div style="font-size:9px;color:#888;margin-bottom:2px;">${otherFlag} ${p.other_side === 'ru' ? 'RU' : p.other_side === 'ua' ? 'UA' : ''} CLAIM</div>
+        <div style="font-size:11px;color:#C8C6C0;margin-bottom:6px;">${esc(p.other_name)}</div>
+        ${p.other_source ? `<div style="font-size:9px;color:#5C5A54;margin-bottom:4px;">${esc(p.other_source)}</div>` : ''}
+        ${p.other_link ? `<a href="${safeUrl(p.other_link)}" target="_blank" style="${linkStyle}color:#FFB300;border:1px solid rgba(255,179,0,0.4);background:rgba(255,179,0,0.08);">📡 SOURCE</a>` : ''}
+        ` : ''}
         <div style="font-size:8px;color:#444;margin-top:6px;">milblogger claim — verify before acting</div>
       </div>`);
     });
@@ -1750,7 +1779,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('captures', visible.map((c: any) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-      properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description },
+      properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description, conflicted: c.conflicted, other_name: c.other_name, other_link: c.other_link, other_source: c.other_source, other_side: c.other_side },
     })));
   }, [mapReady, data.captures, activeLayers.captures, setGeo]);
 

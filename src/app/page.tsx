@@ -115,7 +115,7 @@ export default function Dashboard() {
   const data = dataRef.current;
 
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
-  const [mapView, setMapView] = useState({ zoom: 2.5, latitude: 20 });
+  const [mapView, setMapView] = useState({ zoom: 2.5, latitude: 20, longitude: 25.48 });
   const [flyToLocation, setFlyToLocation] = useState<{ lat: number; lng: number; ts: number } | null>(null);
   const [highlight, setHighlight] = useState<{ lat: number; lng: number; ts: number } | null>(null);
   // Searchable index over every live entity array (rebuilt when data changes).
@@ -145,6 +145,10 @@ export default function Dashboard() {
   const [scanTargets, setScanTargets] = useState<any[]>([]);
   const [entityGraphTarget, setEntityGraphTarget] = useState<{ type: string; id: string; label?: string; properties?: Record<string, any> } | null>(null);
   const [demoMode, setDemoMode] = useState(false);
+  const [osirisTheme, setOsirisTheme] = useState<'core'|'ghost'>('core');
+  useEffect(() => {
+    document.body.classList.toggle('theme-ghost', osirisTheme === 'ghost');
+  }, [osirisTheme]);
   const [showFrontlineTracker, setShowFrontlineTracker] = useState(false);
   const [showAxisBriefing, setShowAxisBriefing] = useState(false);
   const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlert[]>([]);
@@ -914,20 +918,24 @@ export default function Dashboard() {
 
       {/* ── MAP ── */}
       <ErrorBoundary name="Map">
-        <OsirisMap 
-          data={data} 
-          activeLayers={activeLayers} 
-          projection={mapProjection} 
-          mapStyle={mapStyle === 'satellite' ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}' : 'dark'} 
-          onEntityClick={handleEntityClick} 
-          onMouseCoords={handleMouseCoords} 
-          onRightClick={handleRightClick} 
-          onViewStateChange={setMapView} 
+        <OsirisMap
+          key={osirisTheme}
+          data={data}
+          activeLayers={activeLayers}
+          projection={mapProjection}
+          mapStyle={mapStyle === 'satellite' ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}' : 'dark'}
+          onEntityClick={handleEntityClick}
+          onMouseCoords={handleMouseCoords}
+          onRightClick={handleRightClick}
+          onViewStateChange={setMapView}
+          initialCenter={[mapView.longitude, mapView.latitude]}
+          initialZoom={mapView.zoom}
           flyToLocation={flyToLocation}
           highlight={highlight}
           sweepData={sweepData}
           scanTargets={scanTargets}
           demoMode={demoMode}
+          theme={osirisTheme}
         />
       </ErrorBoundary>
 
@@ -1056,7 +1064,7 @@ export default function Dashboard() {
 
 
       {/* ── NEW SIDEBAR (Root Level) ── */}
-      {showLayers && !isMobile && <LayerPanel data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} />}
+      {showLayers && !isMobile && <LayerPanel data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} />}
 
       {/* ── RIGHT TOOL STRIP (desktop only — mobile uses bottom nav) ── */}
       {!isMobile && <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-[250] pointer-events-auto bg-black/40 backdrop-blur-sm p-1 rounded-full border border-white/5">
@@ -1305,7 +1313,7 @@ export default function Dashboard() {
                           <div><div className="hud-label" style={{fontSize:'6px'}}>NUC</div><div className="hud-value text-[9px]" style={{color:'var(--accent-nuclear)'}}>{(data.infrastructure?.length || globalStats?.nuclear || 0)}</div></div>
                         </div>
                       </div>
-                      <LayerPanel data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} />
+                      <LayerPanel data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} />
                       <div className="mt-2">
                         <ViewPresets onNavigate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMapView(v => ({ ...v, zoom })); setMobilePanel(null); }} />
                       </div>

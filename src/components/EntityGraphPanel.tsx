@@ -43,6 +43,11 @@ const TYPE_ICONS: Record<string, typeof Plane> = {
   ip: Wifi,
 };
 
+// ── EXPANDABLE TYPES ──
+// 'event' and 'sanction' nodes appear in the graph but have no intel resolver —
+// attempting to expand them causes a 400 "Invalid type" from /api/entity/expand.
+const EXPANDABLE_TYPES = new Set(['aircraft', 'vessel', 'company', 'person', 'ip', 'country']);
+
 // ── PROPS ──
 
 interface Props {
@@ -57,6 +62,7 @@ function EntityGraphPanel({ entity, onClose }: Props) {
   const [selectedNode, setSelectedNode] = useState<EntityNode | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [containerDim, setContainerDim] = useState({ width: 480, height: 400 });
   const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -98,6 +104,28 @@ function EntityGraphPanel({ entity, onClose }: Props) {
     finally { setLoading(false); }
   }, [expandedIds, mergeGraph]);
 
+  // Measure container on mount and observe size changes
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateDims = () => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setContainerDim({ width: rect.width, height: rect.height });
+      }
+    };
+
+    // Initial measurement
+    updateDims();
+
+    // Observe resize
+    const observer = new ResizeObserver(updateDims);
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     if (!entity) return;
     const root: EntityNode = {
@@ -114,6 +142,7 @@ function EntityGraphPanel({ entity, onClose }: Props) {
   const handleNodeClick = useCallback((node: any) => {
     const n = node as EntityNode;
     setSelectedNode(n);
+    if (!EXPANDABLE_TYPES.has(n.type)) return; // 'event' and 'sanction' have no resolver
     const rawId = n.id.includes(':') ? n.id.split(':').slice(1).join(':') : n.id;
     if (!expandedIds.has(`${n.type}:${rawId}`)) expandEntity(n.type, rawId);
   }, [expandedIds, expandEntity]);
@@ -279,8 +308,8 @@ function EntityGraphPanel({ entity, onClose }: Props) {
               ref={graphRef} graphData={graphData} nodeId="id"
               nodeCanvasObject={paintNode} linkCanvasObject={paintLink}
               onNodeClick={handleNodeClick} backgroundColor="rgba(0,0,0,0)"
-              width={containerRef.current?.clientWidth || 480}
-              height={containerRef.current?.clientHeight || 400}
+              width={containerDim.width}
+              height={containerDim.height}
               d3AlphaDecay={0.05} d3VelocityDecay={0.4} cooldownTicks={100}
               linkDirectionalParticles={1} linkDirectionalParticleWidth={1.5}
               linkDirectionalParticleSpeed={0.003}
