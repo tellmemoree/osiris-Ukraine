@@ -92,11 +92,15 @@ const ZuluClock = () => {
 };
 
 /** Real entity count — no fake throughput metrics */
-const ActiveEntityCount = ({ data }: { data: Record<string, unknown[]> }) => {
+const ActiveEntityCount = ({ data, globalStats }: { data: Record<string, unknown[]>; globalStats?: any }) => {
   const count = useMemo(() => {
     if (!data) return 0;
-    return Object.values(data).reduce((sum, v) => sum + (Array.isArray(v) ? v.length : 0), 0);
-  }, [data]);
+    const live = Object.values(data).reduce((sum, v) => sum + (Array.isArray(v) ? v.length : 0), 0);
+    if (live > 0 || !globalStats) return live;
+    // Seed from globalStats on cold start until live data arrives.
+    return (globalStats.flights || 0) + (globalStats.sats || 0) + (globalStats.cctv || 0) +
+           (globalStats.weather || 0) + (globalStats.nuclear || 0) + (globalStats.incidents || 0);
+  }, [data, globalStats]);
   return <span className="text-[var(--alert-green)] font-bold tabular-nums">{count.toLocaleString()}</span>;
 };
 
@@ -189,6 +193,7 @@ export default function Dashboard() {
     maritime: true,
     ships: true,
     shadow_fleet: false,
+    shadow_fleet_tracks: false,
     satellites: false,
     balloons: false,
     cctv: true,
@@ -220,6 +225,7 @@ export default function Dashboard() {
     thermal_aoi_fires_only: false,
     internet_outages: false,
     malware: false,
+    oblast_pressure: false,
   });
   // Persist active layer toggles across restarts — read on mount, write on every change.
   // Skip the first write (count=1, initial defaults) so we don't overwrite saved state
@@ -240,10 +246,16 @@ export default function Dashboard() {
   const [liveFeedUrl, setLiveFeedUrl] = useState<string | null>(null);
   const [liveFeedName, setLiveFeedName] = useState('');
   const [liveFeedEmbedAllowed, setLiveFeedEmbedAllowed] = useState(true);
-  // Splash screen
+  // Splash screen — hides when MapLibre fires its load event (onMapReady),
+  // with a 600 ms minimum so the branding is visible, and a 3s hard cap so
+  // a slow tile source never traps the user behind the splash indefinitely.
+  const splashResolveRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    const splashTimer = setTimeout(() => setShowSplash(false), 2500);
-    return () => clearTimeout(splashTimer);
+    let resolved = false;
+    const resolve = () => { if (!resolved) { resolved = true; setShowSplash(false); } };
+    splashResolveRef.current = resolve;
+    const cap = setTimeout(resolve, 3000);
+    return () => { clearTimeout(cap); resolved = true; };
   }, []);
 
   // URL state: parse on mount
@@ -453,7 +465,7 @@ export default function Dashboard() {
     live_news: () => fetchEndpoint('/api/live-news', d => ({ live_feeds: d.feeds })),
     weather: () => fetchEndpoint('/api/weather', d => ({ weather_events: d.events })),
     infrastructure: () => fetchEndpoint('/api/infrastructure', d => ({ infrastructure: d.infrastructure })),
-    gdelt: () => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })),
+    gdelt: () => fetchEndpoint('/api/conflict-events', d => ({ gdelt: d.events })),
     air_raids: () => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })),
     power_outages: () => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })),
     kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })),
@@ -467,6 +479,8 @@ export default function Dashboard() {
     thermal_aoi: () => fetchEndpoint('/api/strategic-thermal', d => ({ thermal_aoi: d.aois })),
     internet_outages: () => fetchEndpoint('/api/radar', d => ({ ioda_outages: d.outages })),
     malware: () => fetchEndpoint('/api/malware', d => ({ malware_threats: d.threats })),
+    oblast_pressure: () => fetchEndpoint('/api/oblast-pressure', (d: any) => ({ oblast_pressure: d.oblasts ?? [] })),
+    shadow_fleet_tracks: () => fetchEndpoint('/api/maritime?tracks=1', (d: any) => ({ shadow_fleet_tracks: d.tracks ?? [] })),
   }), [fetchEndpoint]);
 
   // Fetch a source at most once (does NOT toggle the layer on).
@@ -480,6 +494,24 @@ export default function Dashboard() {
   // entity by name even while its layer is hidden. Called when search is opened.
   const ensureSearchSources = useCallback(() => {
     ['flights', 'satellites', 'cctv', 'maritime', 'radiation', 'live_news', 'weather', 'infrastructure', 'gdelt', 'kab_threats', 'power_outages'].forEach(loadOnce);
+  }, [loadOnce]);
+
+  // Background pre-fetch: populate LayerPanel counts for every layer regardless
+  // of whether it is toggled on. Split into three tiers so the server never
+  // receives a large burst — each tier fires after the previous one has settled.
+  // loadOnce() skips keys already fetched by active layers.
+  useEffect(() => {
+    const t1 = setTimeout(() => {
+      ['flights', 'air_raids', 'kab_threats', 'power_outages', 'frontlines', 'captures'].forEach(loadOnce);
+    }, 1000);
+    const t2 = setTimeout(() => {
+      ['thermal_aoi', 'satellites', 'fires', 'weather', 'infrastructure', 'gdelt', 'radiation'].forEach(loadOnce);
+    }, 4000);
+    const t3 = setTimeout(() => {
+      ['maritime', 'live_news', 'cctv', 'air_quality', 'internet_outages', 'malware',
+       'weapon_threats', 'drone_threats', 'missile_threats', 'ru_air_raids'].forEach(loadOnce);
+    }, 8000);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [loadOnce]);
 
   // Picking an entity from search: fly to it, reveal its layer, and highlight it.
@@ -516,6 +548,8 @@ export default function Dashboard() {
     if (activeLayers.thermal_aoi) loadOnce('thermal_aoi');
     if (activeLayers.internet_outages) loadOnce('internet_outages');
     if (activeLayers.malware) loadOnce('malware');
+    if (activeLayers.oblast_pressure) loadOnce('oblast_pressure');
+    if (activeLayers.shadow_fleet_tracks) loadOnce('shadow_fleet_tracks');
   }, [activeLayers, loadOnce]);
 
   // Background pre-fetch: populate LayerPanel counts for every layer
@@ -596,7 +630,13 @@ export default function Dashboard() {
       intervals.push(setInterval(() => fetchEndpoint('/api/captures', d => ({ captures: d.captures })), 300000)); // 5 min
     }
     if (activeLayers.global_incidents) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })), 300000)); // 5 min
+      intervals.push(setInterval(() => fetchEndpoint('/api/conflict-events', d => ({ gdelt: d.events })), 300000)); // 5 min
+    }
+    if (activeLayers.oblast_pressure) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/oblast-pressure', (d: any) => ({ oblast_pressure: d.oblasts ?? [] })), 60_000)); // 1 min
+    }
+    if (activeLayers.shadow_fleet_tracks) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/maritime?tracks=1', (d: any) => ({ shadow_fleet_tracks: d.tracks ?? [] })), 300_000)); // 5 min
     }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);
@@ -688,7 +728,7 @@ export default function Dashboard() {
     // GDELT events
     if (data.gdelt?.length) {
       for (const g of data.gdelt) {
-        if (!g.lat || !g.lng) continue;
+        if (g.lat == null || g.lng == null) continue;
         sdkEntities.push({
           type: 'Feature', geometry: { type: 'Point', coordinates: [g.lng, g.lat] },
           properties: { domain: 'INTEL', name: g.name || 'GDELT Event', source: 'GDELT Project' },
@@ -932,6 +972,8 @@ export default function Dashboard() {
         notifications={notificationLog}
         onClear={() => setNotificationLog([])}
         onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setNotifOpen(false); }}
+        onDismiss={(id) => setNotificationLog(prev => prev.filter(n => n.id !== id))}
+        onDismissGroup={(ids) => { const s = new Set(ids); setNotificationLog(prev => prev.filter(n => !s.has(n.id))); }}
       />
 
       {/* ── MAP ── */}
@@ -955,6 +997,7 @@ export default function Dashboard() {
           demoMode={demoMode}
           theme={osirisTheme}
           replayTime={replayTime}
+          onMapReady={() => setTimeout(() => splashResolveRef.current?.(), 600)}
         />
       </ErrorBoundary>
 
@@ -1033,7 +1076,7 @@ export default function Dashboard() {
       <motion.button
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3 }}
         onClick={() => { setNotifOpen(true); setUnreadCount(0); }}
-        className="status-bar-desktop absolute top-3.5 right-[340px] z-[210] pointer-events-auto w-8 h-8 flex items-center justify-center rounded-lg glass-panel text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        className="status-bar-desktop absolute top-7 right-[310px] z-[210] pointer-events-auto w-8 h-8 flex items-center justify-center rounded-lg glass-panel text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="Notification log"
       >
         <Bell className="w-3.5 h-3.5" />
@@ -1353,11 +1396,11 @@ export default function Dashboard() {
                     <>
                       <div className="glass-panel-sm p-2 mb-2">
                         <div className="grid grid-cols-5 gap-1 text-center">
-                          <div><div className="hud-label" style={{fontSize:'6px'}}>AIR</div><div className="hud-value text-[9px]">{totalFlights.toLocaleString()}</div></div>
-                          <div><div className="hud-label" style={{fontSize:'6px'}}>SAT</div><div className="hud-value text-[9px]">{(data.satellites?.length||0)}</div></div>
-                          <div><div className="hud-label" style={{fontSize:'6px'}}>CAM</div><div className="hud-value text-[9px]">{(data.cameras?.length||0)}</div></div>
-                          <div><div className="hud-label" style={{fontSize:'6px'}}>WX</div><div className="hud-value text-[9px]" style={{color:'var(--accent-weather)'}}>{(data.weather_events?.length||0)}</div></div>
-                          <div><div className="hud-label" style={{fontSize:'6px'}}>NUC</div><div className="hud-value text-[9px]" style={{color:'var(--accent-nuclear)'}}>{(data.infrastructure?.length||0)}</div></div>
+                          <div><div className="hud-label" style={{fontSize:'6px'}}>AIR</div><div className="hud-value text-[9px]">{(totalFlights || globalStats?.flights || 0).toLocaleString()}</div></div>
+                          <div><div className="hud-label" style={{fontSize:'6px'}}>SAT</div><div className="hud-value text-[9px]">{(data.satellites?.length || globalStats?.sats || 0)}</div></div>
+                          <div><div className="hud-label" style={{fontSize:'6px'}}>CAM</div><div className="hud-value text-[9px]">{(data.cameras?.length || globalStats?.cctv || 0)}</div></div>
+                          <div><div className="hud-label" style={{fontSize:'6px'}}>WX</div><div className="hud-value text-[9px]" style={{color:'var(--accent-weather)'}}>{(data.weather_events?.length || globalStats?.weather || 0)}</div></div>
+                          <div><div className="hud-label" style={{fontSize:'6px'}}>NUC</div><div className="hud-value text-[9px]" style={{color:'var(--accent-nuclear)'}}>{(data.infrastructure?.length || globalStats?.nuclear || 0)}</div></div>
                         </div>
                       </div>
                       <LayerPanel data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} />
