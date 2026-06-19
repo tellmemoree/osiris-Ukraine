@@ -443,7 +443,7 @@ export default function Dashboard() {
     live_news: () => fetchEndpoint('/api/live-news', d => ({ live_feeds: d.feeds })),
     weather: () => fetchEndpoint('/api/weather', d => ({ weather_events: d.events })),
     infrastructure: () => fetchEndpoint('/api/infrastructure', d => ({ infrastructure: d.infrastructure })),
-    gdelt: () => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })),
+    gdelt: () => fetchEndpoint('/api/conflict-events', d => ({ gdelt: d.events })),
     air_raids: () => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })),
     power_outages: () => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })),
     kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })),
@@ -608,7 +608,7 @@ export default function Dashboard() {
       intervals.push(setInterval(() => fetchEndpoint('/api/captures', d => ({ captures: d.captures })), 300000)); // 5 min
     }
     if (activeLayers.global_incidents) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events })), 300000)); // 5 min
+      intervals.push(setInterval(() => fetchEndpoint('/api/conflict-events', d => ({ gdelt: d.events })), 300000)); // 5 min
     }
     if (activeLayers.oblast_pressure) {
       intervals.push(setInterval(() => fetchEndpoint('/api/oblast-pressure', (d: any) => ({ oblast_pressure: d.oblasts ?? [] })), 60_000)); // 1 min
@@ -706,7 +706,7 @@ export default function Dashboard() {
     // GDELT events
     if (data.gdelt?.length) {
       for (const g of data.gdelt) {
-        if (!g.lat || !g.lng) continue;
+        if (g.lat == null || g.lng == null) continue;
         sdkEntities.push({
           type: 'Feature', geometry: { type: 'Point', coordinates: [g.lng, g.lat] },
           properties: { domain: 'INTEL', name: g.name || 'GDELT Event', source: 'GDELT Project' },

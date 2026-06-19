@@ -256,6 +256,102 @@ export function matchOblasts(text: string): OblastRef[] {
     .map(({ ref }) => ref);
 }
 
+// ── geo event extraction ─────────────────────────────────────────────────────
+
+// Bilingual event keywords (Cyrillic + Latin) for conflict detection.
+const EVENT_KEYWORDS = [
+  'вибух', 'удар', 'обстріл', 'атака', 'приліт', 'бій', 'штурм', 'наступ',
+  'окупанти', 'зайняли', 'звільнили', 'втрати', 'загинули', 'поранені',
+  'explosion', 'strike', 'shelling', 'assault', 'offensive', 'captured', 'liberated', 'casualties',
+];
+
+// Max events extracted from the Telegram corpus per call.
+const GEO_EVENT_CAP = 50;
+
+// Lazily imported to avoid circular dependency (conflict-geo imports nothing from here).
+// We use a dynamic import pattern to keep the module graph clean.
+let _geoMapText: ((text: string) => [number, number] | null) | null = null;
+
+async function getGeoMapText(): Promise<(text: string) => [number, number] | null> {
+  if (!_geoMapText) {
+    const m = await import('@/lib/conflict-geo');
+    _geoMapText = m.geoMapText;
+  }
+  return _geoMapText;
+}
+
+/**
+ * Extracts geo-located conflict events from the cached Telegram corpus.
+ * Reuses getThreatCorpus() — does NOT launch new channel fetches.
+ *
+ * Returns up to GEO_EVENT_CAP events, each with a coordinate, event type,
+ * ISO published timestamp, and sources array tagged ['telegram'].
+ */
+export async function extractGeoEvents(): Promise<{
+  lat: number;
+  lng: number;
+  name: string;
+  eventType: string;
+  published: string;
+  sources: string[];
+}[]> {
+  const geoMap = await getGeoMapText();
+  const msgs = await getThreatCorpus();
+
+  const out: {
+    lat: number;
+    lng: number;
+    name: string;
+    eventType: string;
+    published: string;
+    sources: string[];
+  }[] = [];
+
+  for (const msg of msgs) {
+    if (out.length >= GEO_EVENT_CAP) break;
+
+    const lowerText = msg.text.toLowerCase();
+    const hasEvent = EVENT_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase()));
+    if (!hasEvent) continue;
+
+    // Prefer Cyrillic-aware oblast matching; fall back to Latin GEO_DICT scan.
+    const oblastRef = firstOblastInText(msg.text);
+    let lat: number;
+    let lng: number;
+
+    if (oblastRef) {
+      [lng, lat] = oblastRef.coords; // coords are [lng, lat] in OBLAST_REFS
+    } else {
+      const coords = geoMap(msg.text);
+      if (!coords) continue;
+      [lng, lat] = coords; // geoMapText returns [lng, lat]
+    }
+
+    // eventType mapping
+    let eventType: string;
+    if (/штурм|наступ|assault|offensive/i.test(msg.text)) {
+      eventType = 'battle';
+    } else if (/удар|приліт|strike|обстріл|shelling/i.test(msg.text)) {
+      eventType = 'strike';
+    } else {
+      eventType = 'conflict';
+    }
+
+    const published = new Date(msg.ts).toISOString();
+
+    out.push({
+      lat,
+      lng,
+      name: msg.text.slice(0, 120),
+      eventType,
+      published,
+      sources: ['telegram'],
+    });
+  }
+
+  return out;
+}
+
 // ── route building ───────────────────────────────────────────────────────────
 
 // Messages matching these patterns are threat-level assessments or probability

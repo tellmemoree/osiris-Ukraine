@@ -685,9 +685,35 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'line-opacity': 0.4,
       }});
 
-      // GDELT
+      // GDELT / Conflict Events (confidence-tiered)
       map.addLayer({ id: 'gdelt-dots', type: 'circle', source: 'gdelt', paint: {
-        'circle-radius': 4, 'circle-color': '#FF3D3D', 'circle-opacity': 0.5, 'circle-stroke-width': 1, 'circle-stroke-color': '#FF3D3D', 'circle-stroke-opacity': 0.3,
+        'circle-color': [
+          'match', ['get', 'confidence'],
+          'confirmed', '#FF3D3D',
+          'reported',  '#FF9500',
+          'unverified','#FFD54F',
+          '#FF3D3D', // default
+        ],
+        'circle-radius': [
+          'match', ['get', 'confidence'],
+          'confirmed', 6,
+          'reported',  4,
+          3, // unverified + default
+        ],
+        'circle-opacity': [
+          'match', ['get', 'confidence'],
+          'unverified', 0.4,
+          0.8,
+        ],
+        'circle-stroke-width': 1,
+        'circle-stroke-color': [
+          'match', ['get', 'confidence'],
+          'confirmed', '#FF3D3D',
+          'reported',  '#FF9500',
+          'unverified','#FFD54F',
+          '#FF3D3D',
+        ],
+        'circle-stroke-opacity': 0.3,
       }});
 
       // GPS Jamming
@@ -1379,7 +1405,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
-    // ── GDELT Conflicts (with source article) ──
+    // ── GDELT / Conflict Events (with confidence tier + sources) ──
     map.on('click', 'gdelt-dots', e => {
       if (!e.features?.length) return;
       const p = e.features[0].properties as any;
@@ -1387,12 +1413,25 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const evtTime = p.published ? new Date(p.published) : null;
       const evtAgo = evtTime ? Math.max(0, Math.round((Date.now() - evtTime.getTime()) / 60000)) : null;
       const evtLabel = evtAgo == null ? '' : evtAgo < 60 ? `${evtAgo}m ago` : `${Math.round(evtAgo/60)}h ago`;
-      popup(coords, `<div style="${pStyle}border:1px solid rgba(255,61,61,0.3);">
-        <div style="color:#FF3D3D;font-size:12px;font-weight:700;margin-bottom:6px;">⚠️ CONFLICT EVENT</div>
+
+      const confidence: string = p.confidence ?? 'reported';
+      const confidenceColor = confidence === 'confirmed' ? '#FF3D3D' : confidence === 'reported' ? '#FF9500' : '#FFD54F';
+      const confidenceSymbol = confidence === 'confirmed' ? '●' : confidence === 'reported' ? '◎' : '○';
+      const confidenceLabel = `${confidenceSymbol} ${confidence.toUpperCase()}`;
+
+      const sourcesRaw: string = p.sources ?? '';
+      const sourcesDisplay = sourcesRaw
+        ? sourcesRaw.split(',').map((s: string) => s.trim().toUpperCase()).join(' · ')
+        : 'GDELT';
+
+      popup(coords, `<div style="${pStyle}border:1px solid ${confidenceColor}40;">
+        <div style="color:${confidenceColor};font-size:12px;font-weight:700;margin-bottom:4px;">CONFLICT EVENT</div>
+        <div style="font-size:9px;color:${confidenceColor};font-weight:700;margin-bottom:6px;letter-spacing:0.08em;">${esc(confidenceLabel)}</div>
         <div style="font-size:9px;color:#E8E6E0;margin-bottom:6px;line-height:1.4;">${esc(p.name)||'Unclassified incident'}</div>
-        ${evtTime ? `<div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">🕐 ${evtTime.toUTCString().slice(5,22)} UTC · ${evtLabel}</div>` : ''}
+        ${evtTime ? `<div style="font-size:9px;color:#5C5A54;margin-bottom:4px;">${evtTime.toUTCString().slice(5,22)} UTC · ${evtLabel}</div>` : ''}
+        <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">Sources: ${esc(sourcesDisplay)}</div>
         <div style="display:flex;gap:6px;">
-          ${p.url ? `<a href="${safeUrl(p.url)}" target="_blank" style="${linkStyle}color:#FF3D3D;border:1px solid rgba(255,61,61,0.4);background:rgba(255,61,61,0.1);">SOURCE</a>` : ''}
+          ${p.url ? `<a href="${safeUrl(p.url)}" target="_blank" style="${linkStyle}color:${confidenceColor};border:1px solid ${confidenceColor}60;background:${confidenceColor}18;">SOURCE</a>` : ''}
           <a href="https://www.google.com/maps/@${coords[1]},${coords[0]},12z" target="_blank" style="${linkStyle}color:#448AFF;border:1px solid rgba(68,138,255,0.4);background:rgba(68,138,255,0.1);">MAP</a>
         </div>
       </div>`);
@@ -1893,7 +1932,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       if (!e.published) return true;
       const t = new Date(e.published).getTime();
       return t <= cutoff.getTime() && (cutoff.getTime() - t) < 86400000;
-    }).map((e: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lng, e.lat] }, properties: { name: e.name, url: e.url, published: e.published } })) : []);
+    }).map((e: any) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [e.lng, e.lat] },
+      properties: {
+        name: e.name,
+        url: e.url,
+        published: e.published,
+        confidence: e.confidence ?? 'reported',
+        sources: (e.sources ?? []).join(', '),
+        eventType: e.eventType ?? 'conflict',
+      },
+    })) : []);
   }, [mapReady, data.gdelt, activeLayers.global_incidents, setGeo]);
 
   // IODA Internet Outages
