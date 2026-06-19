@@ -316,17 +316,33 @@ async function fetchLsaSafFires(): Promise<Fire[]> {
 // ignition: deduplicate within 1.5 km + 4 h window, keeping the highest FRP and
 // the freshest acquisition timestamp.
 function mergeFires(batches: Fire[][]): Fire[] {
+  // Grid-based spatial dedup: 0.02° cell ≈ 2.2 km covers the 1.5 km dedup radius.
+  // Checking the 3×3 cell neighbourhood is O(9) per fire instead of O(n).
+  const FOUR_H_MS = 4 * 60 * 60 * 1000;
+  const grid = new Map<string, Fire>();
   const result: Fire[] = [];
+
   for (const fire of batches.flat()) {
-    const dup = result.find(r =>
-      distKm(fire.lat, fire.lng, r.lat, r.lng) < 1.5 &&
-      Math.abs(fire.ts - r.ts) < 4 * 60 * 60 * 1000,
-    );
+    const cLat = Math.round(fire.lat / 0.02);
+    const cLng = Math.round(fire.lng / 0.02);
+    let dup: Fire | undefined;
+    outer: for (let dLat = -1; dLat <= 1; dLat++) {
+      for (let dLng = -1; dLng <= 1; dLng++) {
+        const candidate = grid.get(`${cLat + dLat},${cLng + dLng}`);
+        if (candidate &&
+            distKm(fire.lat, fire.lng, candidate.lat, candidate.lng) < 1.5 &&
+            Math.abs(fire.ts - candidate.ts) < FOUR_H_MS) {
+          dup = candidate; break outer;
+        }
+      }
+    }
     if (dup) {
       if (fire.frp > dup.frp) { dup.frp = fire.frp; dup.brightness = Math.max(dup.brightness, fire.brightness); }
       if (fire.ts > dup.ts) { dup.ts = fire.ts; dup.date = fire.date; dup.time = fire.time; }
     } else {
-      result.push({ ...fire });
+      const rep = { ...fire };
+      result.push(rep);
+      grid.set(`${cLat},${cLng}`, rep);
     }
   }
   return result;

@@ -133,6 +133,7 @@ export async function GET() {
         const waves = buildWavesFromEntries(typeEntries);
         if (waves.length === 0) continue;
         const allWps = waves.flatMap(w => w.waypoints);
+        if (allWps.length === 0) continue;
         seedRoutes.push({
           weaponType: wt, ...MISSILE_META[wt], waves,
           latestAt: allWps[allWps.length - 1].ts,

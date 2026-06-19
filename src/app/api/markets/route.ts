@@ -144,7 +144,8 @@ export async function GET() {
     // --- SCM Integration: Chokepoint-Commodity Correlation ---
     const scm_alerts: string[] = [];
     try {
-      const maritimeRes = await fetch('http://127.0.0.1:3001/api/maritime', { signal: AbortSignal.timeout(3000) });
+      const origin = process.env.OSIRIS_SELF_ORIGIN ?? 'http://localhost:3001';
+      const maritimeRes = await fetch(`${origin}/api/maritime`, { signal: AbortSignal.timeout(3000) });
       if (maritimeRes.ok) {
         const maritimeData = await maritimeRes.json();
         const chokepoints: Array<{ id?: string; name?: string; risk?: string; live_ships?: number }> = maritimeData.chokepoints || [];

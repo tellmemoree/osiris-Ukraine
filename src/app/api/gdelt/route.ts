@@ -110,17 +110,14 @@ async function fetchGdeltEvents(): Promise<ConflictEvent[]> {
 // ── GDELT RSS fallback ───────────────────────────────────────────────────────
 
 async function fetchRssEvents(): Promise<ConflictEvent[]> {
-  const allEvents: ConflictEvent[] = [];
-  let eventId = 0;
-
-  for (const feed of RSS_FEEDS) {
-    try {
+  const perFeed = await Promise.allSettled(
+    RSS_FEEDS.map(async (feed, feedIdx) => {
+      const events: ConflictEvent[] = [];
       const res = await fetch(feed.url, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) continue;
+      if (!res.ok) return events;
       const xml = await res.text();
-
       const items = xml.match(/<item>([\s\S]*?)<\/item>/gi) ?? [];
-
+      let itemIdx = 0;
       for (const item of items) {
         const titleMatch =
           item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i) ??
@@ -130,25 +127,17 @@ async function fetchRssEvents(): Promise<ConflictEvent[]> {
           item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/i) ??
           item.match(/<description>(.*?)<\/description>/i);
         const dateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/i);
-
         if (!titleMatch || !linkMatch) continue;
-
         const parsed = dateMatch ? new Date(dateMatch[1]) : new Date();
-        const published = Number.isNaN(parsed.getTime())
-          ? new Date().toISOString()
-          : parsed.toISOString();
-        const ageHours = (Date.now() - new Date(published).getTime()) / 3_600_000;
-        if (ageHours > 24) continue;
-
+        const published = Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+        if ((Date.now() - new Date(published).getTime()) / 3_600_000 > 24) continue;
         const title = titleMatch[1];
         const link = linkMatch[1];
         const desc = descMatch ? descMatch[1] : '';
-
         const textToSearch = (title + ' ' + desc).toLowerCase();
-        const isConflict = CONFLICT_KEYWORDS.some(kw => textToSearch.includes(kw));
-        if (!isConflict) continue;
-
+        if (!CONFLICT_KEYWORDS.some(kw => textToSearch.includes(kw))) continue;
         let coords: [number, number] | null = null;
+        const eventId = feedIdx * 1000 + itemIdx;
         for (const [location, point] of Object.entries(GEO_DICT)) {
           const regex = new RegExp(`\\b${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
           if (regex.test(textToSearch)) {
@@ -158,28 +147,21 @@ async function fetchRssEvents(): Promise<ConflictEvent[]> {
             break;
           }
         }
-
         if (coords) {
-          allEvents.push({
-            id: `osint-${feed.source.replace(/\s+/g, '')}-${eventId++}`,
-            lat: coords[1],
-            lng: coords[0],
-            name: `[${feed.source}] ${title}`,
-            url: link,
+          events.push({
+            id: `osint-${feed.source.replace(/\s+/g, '')}-${itemIdx}`,
+            lat: coords[1], lng: coords[0],
+            name: `[${feed.source}] ${title}`, url: link,
             html: `<a href="${link}" target="_blank">${title}</a><br/><i>Source: ${feed.source}</i>`,
-            eventType: 'conflict',
-            sources: ['gdelt-rss'],
-            confidence: 'reported',
-            published,
+            eventType: 'conflict', sources: ['gdelt-rss'], confidence: 'reported', published,
           });
+          itemIdx++;
         }
       }
-    } catch {
-      console.warn(`[gdelt shim] RSS fetch failed: ${feed.source}`);
-    }
-  }
-
-  return allEvents;
+      return events;
+    }),
+  );
+  return perFeed.flatMap(r => r.status === 'fulfilled' ? r.value : []);
 }
 
 // ── Handler ──────────────────────────────────────────────────────────────────

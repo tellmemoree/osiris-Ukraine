@@ -550,12 +550,14 @@ export async function GET(req: Request) {
       if (getDistanceKm(choke.lat, choke.lng, ships[i].lat, ships[i].lng) < choke.radius_km) nearbyCount++;
     }
 
-    // Risk is a pure function of live ship count; baseline_risk is metadata only.
+    const RISK_RANK: Record<string, number> = { LOW: 0, MODERATE: 1, HIGH: 2, CRITICAL: 3 };
     let risk: string;
     if (nearbyCount === 0)      risk = 'LOW';
     else if (nearbyCount <= 2)  risk = 'MODERATE';
     else if (nearbyCount <= 5)  risk = 'HIGH';
     else                        risk = 'CRITICAL';
+    // Floor at baseline: sparse free-AIS coverage must not drag a HIGH strait down to LOW.
+    if ((RISK_RANK[risk] ?? 0) < (RISK_RANK[choke.baseline_risk] ?? 0)) risk = choke.baseline_risk;
 
     return {
       id: choke.id,

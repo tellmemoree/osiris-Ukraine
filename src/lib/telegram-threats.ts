@@ -450,7 +450,7 @@ function firstOblastInText(text: string): OblastRef | null {
 // wave (separate attack group / drone swarm). 45 min is used because different
 // channels post about the same cruise missile 20-30 min apart; 25 min was
 // splitting single strikes into multiple "waves".
-const WAVE_GAP_MS = 45 * 60 * 1000;
+export const WAVE_GAP_MS = 45 * 60 * 1000;
 
 /**
  * Builds temporal route waves for a given weapon type.

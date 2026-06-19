@@ -16,7 +16,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import type { RouteWave, RouteWaypoint } from '@/lib/telegram-threats';
+import { WAVE_GAP_MS, type RouteWave, type RouteWaypoint } from '@/lib/telegram-threats';
 
 const DATA_DIR = path.join(os.homedir(), '.osiris-data');
 
@@ -26,8 +26,7 @@ export const MISSILE_TRACKS_FILE = path.join(DATA_DIR, 'missile-route-tracks.jso
 export const DRONE_TRACK_TTL_MS   = 24 * 60 * 60 * 1000; // 24h — Shahed swarms span hours
 export const MISSILE_TRACK_TTL_MS = 12 * 60 * 60 * 1000; // 12h — missile strikes are fast
 
-// 45-min wave gap (matches telegram-threats WAVE_GAP_MS) — must be kept in sync
-const WAVE_GAP_MS = 45 * 60 * 1000;
+// WAVE_GAP_MS imported from telegram-threats.ts — single source of truth
 
 export interface TrackEntry {
   weaponType:     string;
@@ -45,7 +44,11 @@ export interface TrackEntry {
 export async function loadTrackEntries(file: string): Promise<TrackEntry[]> {
   try {
     const raw = JSON.parse(await fs.readFile(file, 'utf8'));
-    return Array.isArray(raw) ? raw as TrackEntry[] : [];
+    if (!Array.isArray(raw)) return [];
+    return (raw as TrackEntry[]).filter(
+      e => typeof e?.ts === 'number' && isFinite(e.ts) &&
+           typeof e?.lat === 'number' && typeof e?.lng === 'number',
+    );
   } catch {
     return [];
   }

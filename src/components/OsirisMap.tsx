@@ -1936,7 +1936,9 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('gdelt', activeLayers.global_incidents && data.gdelt ? data.gdelt.filter((e: any) => {
       if (!e.published) return true;
       const t = new Date(e.published).getTime();
-      return t <= cutoff.getTime() && (cutoff.getTime() - t) < 86400000;
+      if (t > cutoff.getTime()) return false;
+      if (!replayTime && (cutoff.getTime() - t) >= 86400000) return false;
+      return true;
     }).map((e: any) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [e.lng, e.lat] },
@@ -2324,7 +2326,9 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           if (n.coords?.length !== 2) return false;
           if (!n.published) return true;
           const t = new Date(n.published).getTime();
-          return t <= cutoff.getTime() && (cutoff.getTime() - t) < 86400000;
+          if (t > cutoff.getTime()) return false;
+          if (!replayTime && (cutoff.getTime() - t) >= 86400000) return false;
+          return true;
         }).map((n: any) => ({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [n.coords[1], n.coords[0]] },
