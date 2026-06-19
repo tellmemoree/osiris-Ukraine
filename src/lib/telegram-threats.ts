@@ -16,8 +16,16 @@ import { stealthFetch } from '@/lib/stealthFetch';
 // ── channels ────────────────────────────────────────────────────────────────
 
 export const UA_THREAT_CHANNELS = [
-  'GeneralStaffUA', 'DeepStateUA', 'Militaryland', 'UkraineWarReport',
-  'ukraine_now', 'ua_forces', 'kpszsu', 'war_monitor',
+  'DeepStateUA', 'UkraineWarReport',
+  'ua_forces', 'kpszsu', 'war_monitor',
+  'vanek_nikolaev', // RU-language UA channel; uses "мопед" as Shahed alias
+] as const;
+
+// Strike-report channels: post after-action summaries, not real-time threat alerts.
+// Kept separate from UA_THREAT_CHANNELS so drone/missile route builders never see
+// multi-oblast summary posts as waypoints of an active wave.
+export const STRIKE_REPORT_CHANNELS = [
+  'ssternenko',
 ] as const;
 
 // ── types ───────────────────────────────────────────────────────────────────
@@ -101,8 +109,11 @@ const WEAPON_VOCAB: Record<WeaponType, RegExp[]> = {
   CRUISE: [
     /(?<!\p{L})калібр(?!\p{L})/iu,
     /(?<!\p{L})kh?-?101(?!\p{L})/iu,
+    /(?<!\p{L})х-?101(?!\p{L})/iu,    // Cyrillic Х (кириличний) — UA writers use Х not K
     /(?<!\p{L})kh?-?555(?!\p{L})/iu,
+    /(?<!\p{L})х-?555(?!\p{L})/iu,
     /крилата ракета/iu,
+    /(?<!\p{L})ракетн/iu,             // generic missile fallback: ракетна загроза / ракетний удар
   ],
   BALLISTIC: [
     /(?<!\p{L})іскандер(?!\p{L})/iu,
@@ -116,6 +127,7 @@ const WEAPON_VOCAB: Record<WeaponType, RegExp[]> = {
     /(?<!\p{L})geran(?!\p{L})/iu,
     /(?<!\p{L})бпла(?!\p{L})/iu,
     /дрон-?камікадз/iu,
+    /(?<!\p{L})мопед/iu,  // vanek_nikolaev alias for Shahed ("мопед", "мопедів", etc.)
   ],
   KINZHAL: [
     /(?<!\p{L})кинджал(?!\p{L})/iu,
@@ -148,6 +160,15 @@ const CACHE_TTL_MS = 15 * 60 * 1000; // 15 min — data is text scraped from Tel
 let corpus:         TgMessage[] | null = null;
 let corpusAt                           = 0;
 let corpusInflight: Promise<TgMessage[]> | null = null;
+
+// Strike-report corpus: longer window (6h) + longer TTL (30 min) — summaries
+// arrive later than live alerts and don't need to be re-scraped as often.
+const REPORT_WINDOW_MS  = 6 * 60 * 60 * 1000;
+const REPORT_CACHE_TTL_MS = 30 * 60 * 1000;
+
+let reportCorpus:         TgMessage[] | null = null;
+let reportCorpusAt                           = 0;
+let reportCorpusInflight: Promise<TgMessage[]> | null = null;
 
 // ── internal helpers ─────────────────────────────────────────────────────────
 
@@ -229,6 +250,41 @@ export async function getThreatCorpus(): Promise<TgMessage[]> {
     return data;
   } finally {
     corpusInflight = null;
+  }
+}
+
+async function fetchReportCorpus(): Promise<TgMessage[]> {
+  const cutoff = Date.now() - REPORT_WINDOW_MS;
+  const settled = await Promise.allSettled(
+    STRIKE_REPORT_CHANNELS.map((c) => fetchChannel(c)),
+  );
+  const messages: TgMessage[] = [];
+  for (const r of settled) {
+    if (r.status !== 'fulfilled') continue;
+    for (const msg of r.value) {
+      if (msg.ts >= cutoff) messages.push(msg);
+    }
+  }
+  return messages;
+}
+
+/**
+ * Returns the last 6h of messages from STRIKE_REPORT_CHANNELS.
+ * Separate cache from getThreatCorpus() — longer window, longer TTL.
+ * Only used by /api/strategic-thermal; never fed into route builders.
+ */
+export async function getStrikeReportCorpus(): Promise<TgMessage[]> {
+  const now = Date.now();
+  if (reportCorpus && now - reportCorpusAt < REPORT_CACHE_TTL_MS) return reportCorpus;
+  if (reportCorpusInflight) return reportCorpusInflight;
+  reportCorpusInflight = fetchReportCorpus();
+  try {
+    const data = await reportCorpusInflight;
+    reportCorpus   = data;
+    reportCorpusAt = Date.now();
+    return data;
+  } finally {
+    reportCorpusInflight = null;
   }
 }
 
@@ -388,9 +444,11 @@ function firstOblastInText(text: string): OblastRef | null {
   return result;
 }
 
-// A 25-minute gap between consecutive sighting messages is treated as a new
-// wave (separate attack group / drone swarm).
-const WAVE_GAP_MS = 25 * 60 * 1000;
+// A 45-minute gap between consecutive sighting messages is treated as a new
+// wave (separate attack group / drone swarm). 45 min is used because different
+// channels post about the same cruise missile 20-30 min apart; 25 min was
+// splitting single strikes into multiple "waves".
+const WAVE_GAP_MS = 45 * 60 * 1000;
 
 /**
  * Builds temporal route waves for a given weapon type.
