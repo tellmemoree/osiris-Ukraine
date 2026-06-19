@@ -1020,7 +1020,7 @@ export default function Dashboard() {
       <motion.button
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3 }}
         onClick={() => { setNotifOpen(true); setUnreadCount(0); }}
-        className="status-bar-desktop absolute top-3.5 right-[340px] z-[210] pointer-events-auto w-8 h-8 flex items-center justify-center rounded-lg glass-panel text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        className="status-bar-desktop absolute top-7 right-[310px] z-[210] pointer-events-auto w-8 h-8 flex items-center justify-center rounded-lg glass-panel text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="Notification log"
       >
         <Bell className="w-3.5 h-3.5" />
