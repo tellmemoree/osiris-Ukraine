@@ -440,7 +440,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         filter: ['!', ['boolean', ['get', 'confirmed'], false]],
         layout: { 'text-field': '?', 'text-size': 14, 'text-font': ['Open Sans Bold'], 'text-offset': [0, 0], 'text-anchor': 'center', 'text-allow-overlap': true },
         paint: { 'text-color': '#FF8C00', 'text-halo-color': '#000', 'text-halo-width': 1.5 }});
-      // Territorial Captures — RU red, UA blue.
+      // Territorial Captures — RU red, UA blue, Conflicted neutral gold.
       map.addLayer({ id: 'capture-glow', type: 'circle', source: 'captures', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 12, 5, 20, 10, 30],
         'circle-color': ['case', ['boolean', ['get', 'conflicted'], false],
