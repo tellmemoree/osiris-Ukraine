@@ -1588,19 +1588,20 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const score = scores.find((o: any) => o.name_en === nameEn);
       if (!score) return;
       const pct = (v: number) => `${Math.round(v * 100)}%`;
-      new maplibregl.Popup({ className: 'osiris-popup', maxWidth: '280px' })
-        .setLngLat(e.lngLat)
-        .setHTML(`<div style="font-size:11px;line-height:1.6">
-          <div style="font-weight:700;margin-bottom:4px">${esc(nameEn)}</div>
-          <div>Pressure: <b>${Math.round(score.score)}</b> <span style="color:#aaa">(${esc(score.level.toUpperCase())})</span></div>
-          <div style="margin-top:6px;color:#aaa;font-size:10px">
-            Ballistic ${pct(score.components.ballistic)} &middot;
-            KAB ${pct(score.components.kab)} &middot;
-            Frontline ${pct(score.components.frontline)} &middot;
-            Outage ${pct(score.components.outage)}
-          </div>
-        </div>`)
-        .addTo(map);
+      const levelColors: Record<string, string> = {
+        critical: 'rgba(255,23,68,0.8)', high: 'rgba(255,107,0,0.8)',
+        med: 'rgba(255,193,7,0.8)', low: 'rgba(100,181,246,0.6)',
+      };
+      popup(e.lngLat, `<div style="${pStyle}border:1px solid ${levelColors[score.level] ?? 'rgba(255,255,255,0.3)'};max-width:280px;">
+        <div style="font-weight:700;margin-bottom:4px">${esc(nameEn)}</div>
+        <div>Pressure: <b>${Math.round(score.score)}</b> <span style="color:#aaa">(${esc(score.level.toUpperCase())})</span></div>
+        <div style="margin-top:6px;color:#aaa;font-size:10px">
+          Ballistic ${pct(score.components.ballistic)} &middot;
+          KAB ${pct(score.components.kab)} &middot;
+          Frontline ${pct(score.components.frontline)} &middot;
+          Outage ${pct(score.components.outage)}
+        </div>
+      </div>`);
     });
     map.on('mouseenter', 'pressure-oblast-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'pressure-oblast-fill', () => { map.getCanvas().style.cursor = ''; });

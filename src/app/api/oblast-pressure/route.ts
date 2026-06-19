@@ -112,6 +112,31 @@ const OUTAGE_TO_NAME_EN: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Scope: only oblasts on the active frontline or sharing a land border with
+// Russia. Western/central oblasts far from the contact line score near zero
+// on every signal and just add visual noise to the choropleth.
+//   Russia-border: Chernihiv (Bryansk), Sumy (Kursk/Bryansk), Kharkiv (Belgorod),
+//                  Luhansk (Voronezh/Rostov), Donetsk (Rostov)
+//   Active frontline (no direct Russia border): Zaporizhzhia, Kherson
+//   Occupied: Crimea, Sevastopol
+//   Strategic depth (adjacent to frontline, regularly struck): Dnipropetrovsk, Mykolaiv
+// ---------------------------------------------------------------------------
+
+const PRESSURE_OBLASTS = new Set([
+  'Chernihiv oblast',
+  'Sumy oblast',
+  'Kharkiv oblast',
+  'Luhansk oblast',
+  'Donetsk oblast',
+  'Zaporizhzhia oblast',
+  'Kherson oblast',
+  'Dnipropetrovsk oblast',
+  'Mykolaiv oblast',
+  'Crimea',
+  'Sevastopol',
+]);
+
+// ---------------------------------------------------------------------------
 // Haversine distance — returns km between two [lng, lat] points
 // ---------------------------------------------------------------------------
 
@@ -264,8 +289,10 @@ async function computePressure(): Promise<PressureResponse> {
     }
   }
 
-  // Score every oblast
-  const oblasts: OblastScore[] = Object.entries(OBLAST_CENTROIDS).map(([name_en, [lng, lat]]) => {
+  // Score frontline / Russia-border oblasts only
+  const oblasts: OblastScore[] = Object.entries(OBLAST_CENTROIDS)
+    .filter(([name_en]) => PRESSURE_OBLASTS.has(name_en))
+    .map(([name_en, [lng, lat]]) => {
     const ballistic = activeBallistic.has(name_en) ? 1.0 : 0;
     const kabCount  = kabCounts.get(name_en) ?? 0;
     const kab       = Math.min(kabCount / 5, 1.0);
