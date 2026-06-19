@@ -15,6 +15,8 @@ import { stealthFetch } from '@/lib/stealthFetch';
 
 // ── channels ────────────────────────────────────────────────────────────────
 
+// GeneralStaffUA / Militaryland / ukraine_now removed: scrape 0 messages and/or
+// post after-action summaries rather than real-time warnings.
 export const UA_THREAT_CHANNELS = [
   'DeepStateUA', 'UkraineWarReport',
   'ua_forces', 'kpszsu', 'war_monitor',
