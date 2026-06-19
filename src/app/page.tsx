@@ -222,10 +222,16 @@ export default function Dashboard() {
   const [liveFeedUrl, setLiveFeedUrl] = useState<string | null>(null);
   const [liveFeedName, setLiveFeedName] = useState('');
   const [liveFeedEmbedAllowed, setLiveFeedEmbedAllowed] = useState(true);
-  // Splash screen
+  // Splash screen — hides when MapLibre fires its load event (onMapReady),
+  // with a 600 ms minimum so the branding is visible, and a 3s hard cap so
+  // a slow tile source never traps the user behind the splash indefinitely.
+  const splashResolveRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    const splashTimer = setTimeout(() => setShowSplash(false), 2500);
-    return () => clearTimeout(splashTimer);
+    let resolved = false;
+    const resolve = () => { if (!resolved) { resolved = true; setShowSplash(false); } };
+    splashResolveRef.current = resolve;
+    const cap = setTimeout(resolve, 3000);
+    return () => { clearTimeout(cap); resolved = true; };
   }, []);
 
   // URL state: parse on mount
@@ -462,6 +468,24 @@ export default function Dashboard() {
   // entity by name even while its layer is hidden. Called when search is opened.
   const ensureSearchSources = useCallback(() => {
     ['flights', 'satellites', 'cctv', 'maritime', 'radiation', 'live_news', 'weather', 'infrastructure', 'gdelt', 'kab_threats', 'power_outages'].forEach(loadOnce);
+  }, [loadOnce]);
+
+  // Background pre-fetch: populate LayerPanel counts for every layer regardless
+  // of whether it is toggled on. Split into three tiers so the server never
+  // receives a large burst — each tier fires after the previous one has settled.
+  // loadOnce() skips keys already fetched by active layers.
+  useEffect(() => {
+    const t1 = setTimeout(() => {
+      ['flights', 'air_raids', 'kab_threats', 'power_outages', 'frontlines', 'captures'].forEach(loadOnce);
+    }, 1000);
+    const t2 = setTimeout(() => {
+      ['thermal_aoi', 'satellites', 'fires', 'weather', 'infrastructure', 'gdelt', 'radiation'].forEach(loadOnce);
+    }, 4000);
+    const t3 = setTimeout(() => {
+      ['maritime', 'live_news', 'cctv', 'air_quality', 'internet_outages', 'malware',
+       'weapon_threats', 'drone_threats', 'missile_threats', 'ru_air_raids'].forEach(loadOnce);
+    }, 8000);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [loadOnce]);
 
   // Picking an entity from search: fly to it, reveal its layer, and highlight it.
@@ -936,6 +960,7 @@ export default function Dashboard() {
           scanTargets={scanTargets}
           demoMode={demoMode}
           theme={osirisTheme}
+          onMapReady={() => setTimeout(() => splashResolveRef.current?.(), 600)}
         />
       </ErrorBoundary>
 
