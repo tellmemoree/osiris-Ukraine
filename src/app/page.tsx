@@ -171,6 +171,7 @@ export default function Dashboard() {
     maritime: true,
     ships: true,
     shadow_fleet: false,
+    shadow_fleet_tracks: false,
     satellites: false,
     balloons: false,
     cctv: true,
@@ -457,6 +458,7 @@ export default function Dashboard() {
     internet_outages: () => fetchEndpoint('/api/radar', d => ({ ioda_outages: d.outages })),
     malware: () => fetchEndpoint('/api/malware', d => ({ malware_threats: d.threats })),
     oblast_pressure: () => fetchEndpoint('/api/oblast-pressure', (d: any) => ({ oblast_pressure: d.oblasts ?? [] })),
+    shadow_fleet_tracks: () => fetchEndpoint('/api/maritime?tracks=1', (d: any) => ({ shadow_fleet_tracks: d.tracks ?? [] })),
   }), [fetchEndpoint]);
 
   // Fetch a source at most once (does NOT toggle the layer on).
@@ -525,6 +527,7 @@ export default function Dashboard() {
     if (activeLayers.internet_outages) loadOnce('internet_outages');
     if (activeLayers.malware) loadOnce('malware');
     if (activeLayers.oblast_pressure) loadOnce('oblast_pressure');
+    if (activeLayers.shadow_fleet_tracks) loadOnce('shadow_fleet_tracks');
   }, [activeLayers, loadOnce]);
 
   // Background pre-fetch: populate LayerPanel counts for every layer
@@ -609,6 +612,9 @@ export default function Dashboard() {
     }
     if (activeLayers.oblast_pressure) {
       intervals.push(setInterval(() => fetchEndpoint('/api/oblast-pressure', (d: any) => ({ oblast_pressure: d.oblasts ?? [] })), 60_000)); // 1 min
+    }
+    if (activeLayers.shadow_fleet_tracks) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/maritime?tracks=1', (d: any) => ({ shadow_fleet_tracks: d.tracks ?? [] })), 300_000)); // 5 min
     }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);

@@ -244,6 +244,7 @@ if (!globalForAis.shipsCache) {
     } catch {/* best-effort */}
   }, 5 * 60 * 1000);
 
+
   // Best-effort restore of the 24h position ring-buffers. Drops entries older
   // than TRACK_MAX_AGE_MS so a stale snapshot doesn't show ancient tracks.
   fs.readFile(SHADOW_TRACKS_FILE, 'utf8')
