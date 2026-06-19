@@ -176,12 +176,27 @@ function distKm(aLat: number, aLng: number, bLat: number, bLng: number): number 
   return Math.sqrt(dLat * dLat + dLng * dLng) * 111.32;
 }
 
-async function fetchTheaterFires(): Promise<Fire[]> {
-  const sources = [
+// FIRMS area API bbox: W,S,E,N (matches BBOX constant above)
+const FIRMS_BBOX = `${BBOX.lngMin},${BBOX.latMin},${BBOX.lngMax},${BBOX.latMax}`;
+
+function firmsUrls(): string[] {
+  const key = process.env.FIRMS_MAP_KEY;
+  if (key) {
+    // Area API: bounding-box query, 2-day window — ~50 KB vs 20 MB global CSV
+    return [
+      `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/VIIRS_SNPP_NRT/${FIRMS_BBOX}/2`,
+      `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/MODIS_NRT/${FIRMS_BBOX}/2`,
+    ];
+  }
+  // Keyless fallback: 24h global CSV (20 MB each — slower, but always available)
+  return [
     'https://firms.modaps.eosdis.nasa.gov/data/active_fire/suomi-npp-viirs-c2/csv/SUOMI_VIIRS_C2_Global_24h.csv',
     'https://firms.modaps.eosdis.nasa.gov/data/active_fire/modis-c6.1/csv/MODIS_C6_1_Global_24h.csv',
   ];
-  for (const url of sources) {
+}
+
+async function fetchTheaterFires(): Promise<Fire[]> {
+  for (const url of firmsUrls()) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'OSIRIS-Intelligence-Platform/3.5' } });
       if (!res.ok) continue;
