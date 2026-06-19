@@ -1990,6 +1990,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       return;
     }
     const now = Date.now();
+    const MAX_SEG_KPH = 92.6; // 50 knots — any segment implying faster speed is a ghost GPS fix
+    const segDistKm = (a: {lat:number;lng:number}, b: {lat:number;lng:number}) => {
+      const R = 6371, toR = Math.PI / 180;
+      const dLat = (b.lat - a.lat) * toR, dLng = (b.lng - a.lng) * toR;
+      const x = Math.sin(dLat/2)**2 + Math.cos(a.lat*toR)*Math.cos(b.lat*toR)*Math.sin(dLng/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+    };
     const segments: any[] = [];
     for (const vessel of data.shadow_fleet_tracks as any[]) {
       const positions: { lat: number; lng: number; ts: number }[] = vessel.positions;
@@ -1997,6 +2004,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       for (let i = 0; i < positions.length - 1; i++) {
         const a = positions[i];
         const b = positions[i + 1];
+        const dtH = (b.ts - a.ts) / 3_600_000;
+        if (dtH > 0 && segDistKm(a, b) / dtH > MAX_SEG_KPH) continue;
         segments.push({
           type: 'Feature',
           geometry: { type: 'LineString', coordinates: [[a.lng, a.lat], [b.lng, b.lat]] },
