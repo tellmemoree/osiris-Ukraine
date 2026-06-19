@@ -30,6 +30,13 @@ function safeUrl(v: unknown): string {
   return /^https?:\/\//i.test(s) ? esc(s) : '#';
 }
 
+// Normalises apostrophe variants in oblast names so vadimklimenko API curly-quote
+// strings (U+2019 etc.) match the straight-quote values in the GeoJSON file.
+// Used both in the air-raid fill useEffect and the oblast-pressure useEffect.
+function normalizeApos(s: string): string {
+  return s.replace(/['''ʼ]/g, "'");
+}
+
 // Maps power-outage canonical region names (from /api/power-outages) to the
 // name_en values used in ukraine-oblasts.geojson for polygon highlighting.
 // Kyiv City and Kyiv Oblast are intentionally separate entries.
@@ -78,6 +85,7 @@ interface OsirisMapProps {
   theme?: 'core' | 'ghost';
   initialCenter?: [number, number];
   initialZoom?: number;
+  onMapReady?: () => void;
 }
 
 function computeSolarTerminator(): [number, number][] {
@@ -102,19 +110,25 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom, onMapReady }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  const dataRef = useRef<any>(data);
   const [mapReady, setMapReady] = useState(false);
   const prevStyleRef = useRef(mapStyle);
+
+  // Keep dataRef current on every render so stale-closure click handlers
+  // registered in map.on('load') can read live data without being re-registered.
+  dataRef.current = data;
 
   // Create aircraft icon on canvas (for WebGL symbol layer)
   const createIcon = useCallback((map: maplibregl.Map, id: string, color: string, size: number) => {
     if (map.hasImage(id)) return;
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     const cx = size / 2, cy = size / 2;
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -133,11 +147,40 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     map.addImage(id, { width: size, height: size, data: new Uint8Array(ctx.getImageData(0, 0, size, size).data) });
   }, []);
 
+  // Create helicopter icon on canvas — a rotor-disc glyph (crossed blades over a
+  // hub) that reads clearly as a helicopter and is visually distinct from the
+  // fixed-wing arrow above. Near rotationally symmetric, so it stays legible
+  // regardless of heading.
+  const createHeliIcon = useCallback((map: maplibregl.Map, id: string, color: string, size: number) => {
+    if (map.hasImage(id)) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const cx = size / 2, cy = size / 2;
+    const reach = size * 0.42 * 0.707; // half-diagonal of the rotor span
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = Math.max(2, size * 0.09);
+    ctx.lineCap = 'round';
+    // Rotor blades (X)
+    ctx.beginPath();
+    ctx.moveTo(cx - reach, cy - reach); ctx.lineTo(cx + reach, cy + reach);
+    ctx.moveTo(cx + reach, cy - reach); ctx.lineTo(cx - reach, cy + reach);
+    ctx.stroke();
+    // Fuselage hub
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.17, 0, Math.PI * 2);
+    ctx.fill();
+    map.addImage(id, { width: size, height: size, data: new Uint8Array(ctx.getImageData(0, 0, size, size).data) });
+  }, []);
+
   const createDot = useCallback((map: maplibregl.Map, id: string, color: string, size: number) => {
     if (map.hasImage(id)) return;
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(size/2, size/2, size/2 - 1, 0, Math.PI * 2);
@@ -223,21 +266,33 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const flightGov = isGhost ? phantomPurple : '#FF9500';
       const flightMil = isGhost ? phantomPurple : '#FF3D3D';
 
-      // Create icons
-      createIcon(map, 'plane-cyan', flightCom, 24);
-      createIcon(map, 'plane-green', flightPriv, 24);
-      createIcon(map, 'plane-pink', flightGov, 24);
-      createIcon(map, 'plane-red', flightMil, 24);
-      createIcon(map, 'plane-grey', isGhost ? phantomPurple : '#555555', 24);
-      createDot(map, 'dot-gold', isGhost ? phantomPurple : '#D4AF37', 8);
-      createDot(map, 'dot-red', '#FF3D3D', 10);
-      createDot(map, 'dot-orange', '#FF9500', 10);
-      createDot(map, 'dot-green', '#00E676', 10);
-      createDot(map, 'dot-fire', '#FF6B00', 10);
-      createDot(map, 'dot-cctv', cameraColor, 10);
+      // Create icons — isolated in a try/catch so a canvas/addImage failure
+      // (e.g. iOS Safari returning a null 2d context under memory/context
+      // pressure) can NEVER abort the rest of map init.
+      try {
+        createIcon(map, 'plane-cyan', flightCom, 24);
+        createIcon(map, 'plane-green', flightPriv, 24);
+        createIcon(map, 'plane-pink', flightGov, 24);
+        createIcon(map, 'plane-red', flightMil, 24);
+        createIcon(map, 'plane-grey', isGhost ? phantomPurple : '#555555', 24);
+        // Helicopter variants (one per flight-category colour) — selected per
+        // feature via aircraft_category in the flight symbol layers below.
+        createHeliIcon(map, 'heli-cyan', flightCom, 24);
+        createHeliIcon(map, 'heli-green', flightPriv, 24);
+        createHeliIcon(map, 'heli-pink', flightGov, 24);
+        createHeliIcon(map, 'heli-red', flightMil, 24);
+        createDot(map, 'dot-gold', isGhost ? phantomPurple : '#D4AF37', 8);
+        createDot(map, 'dot-red', '#FF3D3D', 10);
+        createDot(map, 'dot-orange', '#FF9500', 10);
+        createDot(map, 'dot-green', '#00E676', 10);
+        createDot(map, 'dot-fire', '#FF6B00', 10);
+        createDot(map, 'dot-cctv', cameraColor, 10);
+      } catch (e) {
+        console.error('[OsirisMap] icon init failed (continuing without icons):', e);
+      }
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality', 'ioda-outages', 'malware-nodes', 'thermal-aoi', 'captures', 'network-mesh'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality', 'ioda-outages', 'malware-nodes', 'thermal-aoi', 'captures', 'network-mesh', 'shadow-fleet-tracks'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -245,7 +300,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         const s = 20;
         const c = document.createElement('canvas');
         c.width = s; c.height = s;
-        const ctx = c.getContext('2d')!;
+        const ctx = c.getContext('2d');
+        if (!ctx) return;
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.moveTo(s/2, 1);
@@ -259,9 +315,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         ctx.fillText('!', s/2, s - 4);
         map.addImage(id, { width: s, height: s, data: new Uint8Array(ctx.getImageData(0, 0, s, s).data) });
       };
-      createWarningIcon('warn-icon', '#FF1744');
-      createWarningIcon('warn-orange', '#FF9500');
-      createWarningIcon('warn-yellow', '#FFD500');
+      try {
+        createWarningIcon('warn-icon', '#FF1744');
+        createWarningIcon('warn-orange', '#FF9500');
+        createWarningIcon('warn-yellow', '#FFD500');
+      } catch (e) {
+        console.error('[OsirisMap] warning-icon init failed (continuing):', e);
+      }
 
       map.addLayer({ id: 'conflict-icons', type: 'symbol', source: 'conflict-zones', layout: {
         'icon-image': ['match', ['get','severity'], 'war','warn-icon', 'high','warn-orange', 'warn-yellow'],
@@ -333,6 +393,19 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         paint: { 'line-color': '#FFD500', 'line-width': 1.5, 'line-opacity': 0.50 }
       });
 
+      // Oblast Pressure Index — amber-to-red choropleth (separate from outage fills).
+      // Color and opacity are overridden per-feature via setPaintProperty in the
+      // oblast-pressure useEffect; these defaults only show when filter passes but
+      // before the first data-driven override lands.
+      map.addLayer({ id: 'pressure-oblast-fill', type: 'fill', source: 'ukraine-oblast-fill',
+        filter: ['in', ['get', 'name_en'], ['literal', []]],
+        paint: { 'fill-color': '#FF7043', 'fill-opacity': 0.30 },
+      });
+      map.addLayer({ id: 'pressure-oblast-outline', type: 'line', source: 'ukraine-oblast-fill',
+        filter: ['in', ['get', 'name_en'], ['literal', []]],
+        paint: { 'line-color': '#FF7043', 'line-width': 1.2, 'line-opacity': 0.6 },
+      });
+
       // Frontline (DeepState/Militaryland) — occupied-zone fills + outlines. Uses
       // each feature's own DeepState style colors; fills sit under the dot/label
       // layers added below so markers stay legible.
@@ -397,8 +470,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       map.addLayer({ id: 'capture-glow', type: 'circle', source: 'captures', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 12, 5, 20, 10, 30],
         'circle-color': ['case', ['boolean', ['get', 'conflicted'], false],
-          '#FFD700', // Gold for conflicted
-          ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888']
+          '#FFB300',
+          ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888'],
         ],
         'circle-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.05, 3, 0.14],
         'circle-blur': 1,
@@ -411,8 +484,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           10, ['interpolate', ['linear'], ['get', 'count'], 1, 6, 4, 12],
         ],
         'circle-color': ['case', ['boolean', ['get', 'conflicted'], false],
-          '#FFD700', // Gold for conflicted
-          ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888']
+          '#FFB300',
+          ['match', ['get', 'side'], 'ru', '#FF3D3D', 'ua', '#2979FF', '#888888'],
         ],
         'circle-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.40, 3, 0.88],
         'circle-stroke-width': ['case', ['boolean', ['get', 'conflicted'], false], 2.5, 1.5],
@@ -612,9 +685,35 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'line-opacity': 0.4,
       }});
 
-      // GDELT
+      // GDELT / Conflict Events (confidence-tiered)
       map.addLayer({ id: 'gdelt-dots', type: 'circle', source: 'gdelt', paint: {
-        'circle-radius': 4, 'circle-color': '#FF3D3D', 'circle-opacity': 0.5, 'circle-stroke-width': 1, 'circle-stroke-color': '#FF3D3D', 'circle-stroke-opacity': 0.3,
+        'circle-color': [
+          'match', ['get', 'confidence'],
+          'confirmed', '#FF3D3D',
+          'reported',  '#FF9500',
+          'unverified','#FFD54F',
+          '#FF3D3D', // default
+        ],
+        'circle-radius': [
+          'match', ['get', 'confidence'],
+          'confirmed', 6,
+          'reported',  4,
+          3, // unverified + default
+        ],
+        'circle-opacity': [
+          'match', ['get', 'confidence'],
+          'unverified', 0.4,
+          0.8,
+        ],
+        'circle-stroke-width': 1,
+        'circle-stroke-color': [
+          'match', ['get', 'confidence'],
+          'confirmed', '#FF3D3D',
+          'reported',  '#FF9500',
+          'unverified','#FFD54F',
+          '#FF3D3D',
+        ],
+        'circle-stroke-opacity': 0.3,
       }});
 
       // GPS Jamming
@@ -773,17 +872,22 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-offset': [0, 2], 'text-max-width': 14, 'text-allow-overlap': false,
       }, paint: { 'text-color': '#FF3D3D', 'text-halo-color': '#000', 'text-halo-width': 1.5, 'text-opacity': 0.9 }});
 
-      // Flight layers (WebGL symbol — GPU rendered, handles 50K+ smooth)
+      // Flight layers (WebGL symbol — GPU rendered, handles 50K+ smooth).
+      // Each layer picks a plane or helicopter glyph per feature via
+      // aircraft_category; helis aren't heading-rotated (their rotor glyph reads
+      // the same at any angle, and "direction" is meaningless for a hovering one).
       const flightLayers = [
-        { id: 'fl-commercial', src: 'flights', icon: 'plane-cyan' },
-        { id: 'fl-private', src: 'private-fl', icon: 'plane-green' },
-        { id: 'fl-jets', src: 'jets', icon: 'plane-pink' },
-        { id: 'fl-military', src: 'military', icon: 'plane-red' },
+        { id: 'fl-commercial', src: 'flights', plane: 'plane-cyan', heli: 'heli-cyan' },
+        { id: 'fl-private', src: 'private-fl', plane: 'plane-green', heli: 'heli-green' },
+        { id: 'fl-jets', src: 'jets', plane: 'plane-pink', heli: 'heli-pink' },
+        { id: 'fl-military', src: 'military', plane: 'plane-red', heli: 'heli-red' },
       ];
       flightLayers.forEach(l => {
         map.addLayer({ id: l.id, type: 'symbol', source: l.src, layout: {
-          'icon-image': l.icon, 'icon-size': ['interpolate',['linear'],['zoom'], 1,0.4, 5,0.7, 10,1],
-          'icon-rotate': ['get','heading'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true,
+          'icon-image': ['match', ['get','aircraft_category'], 'heli', l.heli, l.plane],
+          'icon-size': ['interpolate',['linear'],['zoom'], 1,0.4, 5,0.7, 10,1],
+          'icon-rotate': ['match', ['get','aircraft_category'], 'heli', 0, ['get','heading']],
+          'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true,
         }, paint: { 'icon-opacity': 0.85 }});
       });
 
@@ -896,6 +1000,23 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-offset': [0, 1.4], 'text-allow-overlap': false,
       }, paint: { 'text-color': '#E040FB', 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
+      // Shadow Fleet Track Lines — age-faded dashed polylines, one segment per
+      // consecutive position pair. Opacity fades from near-full (fresh) to near-zero
+      // (24h old) via data-driven interpolation on the ageHours property.
+      map.addLayer({
+        id: 'shadow-track-line',
+        type: 'line',
+        source: 'shadow-fleet-tracks',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#E040FB',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 1, 1, 8, 2.5],
+          'line-dasharray': [2, 2],
+          'line-opacity': ['interpolate', ['linear'], ['get', 'ageHours'], 0, 0.9, 24, 0.12],
+        },
+      });
+
       // Hide disputed boundary lines from the Carto base style (e.g. dashed
       // line drawn between Crimea and mainland Ukraine). Regex catches any
       // variant name the CDN may use without hard-coding layer IDs.
@@ -906,6 +1027,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       });
 
       setMapReady(true);
+      onMapReady?.();
     });
 
     // Events
@@ -1107,20 +1229,29 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       if (!e.features?.length) return;
       const p = e.features[0].properties as any;
       const coords = (e.features[0].geometry as any).coordinates;
+      const isConflicted = p.conflicted === true || p.conflicted === 'true';
       const sideFlag = p.side === 'ru' ? '🇷🇺' : p.side === 'ua' ? '🇺🇦' : '⚔️';
-      const sideColor = p.side === 'ru' ? '#FF3D3D' : p.side === 'ua' ? '#2979FF' : '#888';
-      const statusText = p.conflicted ? 'CONFLICTED CLAIMS' : (p.side === 'ru' ? 'RU ADVANCE' : p.side === 'ua' ? 'UA ADVANCE' : 'CONTESTED');
-      const statusColor = p.conflicted ? '#FFD700' : sideColor;
-      popup(coords, `<div style="${pStyle}border:1px solid ${statusColor}40;">
+      const sideColor = isConflicted ? '#FFB300' : (p.side === 'ru' ? '#FF3D3D' : p.side === 'ua' ? '#2979FF' : '#888');
+      const headerLabel = isConflicted ? '⚔️ CONFLICTED CLAIMS' : (p.side === 'ru' ? 'RU ADVANCE' : p.side === 'ua' ? 'UA ADVANCE' : 'CONTESTED');
+      const otherFlag = p.other_side === 'ru' ? '🇷🇺' : p.other_side === 'ua' ? '🇺🇦' : '⚔️';
+      popup(coords, `<div style="${pStyle}border:1px solid ${sideColor}40;">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-          <span style="font-size:14px;">${sideFlag}</span>
-          <span style="color:${statusColor};font-size:9px;letter-spacing:0.08em;font-weight:600;">${statusText}</span>
+          <span style="font-size:14px;">${isConflicted ? '⚔️' : sideFlag}</span>
+          <span style="color:${sideColor};font-size:9px;letter-spacing:0.08em;">${headerLabel}</span>
           ${p.count > 1 ? `<span style="color:#888;font-size:9px;">${Number(p.count)||0} reports</span>` : ''}
         </div>
-        ${p.conflicted ? `<div style="font-size:9px;color:#FFD700;margin-bottom:6px;padding:4px;background:#FFD70020;border-radius:3px;">⚠️ Both RU and UA claim this location</div>` : ''}
+        ${isConflicted ? `<div style="font-size:9px;color:#FFB300;background:rgba(255,179,0,0.08);border:1px solid rgba(255,179,0,0.3);border-radius:3px;padding:3px 6px;margin-bottom:6px;">⚠️ Both RU and UA claim this location</div>` : ''}
+        <div style="font-size:9px;color:#888;margin-bottom:2px;">${isConflicted ? `${sideFlag} ${p.side === 'ru' ? 'RU' : p.side === 'ua' ? 'UA' : ''} CLAIM` : ''}</div>
         <div style="font-size:11px;color:#E8E6E0;margin-bottom:6px;">${esc(p.name)||'Unknown location'}</div>
         ${p.description ? `<div style="font-size:9px;color:#8A8880;line-height:1.4;margin-bottom:6px;font-style:italic;">${esc(p.description)}</div>` : ''}
-        ${p.link ? `<a href="${safeUrl(p.link)}" target="_blank" style="${linkStyle}color:${statusColor};border:1px solid ${statusColor}40;background:${statusColor}11;">📡 SOURCE</a>` : ''}
+        ${p.link ? `<a href="${safeUrl(p.link)}" target="_blank" style="${linkStyle}color:${sideColor};border:1px solid ${sideColor}40;background:${sideColor}11;">📡 SOURCE</a>` : ''}
+        ${isConflicted && p.other_name ? `
+        <div style="border-top:1px solid rgba(255,179,0,0.2);margin:8px 0 6px;"></div>
+        <div style="font-size:9px;color:#888;margin-bottom:2px;">${otherFlag} ${p.other_side === 'ru' ? 'RU' : p.other_side === 'ua' ? 'UA' : ''} CLAIM</div>
+        <div style="font-size:11px;color:#C8C6C0;margin-bottom:6px;">${esc(p.other_name)}</div>
+        ${p.other_source ? `<div style="font-size:9px;color:#5C5A54;margin-bottom:4px;">${esc(p.other_source)}</div>` : ''}
+        ${p.other_link ? `<a href="${safeUrl(p.other_link)}" target="_blank" style="${linkStyle}color:#FFB300;border:1px solid rgba(255,179,0,0.4);background:rgba(255,179,0,0.08);">📡 SOURCE</a>` : ''}
+        ` : ''}
         <div style="font-size:8px;color:#444;margin-top:6px;">milblogger claim — verify before acting</div>
       </div>`);
     });
@@ -1274,7 +1405,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
-    // ── GDELT Conflicts (with source article) ──
+    // ── GDELT / Conflict Events (with confidence tier + sources) ──
     map.on('click', 'gdelt-dots', e => {
       if (!e.features?.length) return;
       const p = e.features[0].properties as any;
@@ -1282,12 +1413,25 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const evtTime = p.published ? new Date(p.published) : null;
       const evtAgo = evtTime ? Math.max(0, Math.round((Date.now() - evtTime.getTime()) / 60000)) : null;
       const evtLabel = evtAgo == null ? '' : evtAgo < 60 ? `${evtAgo}m ago` : `${Math.round(evtAgo/60)}h ago`;
-      popup(coords, `<div style="${pStyle}border:1px solid rgba(255,61,61,0.3);">
-        <div style="color:#FF3D3D;font-size:12px;font-weight:700;margin-bottom:6px;">⚠️ CONFLICT EVENT</div>
+
+      const confidence: string = p.confidence ?? 'reported';
+      const confidenceColor = confidence === 'confirmed' ? '#FF3D3D' : confidence === 'reported' ? '#FF9500' : '#FFD54F';
+      const confidenceSymbol = confidence === 'confirmed' ? '●' : confidence === 'reported' ? '◎' : '○';
+      const confidenceLabel = `${confidenceSymbol} ${confidence.toUpperCase()}`;
+
+      const sourcesRaw: string = p.sources ?? '';
+      const sourcesDisplay = sourcesRaw
+        ? sourcesRaw.split(',').map((s: string) => s.trim().toUpperCase()).join(' · ')
+        : 'GDELT';
+
+      popup(coords, `<div style="${pStyle}border:1px solid ${confidenceColor}40;">
+        <div style="color:${confidenceColor};font-size:12px;font-weight:700;margin-bottom:4px;">CONFLICT EVENT</div>
+        <div style="font-size:9px;color:${confidenceColor};font-weight:700;margin-bottom:6px;letter-spacing:0.08em;">${esc(confidenceLabel)}</div>
         <div style="font-size:9px;color:#E8E6E0;margin-bottom:6px;line-height:1.4;">${esc(p.name)||'Unclassified incident'}</div>
-        ${evtTime ? `<div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">🕐 ${evtTime.toUTCString().slice(5,22)} UTC · ${evtLabel}</div>` : ''}
+        ${evtTime ? `<div style="font-size:9px;color:#5C5A54;margin-bottom:4px;">${evtTime.toUTCString().slice(5,22)} UTC · ${evtLabel}</div>` : ''}
+        <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">Sources: ${esc(sourcesDisplay)}</div>
         <div style="display:flex;gap:6px;">
-          ${p.url ? `<a href="${safeUrl(p.url)}" target="_blank" style="${linkStyle}color:#FF3D3D;border:1px solid rgba(255,61,61,0.4);background:rgba(255,61,61,0.1);">SOURCE</a>` : ''}
+          ${p.url ? `<a href="${safeUrl(p.url)}" target="_blank" style="${linkStyle}color:${confidenceColor};border:1px solid ${confidenceColor}60;background:${confidenceColor}18;">SOURCE</a>` : ''}
           <a href="https://www.google.com/maps/@${coords[1]},${coords[0]},12z" target="_blank" style="${linkStyle}color:#448AFF;border:1px solid rgba(68,138,255,0.4);background:rgba(68,138,255,0.1);">MAP</a>
         </div>
       </div>`);
@@ -1474,6 +1618,54 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     }));
 
+    // ── Oblast Pressure Index — choropleth click ──
+    map.on('click', 'pressure-oblast-fill', (e) => {
+      const feat = e.features?.[0];
+      if (!feat) return;
+      const nameEn = feat.properties?.name_en as string;
+      const scores: any[] = (dataRef.current?.oblast_pressure as any[]) ?? [];
+      const score = scores.find((o: any) => o.name_en === nameEn);
+      if (!score) return;
+      const pct = (v: number) => `${Math.round(v * 100)}%`;
+      const levelColors: Record<string, string> = {
+        critical: 'rgba(255,23,68,0.8)', high: 'rgba(255,107,0,0.8)',
+        med: 'rgba(255,193,7,0.8)', low: 'rgba(100,181,246,0.6)',
+      };
+      popup(e.lngLat, `<div style="${pStyle}border:1px solid ${levelColors[score.level] ?? 'rgba(255,255,255,0.3)'};max-width:280px;">
+        <div style="font-weight:700;margin-bottom:4px">${esc(nameEn)}</div>
+        <div>Pressure: <b>${Math.round(score.score)}</b> <span style="color:#aaa">(${esc(score.level.toUpperCase())})</span></div>
+        <div style="margin-top:6px;color:#aaa;font-size:10px">
+          Ballistic ${pct(score.components.ballistic)} &middot;
+          KAB ${pct(score.components.kab)} &middot;
+          Frontline ${pct(score.components.frontline)} &middot;
+          Outage ${pct(score.components.outage)}
+        </div>
+      </div>`);
+    });
+    map.on('mouseenter', 'pressure-oblast-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'pressure-oblast-fill', () => { map.getCanvas().style.cursor = ''; });
+
+    // ── Shadow Fleet Track Lines — click for vessel info ──
+    map.on('click', 'shadow-track-line', (e) => {
+      const feat = e.features?.[0];
+      if (!feat) return;
+      const props = feat.properties as { mmsi: number; name: string; ageHours: number };
+      const allTracks: any[] = (dataRef.current?.shadow_fleet_tracks as any[]) ?? [];
+      const vessel = allTracks.find((v: any) => v.mmsi === props.mmsi);
+      const posCount = vessel?.positions?.length ?? '?';
+      new maplibregl.Popup({ className: 'osiris-popup', maxWidth: '260px' })
+        .setLngLat(e.lngLat)
+        .setHTML(`<div style="font-size:11px;line-height:1.6;border-left:3px solid #E040FB;padding-left:8px">
+          <div style="font-weight:700;color:#E040FB">${esc(props.name ?? 'Unknown')}</div>
+          <div>MMSI: <b>${esc(String(props.mmsi))}</b></div>
+          <div>Track: <b>${posCount} positions</b> &middot; last 24h</div>
+          <div style="color:#aaa;margin-top:2px;font-size:10px">Shadow fleet vessel</div>
+        </div>`)
+        .addTo(map);
+    });
+    map.on('mouseenter', 'shadow-track-line', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'shadow-track-line', () => { map.getCanvas().style.cursor = ''; });
+
     // ── Weather Events (NASA EONET) ──
     map.on('click', 'weather-dots', e => {
       if (!e.features?.length) return;
@@ -1649,7 +1841,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       }
       return filtered.map((f: any) => ({
         type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [f.lng, f.lat] },
-        properties: { callsign: f.callsign, heading: f.heading || 0, alt: f.alt, model: f.model, speed_knots: f.speed_knots, registration: f.registration, icao24: f.icao24 },
+        properties: { callsign: f.callsign, heading: f.heading || 0, alt: f.alt, model: f.model, speed_knots: f.speed_knots, registration: f.registration, icao24: f.icao24, aircraft_category: f.aircraft_category || 'plane' },
       }));
     };
     setGeo('flights', activeLayers.flights ? toFeatures(data.commercial_flights, 10) : []);
@@ -1718,7 +1910,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('captures', visible.map((c: any) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-      properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description, conflicted: c.conflicted },
+      properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description, conflicted: c.conflicted, other_name: c.other_name, other_link: c.other_link, other_source: c.other_source, other_side: c.other_side },
     })));
   }, [mapReady, data.captures, activeLayers.captures, setGeo]);
 
@@ -1740,7 +1932,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       if (!e.published) return true;
       const t = new Date(e.published).getTime();
       return t <= cutoff.getTime() && (cutoff.getTime() - t) < 86400000;
-    }).map((e: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lng, e.lat] }, properties: { name: e.name, url: e.url, published: e.published } })) : []);
+    }).map((e: any) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [e.lng, e.lat] },
+      properties: {
+        name: e.name,
+        url: e.url,
+        published: e.published,
+        confidence: e.confidence ?? 'reported',
+        sources: (e.sources ?? []).join(', '),
+        eventType: e.eventType ?? 'conflict',
+      },
+    })) : []);
   }, [mapReady, data.gdelt, activeLayers.global_incidents, setGeo]);
 
   // IODA Internet Outages
@@ -1826,6 +2029,43 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('maritime-ships', (activeLayers.ships || activeLayers.shadow_fleet) && data.maritime_ships ? data.maritime_ships.filter((s: any) => Number.isFinite(s.lat) && Number.isFinite(s.lng) && Math.abs(s.lat) <= 90 && Math.abs(s.lng) <= 180 && !(s.lat === 0 && s.lng === 0)).map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name || s.mmsi?.toString(), type: s.type || 'cargo', speed: s.speed, heading: s.heading, destination: s.destination, flag: s.flag, flag_emoji: s.flag_emoji, shadow_fleet: s.shadow_fleet === true, stale: s.stale === true, minutes_since_update: s.minutes_since_update, last_position_at: s.last_position_at } })) : []);
   }, [mapReady, data.maritime_ports, data.maritime_chokepoints, data.maritime_ships, activeLayers.maritime, activeLayers.ships, activeLayers.shadow_fleet, setGeo]);
 
+  // Shadow Fleet Track Lines — builds per-segment LineString features from the
+  // 24h ring-buffer positions returned by /api/maritime?tracks=1.
+  // Each segment carries an ageHours property (age of the *start* position) that
+  // the layer uses for opacity fade — segments > 24h will be near-invisible.
+  useEffect(() => {
+    if (!mapReady) return;
+    if (!activeLayers.shadow_fleet_tracks || !Array.isArray(data.shadow_fleet_tracks) || data.shadow_fleet_tracks.length === 0) {
+      setGeo('shadow-fleet-tracks', []);
+      return;
+    }
+    const now = Date.now();
+    const MAX_SEG_KPH = 92.6; // 50 knots — any segment implying faster speed is a ghost GPS fix
+    const segDistKm = (a: {lat:number;lng:number}, b: {lat:number;lng:number}) => {
+      const R = 6371, toR = Math.PI / 180;
+      const dLat = (b.lat - a.lat) * toR, dLng = (b.lng - a.lng) * toR;
+      const x = Math.sin(dLat/2)**2 + Math.cos(a.lat*toR)*Math.cos(b.lat*toR)*Math.sin(dLng/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+    };
+    const segments: any[] = [];
+    for (const vessel of data.shadow_fleet_tracks as any[]) {
+      const positions: { lat: number; lng: number; ts: number }[] = vessel.positions;
+      if (!positions || positions.length < 2) continue;
+      for (let i = 0; i < positions.length - 1; i++) {
+        const a = positions[i];
+        const b = positions[i + 1];
+        const dtH = (b.ts - a.ts) / 3_600_000;
+        if (dtH > 0 && segDistKm(a, b) / dtH > MAX_SEG_KPH) continue;
+        segments.push({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [[a.lng, a.lat], [b.lng, b.lat]] },
+          properties: { mmsi: vessel.mmsi, name: vessel.name ?? 'Unknown', ageHours: (now - a.ts) / 3_600_000 },
+        });
+      }
+    }
+    setGeo('shadow-fleet-tracks', segments);
+  }, [mapReady, data.shadow_fleet_tracks, activeLayers.shadow_fleet_tracks, setGeo]);
+
   useEffect(() => {
     if (!mapReady) return;
     setGeo('balloons', activeLayers.balloons && data.balloons ? data.balloons.map((b: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [b.lng, b.lat] }, properties: { callsign: b.callsign, type: b.type, status: b.status, altitude: b.altitude, speed: b.speed, verticalRate: b.verticalRate, temperature: b.temperature, color: b.color } })) : []);
@@ -1889,9 +2129,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
     // Update polygon fills: oblast alerts fill the oblast polygon;
     // district alerts fill only the specific rayon — NOT the parent oblast.
-    // Normalize apostrophes: vadimklimenko API may return curly ' (U+2019),
-    // GeoJSON was built with straight ' (U+0027).
-    const normalizeApos = (s: string) => s.replace(/['‘’ʼ]/g, "'");
+    // normalizeApos is module-level (hoisted from here to fix stale-closure
+    // risk if it were needed in click handlers too).
     const map = mapRef.current;
     if (map?.getLayer('raid-oblast-fill')) {
       const oblastNames = activeLayers.air_raids
@@ -1906,6 +2145,37 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       map.setFilter('raid-district-outline', ['in', ['get', 'name_ua'], ['literal', districtNames]]);
     }
   }, [mapReady, data.air_raids, activeLayers.air_raids, setGeo]);
+
+  // Oblast Pressure Index — data-driven choropleth fill over ukraine-oblast-fill source.
+  // Deps: mapReady, data.oblast_pressure, activeLayers.oblast_pressure, setGeo.
+  // setGeo is included because it is a useCallback dep; not actually called here
+  // (we use setFilter/setPaintProperty directly), but needed for exhaustive-deps.
+  useEffect(() => {
+    if (!mapReady) return;
+    const map = mapRef.current;
+    if (!map?.getLayer('pressure-oblast-fill')) return;
+    if (!activeLayers.oblast_pressure || !Array.isArray(data.oblast_pressure) || data.oblast_pressure.length === 0) {
+      map.setFilter('pressure-oblast-fill',   ['in', ['get', 'name_en'], ['literal', []]]);
+      map.setFilter('pressure-oblast-outline', ['in', ['get', 'name_en'], ['literal', []]]);
+      return;
+    }
+    const LEVEL_COLOR: Record<string, string> = { low: '#FFEB3B', med: '#FF9800', high: '#FF5722', critical: '#D50000' };
+    const colorExpr: any[] = ['match', ['get', 'name_en']];
+    const opacityExpr: any[] = ['match', ['get', 'name_en']];
+    const names: string[] = [];
+    for (const o of data.oblast_pressure as any[]) {
+      const n = normalizeApos(o.name_en);
+      names.push(n);
+      colorExpr.push(n, LEVEL_COLOR[o.level] ?? '#FF7043');
+      opacityExpr.push(n, o.level === 'critical' ? 0.55 : o.level === 'high' ? 0.45 : o.level === 'med' ? 0.35 : 0.20);
+    }
+    colorExpr.push('rgba(0,0,0,0)');
+    opacityExpr.push(0);
+    map.setFilter('pressure-oblast-fill',   ['in', ['get', 'name_en'], ['literal', names]]);
+    map.setFilter('pressure-oblast-outline', ['in', ['get', 'name_en'], ['literal', names]]);
+    map.setPaintProperty('pressure-oblast-fill', 'fill-color', colorExpr);
+    map.setPaintProperty('pressure-oblast-fill', 'fill-opacity', opacityExpr);
+  }, [mapReady, data.oblast_pressure, activeLayers.oblast_pressure, setGeo]);
 
   // KAB / glide-bomb threats (Telegram-derived, oblast-level point markers).
   useEffect(() => {
@@ -2128,6 +2398,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['thermal-aoi-glow','thermal-aoi-dots','thermal-aoi-label','thermal-aoi-unconfirmed-label'], activeLayers.thermal_aoi);
     setVis(['capture-glow','capture-dots'], activeLayers.captures);
     setVis(['frontline-fill','frontline-line'], activeLayers.frontlines);
+    setVis(['pressure-oblast-fill','pressure-oblast-outline'], activeLayers.oblast_pressure);
+    setVis(['shadow-track-line'], activeLayers.shadow_fleet_tracks);
   }, [mapReady, activeLayers, setVis]);
 
   // IP Sweep visualization

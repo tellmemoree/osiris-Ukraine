@@ -24,6 +24,7 @@ export const dynamic = 'force-dynamic';
 const UA_THREAT_CHANNELS = [
   'DeepStateUA', 'UkraineWarReport',
   'ua_forces', 'kpszsu', 'war_monitor',
+  'vanek_nikolaev',
 ];
 
 // KAB / guided-glide-bomb mentions across UK / RU / EN. The \p{L} look-arounds give

@@ -119,6 +119,10 @@ const SITES: Site[] = [
   { id: 'oil-volgograd', name: 'Volgograd (Lukoil) refinery', category: 'oil', lat: 48.62, lng: 44.42 },
   { id: 'oil-novoshakhtinsk', name: 'Novoshakhtinsk refinery', category: 'oil', lat: 47.78, lng: 39.93 },
   { id: 'oil-slavyansk', name: 'Slavyansk-na-Kubani refinery', category: 'oil', lat: 45.26, lng: 38.13 },
+  // Poltavskaya stanitsa oil depot (Krasnodar Krai) — Lukoil distribution hub between
+  // refineries and regional AZS networks. Use stems (полтавськ, нафтобаз) so keyword
+  // matching covers inflected Ukrainian forms (полтавській, нафтобазі).
+  { id: 'oil-poltavskaya', name: 'Poltavskaya / полтавськ нафтобаз oil depot (Krasnodar/Kuban, Lukoil hub)', category: 'oil', lat: 45.33, lng: 38.17 },
   { id: 'oil-ilsky', name: 'Ilsky refinery', category: 'oil', lat: 44.84, lng: 38.58 },
   { id: 'oil-afipsky', name: 'Afipsky refinery', category: 'oil', lat: 44.90, lng: 38.84 },
   { id: 'oil-krasnodar', name: 'Krasnodar refinery', category: 'oil', lat: 45.07, lng: 39.03 },
@@ -152,7 +156,7 @@ const SITES: Site[] = [
   { id: 'oil-nps-vtoroye', name: 'NPS Vtoroye — Transneft pipeline (Vladimir Oblast)', category: 'oil', lat: 56.40, lng: 41.85 },
   { id: 'oil-kizlyurt-gas', name: 'Gas infrastructure (Kizlyurt, Dagestan)', category: 'oil', lat: 43.21, lng: 46.87 },
   { id: 'oil-yaroslavl', name: 'Slavneft-YANOS refinery (Yaroslavl, 15M t/yr)', category: 'oil', lat: 57.55, lng: 39.81 },
-  { id: 'oil-kapotnya', name: 'Kapotnya refinery (Moscow, 40% of region fuel)', category: 'oil', lat: 55.64, lng: 37.80 },
+  { id: 'oil-kapotnya', name: 'Kapotnya Moscow NPZ / Московський НПЗ / Московский НПЗ (40% of region fuel)', category: 'oil', lat: 55.64, lng: 37.80 },
   { id: 'oil-ufa', name: 'Bashneft-UNPZ / Novoil refinery complex (Ufa, Bashkortostan)', category: 'oil', lat: 54.86, lng: 56.09 },
   // ── Petrochemical / military-industrial (struck June 2026) ──
   { id: 'ind-tolyattikauchuk', name: 'Tolyattikauchuk (Samara Oblast — synthetic rubber for armour/aviation)', category: 'oil', lat: 53.50, lng: 49.38 },
@@ -172,12 +176,27 @@ function distKm(aLat: number, aLng: number, bLat: number, bLng: number): number 
   return Math.sqrt(dLat * dLat + dLng * dLng) * 111.32;
 }
 
-async function fetchTheaterFires(): Promise<Fire[]> {
-  const sources = [
+// FIRMS area API bbox: W,S,E,N (matches BBOX constant above)
+const FIRMS_BBOX = `${BBOX.lngMin},${BBOX.latMin},${BBOX.lngMax},${BBOX.latMax}`;
+
+function firmsUrls(): string[] {
+  const key = process.env.FIRMS_MAP_KEY;
+  if (key) {
+    // Area API: bounding-box query, 2-day window — ~50 KB vs 20 MB global CSV
+    return [
+      `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/VIIRS_SNPP_NRT/${FIRMS_BBOX}/2`,
+      `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/MODIS_NRT/${FIRMS_BBOX}/2`,
+    ];
+  }
+  // Keyless fallback: 24h global CSV (20 MB each — slower, but always available)
+  return [
     'https://firms.modaps.eosdis.nasa.gov/data/active_fire/suomi-npp-viirs-c2/csv/SUOMI_VIIRS_C2_Global_24h.csv',
     'https://firms.modaps.eosdis.nasa.gov/data/active_fire/modis-c6.1/csv/MODIS_C6_1_Global_24h.csv',
   ];
-  for (const url of sources) {
+}
+
+async function fetchTheaterFires(): Promise<Fire[]> {
+  for (const url of firmsUrls()) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'OSIRIS-Intelligence-Platform/3.5' } });
       if (!res.ok) continue;
