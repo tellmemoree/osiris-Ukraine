@@ -24,10 +24,10 @@ const PORT = process.env.INTEL_PORT || 4000;
 // ════════════════════════════════════════════════════
 
 const SANCTIONS_SOURCES = [
-  { url: 'https://data.opensanctions.org/datasets/latest/us_ofac_sdn/targets.simple.csv',      label: 'OFAC SDN' },
-  { url: 'https://data.opensanctions.org/datasets/latest/eu_fsf/targets.simple.csv',           label: 'EU FSF'   },
-  { url: 'https://data.opensanctions.org/datasets/latest/un_sc_sanctions/targets.simple.csv',  label: 'UN SC'    },
-  { url: 'https://data.opensanctions.org/datasets/latest/gb_hmt_sanctions/targets.simple.csv', label: 'UK HMT'  },
+  { url: 'https://data.opensanctions.org/datasets/latest/us_ofac_sdn/targets.simple.csv',     label: 'OFAC SDN' },
+  { url: 'https://data.opensanctions.org/datasets/latest/eu_fsf/targets.simple.csv',          label: 'EU FSF'   },
+  { url: 'https://data.opensanctions.org/datasets/latest/un_sc_sanctions/targets.simple.csv', label: 'UN SC'    },
+  // gb_hmt_sanctions has target_count=0 in OpenSanctions (HMT data doesn't map to targets.simple.csv format)
 ];
 const WIKIDATA_ENDPOINT = 'https://query.wikidata.org/sparql';
 const WIKIDATA_UA = 'OSIRIS-Intel/1.0 (https://osirisai.live; ontology engine)';
@@ -35,13 +35,15 @@ const SDN_REFRESH_MS = 24 * 60 * 60 * 1000; // 24h
 const WIKIDATA_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
 const WIKIDATA_CACHE_MAX = 10_000;
 
-const SHODAN_API_KEY = process.env.SHODAN_API_KEY || '';
-const ABUSEIPDB_KEY  = process.env.ABUSEIPDB_KEY  || '';
+const SHODAN_API_KEY         = process.env.SHODAN_API_KEY         || '';
+const ABUSEIPDB_KEY          = process.env.ABUSEIPDB_KEY          || '';
+const OPENSANCTIONS_API_KEY  = process.env.OPENSANCTIONS_API_KEY  || '';
 
 const ALLOWED_DOMAINS = new Set([
   'query.wikidata.org', 'data.opensanctions.org', 'www.wikidata.org',
   'ip-api.com', 'stat.ripe.net', 'api.opencorporates.com',
   'api.shodan.io', 'api.abuseipdb.com', 'registry.faa.gov',
+  ...(OPENSANCTIONS_API_KEY ? ['api.opensanctions.org'] : []),
 ]);
 
 // ════════════════════════════════════════════════════
@@ -104,7 +106,7 @@ function parseSanctionsRows(rows, label) {
 }
 
 async function loadSanctions() {
-  console.log('[INTEL] Loading sanctions lists (OFAC SDN, EU FSF, UN SC, UK HMT)...');
+  console.log(`[INTEL] Loading sanctions lists (${SANCTIONS_SOURCES.map(s => s.label).join(', ')})...`);
   const results = await Promise.allSettled(
     SANCTIONS_SOURCES.map(async ({ url, label }) => {
       const res = await fetch(url, { signal: AbortSignal.timeout(30000), headers: { Accept: 'text/csv' } });
@@ -212,8 +214,8 @@ async function sparql(query) {
 }
 
 // Search Wikidata for an entity by name, returns QID or null
-async function wdSearch(query, type = 'item') {
-  const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&limit=1&format=json`;
+async function wdSearch(query) {
+  const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&limit=3&format=json`;
   const parsed = new URL(url);
   if (!ALLOWED_DOMAINS.has(parsed.hostname)) return null;
   try {
@@ -223,7 +225,41 @@ async function wdSearch(query, type = 'item') {
     });
     if (!res.ok) return null;
     const json = await res.json();
-    return json.search?.[0]?.id || null;
+    return json.search?.map(r => r.id) || [];
+  } catch { return []; }
+}
+
+// Query the OpenSanctions entity search API for structured data beyond what the CSV carries.
+// Requires OPENSANCTIONS_API_KEY — free key at opensanctions.org/api/
+// schema: 'Vessel' | 'Company' | 'Person' | 'Organization'
+async function opensanctionsSearch(query, schema) {
+  if (!OPENSANCTIONS_API_KEY) return null;
+  const url = `https://api.opensanctions.org/search/default?q=${encodeURIComponent(query)}&schema=${schema}&limit=1`;
+  if (!ALLOWED_DOMAINS.has(new URL(url).hostname)) return null;
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: { 'User-Agent': WIKIDATA_UA, Accept: 'application/json', Authorization: `ApiKey ${OPENSANCTIONS_API_KEY}` },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.results?.[0] || null;
+  } catch { return null; }
+}
+
+// Search OpenSanctions by a structured property value (e.g. IMO number for vessels).
+async function opensanctionsByProp(schema, prop, value) {
+  if (!OPENSANCTIONS_API_KEY) return null;
+  const url = `https://api.opensanctions.org/entities/?schema=${schema}&prop=${prop}&value=${encodeURIComponent(value)}&limit=1`;
+  if (!ALLOWED_DOMAINS.has(new URL(url).hostname)) return null;
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: { 'User-Agent': WIKIDATA_UA, Accept: 'application/json', Authorization: `ApiKey ${OPENSANCTIONS_API_KEY}` },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.results?.[0] || null;
   } catch { return null; }
 }
 
@@ -396,11 +432,18 @@ async function resolveVessel(id) {
   const cached = wdCacheGet(`vessel:${id}`);
   if (cached) return { ...cached };
 
+  const sid = sanitizeId(id);
+  let resolvedImo = null;
+
   try {
-    // wdSearch() is unconstrained and conflates vessel names with same-named cities/places.
-    // Use ship-typed SPARQL directly: IMO number (P458) or label constrained to ship class (Q11446).
-    const sid = sanitizeId(id);
-    const filter = `{ ?item wdt:P458 "${sid}" . } UNION { ?item rdfs:label "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . } UNION { ?item skos:altLabel "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . }`;
+    // wdSearch returns up to 3 QIDs. Build a VALUES clause with all of them, but constrain to
+    // ship class (Q11446) in the same SPARQL — if a QID is a city, the join fails and only
+    // the label/IMO branches produce results.
+    const qids = await wdSearch(id);
+    const qidFilter = qids.length
+      ? `{ VALUES ?item { ${qids.map(q => `wd:${q}`).join(' ')} } . ?item wdt:P31/wdt:P279* wd:Q11446 . } UNION `
+      : '';
+    const filter = `${qidFilter}{ ?item wdt:P458 "${sid}" . } UNION { ?item rdfs:label "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . } UNION { ?item skos:altLabel "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . }`;
 
     const results = await sparql(`
       SELECT ?item ?itemLabel ?ownerLabel ?countryLabel ?operatorLabel ?flagLabel
@@ -421,10 +464,10 @@ async function resolveVessel(id) {
     for (const r of results) {
       if (!vesselPropsSet) {
         const props = { source: 'Wikidata' };
-        if (r.imoNumber?.value)    props.imo           = r.imoNumber.value;
-        if (r.grossTonnage?.value) props.gross_tonnage = r.grossTonnage.value;
-        if (r.builtYear?.value)    props.year_built    = r.builtYear.value.substring(0, 4);
-        if (r.vesselTypeLabel?.value) props.vessel_type = r.vesselTypeLabel.value;
+        if (r.imoNumber?.value)       { props.imo           = r.imoNumber.value; resolvedImo = r.imoNumber.value; }
+        if (r.grossTonnage?.value)      props.gross_tonnage = r.grossTonnage.value;
+        if (r.builtYear?.value)         props.year_built    = r.builtYear.value.substring(0, 4);
+        if (r.vesselTypeLabel?.value)   props.vessel_type   = r.vesselTypeLabel.value;
         nodes.push({ id: rootId, label: id, type: 'vessel', properties: props });
         vesselPropsSet = true;
       }
@@ -447,6 +490,49 @@ async function resolveVessel(id) {
     }
   } catch (e) { console.warn('[INTEL] Wikidata vessel error:', e.message); }
 
+  // OpenSanctions entity API — richer structured data (flag, aliases, owner notes, designation date)
+  // Search by IMO if Wikidata gave us one; otherwise search by name.
+  try {
+    const osEntity = resolvedImo
+      ? await opensanctionsByProp('Vessel', 'imoNumber', resolvedImo)
+      : await opensanctionsSearch(id, 'Vessel');
+    if (osEntity) {
+      const props = osEntity.properties || {};
+      const flag = props.flag?.[0];
+      const owner = props.owner?.[0];
+      const operator = props.operator?.[0];
+      const mmsi = props.mmsi?.[0];
+      const imo = props.imoNumber?.[0];
+      const notes = props.notes?.[0];
+      if (flag) {
+        const cid = `country:${flag}`;
+        nodes.push({ id: cid, label: flag, type: 'country', properties: { source: 'OpenSanctions' } });
+        links.push({ source: rootId, target: cid, label: 'FLAG STATE' });
+      }
+      if (owner) {
+        const oid = `company:${owner}`;
+        nodes.push({ id: oid, label: owner, type: 'company', properties: { source: 'OpenSanctions' } });
+        links.push({ source: rootId, target: oid, label: 'OWNED BY' });
+      }
+      if (operator) {
+        const oid = `company:${operator}`;
+        nodes.push({ id: oid, label: operator, type: 'company', properties: { source: 'OpenSanctions' } });
+        links.push({ source: rootId, target: oid, label: 'OPERATED BY' });
+      }
+      if (mmsi || imo || notes) {
+        nodes.push({
+          id: rootId, label: id, type: 'vessel',
+          properties: {
+            ...(mmsi && { mmsi }),
+            ...(imo && !resolvedImo && { imo }),
+            ...(notes && { notes: notes.slice(0, 200) }),
+            source: 'OpenSanctions',
+          },
+        });
+      }
+    }
+  } catch (e) { console.warn('[INTEL] OpenSanctions vessel error:', e.message); }
+
   addSanctionsToGraph(id, rootId, nodes, links);
   const result = dedup(nodes, links);
   wdCacheSet(`vessel:${id}`, result);
@@ -459,12 +545,15 @@ async function resolveCompany(id) {
   const cached = wdCacheGet(`company:${id}`);
   if (cached) return { ...cached };
 
+  const cSid = sanitizeId(id);
   try {
-    // Use Wikidata search to find the QID first, then resolve by QID
-    const qid = await wdSearch(id);
-    const filter = qid
-      ? `VALUES ?item { wd:${qid} }`
-      : `?item rdfs:label "${id}"@en . { ?item wdt:P31/wdt:P279* wd:Q4830453 . } UNION { ?item wdt:P31/wdt:P279* wd:Q43229 . }`;
+    const qids = await wdSearch(id);
+    // Constrain QID branch to organization types so we don't conflate a company name with a
+    // same-named place or person. Fall back to label search with the same constraint.
+    const qidFilter = qids.length
+      ? `{ VALUES ?item { ${qids.map(q => `wd:${q}`).join(' ')} } . { ?item wdt:P31/wdt:P279* wd:Q4830453 . } UNION { ?item wdt:P31/wdt:P279* wd:Q43229 . } } UNION `
+      : '';
+    const filter = `${qidFilter}{ ?item rdfs:label "${cSid}"@en . { ?item wdt:P31/wdt:P279* wd:Q4830453 . } UNION { ?item wdt:P31/wdt:P279* wd:Q43229 . } }`;
     const results = await sparql(`
       SELECT ?item ?itemLabel ?countryLabel ?parentLabel ?ceoLabel ?industryLabel WHERE {
         ${filter}
@@ -492,6 +581,30 @@ async function resolveCompany(id) {
       }
     }
   } catch (e) { console.warn('[INTEL] Wikidata company error:', e.message); }
+
+  // OpenSanctions entity search — structured data including registration numbers, addresses,
+  // incorporation dates, and sanctions designations not in the simple CSV
+  try {
+    const osEntity = await opensanctionsSearch(id, 'Company');
+    if (osEntity) {
+      const props = osEntity.properties || {};
+      const country = props.country?.[0] || props.jurisdiction?.[0];
+      const regNum = props.registrationNumber?.[0];
+      const addr = props.address?.[0];
+      if (country || regNum || addr) {
+        nodes.push({ id: rootId, label: id, type: 'company', properties: {
+          ...(country && { os_country: country }),
+          ...(regNum  && { registration_number: regNum }),
+          ...(addr    && { registered_address: addr.slice(0, 150) }),
+          source: 'OpenSanctions',
+        }});
+      }
+      for (const name of (osEntity.properties?.name || []).slice(1, 4)) {
+        nodes.push({ id: `company:${name}`, label: name, type: 'company', properties: { source: 'OpenSanctions' } });
+        links.push({ source: rootId, target: `company:${name}`, label: 'AKA' });
+      }
+    }
+  } catch (e) { console.warn('[INTEL] OpenSanctions company error:', e.message); }
 
   // OpenCorporates — 500 req/day free tier, no key needed
   try {
@@ -537,17 +650,21 @@ async function resolvePerson(id) {
   const cached = wdCacheGet(`person:${id}`);
   if (cached) return { ...cached };
 
+  const pSid = sanitizeId(id);
   try {
-    const qid = await wdSearch(id);
-    const filter = qid
-      ? `VALUES ?item { wd:${qid} }`
-      : `?item rdfs:label "${id}"@en . ?item wdt:P31 wd:Q5 .`;
+    const qids = await wdSearch(id);
+    // Constrain QID branch to Q5 (human) — rejects same-named places, ships, companies
+    const qidFilter = qids.length
+      ? `{ VALUES ?item { ${qids.map(q => `wd:${q}`).join(' ')} } . ?item wdt:P31 wd:Q5 . } UNION `
+      : '';
+    const filter = `${qidFilter}{ ?item rdfs:label "${pSid}"@en . ?item wdt:P31 wd:Q5 . }`;
     const results = await sparql(`
-      SELECT ?item ?itemLabel ?nationalityLabel ?employerLabel ?positionLabel WHERE {
+      SELECT ?item ?itemLabel ?nationalityLabel ?employerLabel ?positionLabel ?birthLabel WHERE {
         ${filter}
         OPTIONAL { ?item wdt:P27 ?nationality . }
         OPTIONAL { ?item wdt:P108 ?employer . }
         OPTIONAL { ?item wdt:P39 ?position . }
+        OPTIONAL { ?item wdt:P569 ?birth . }
         SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
       } LIMIT 10`);
     for (const r of results) {
@@ -566,8 +683,34 @@ async function resolvePerson(id) {
         nodes.push({ id: pid, label: r.positionLabel.value, type: 'event', properties: { source: 'Wikidata' } });
         links.push({ source: rootId, target: pid, label: 'POSITION HELD' });
       }
+      if (r.birthLabel?.value) {
+        nodes.push({ id: rootId, label: id, type: 'person', properties: { birth_date: r.birthLabel.value.substring(0, 10), source: 'Wikidata' } });
+      }
     }
   } catch (e) { console.warn('[INTEL] Wikidata person error:', e.message); }
+
+  // OpenSanctions entity search — birth date, nationality, aliases, designation date
+  try {
+    const osEntity = await opensanctionsSearch(id, 'Person');
+    if (osEntity) {
+      const props = osEntity.properties || {};
+      const birthDate = props.birthDate?.[0];
+      const nationality = props.nationality?.[0] || props.country?.[0];
+      const passportNum = props.passportNumber?.[0];
+      if (birthDate || nationality || passportNum) {
+        nodes.push({ id: rootId, label: id, type: 'person', properties: {
+          ...(birthDate    && { birth_date: birthDate }),
+          ...(nationality  && { os_nationality: nationality }),
+          ...(passportNum  && { passport_number: passportNum }),
+          source: 'OpenSanctions',
+        }});
+      }
+      for (const alias of (props.alias || []).slice(0, 4)) {
+        nodes.push({ id: `person:${alias}`, label: alias, type: 'person', properties: { source: 'OpenSanctions' } });
+        links.push({ source: rootId, target: `person:${alias}`, label: 'ALIAS' });
+      }
+    }
+  } catch (e) { console.warn('[INTEL] OpenSanctions person error:', e.message); }
 
   addSanctionsToGraph(id, rootId, nodes, links);
   const result = dedup(nodes, links);
@@ -772,10 +915,12 @@ async function resolveCountry(id) {
   if (cached) return { ...cached };
 
   try {
-    const qid = await wdSearch(id);
-    const filter = qid
-      ? `VALUES ?item { wd:${qid} }`
-      : `?item rdfs:label "${id}"@en . ?item wdt:P31 wd:Q6256 .`;
+    const qids = await wdSearch(id);
+    // Constrain QID branch to sovereign state / country types to avoid same-named entities
+    const ctQidFilter = qids.length
+      ? `{ VALUES ?item { ${qids.map(q => `wd:${q}`).join(' ')} } . { ?item wdt:P31/wdt:P279* wd:Q6256 . } UNION { ?item wdt:P31/wdt:P279* wd:Q3624078 . } } UNION `
+      : '';
+    const filter = `${ctQidFilter}{ ?item rdfs:label "${sanitizeId(id)}"@en . { ?item wdt:P31/wdt:P279* wd:Q6256 . } UNION { ?item wdt:P31/wdt:P279* wd:Q3624078 . } }`;
     const results = await sparql(`
       SELECT ?item ?itemLabel ?headLabel ?capitalLabel ?population ?gdp
              ?tld ?callingCode ?memberOfLabel ?neighborLabel WHERE {
