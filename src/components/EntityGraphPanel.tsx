@@ -148,13 +148,12 @@ function EntityGraphPanel({ entity, onClose }: Props) {
     setLoading(true); setError(null);
     try {
       const params = new URLSearchParams({ type, id });
-      // Forward extra properties for aircraft/vessel resolution
-      if (properties?.registration) params.set('registration', properties.registration);
-      if (properties?.model) params.set('model', properties.model);
-      if (properties?.icao24) params.set('icao24', properties.icao24);
-      if (properties?.imo) params.set('imo', properties.imo);
-      if (properties?.mmsi) params.set('mmsi', properties.mmsi);
-      if (properties?.vesselName) params.set('vesselName', properties.vesselName);
+      // Forward all available entity properties to the intel layer
+      const FORWARDED = ['registration','model','icao24','imo','mmsi','vesselName','flag','ship_type','destination','call_sign','threat_type','status'];
+      for (const key of FORWARDED) {
+        const val = properties?.[key];
+        if (val != null && val !== '') params.set(key, String(val));
+      }
       const res = await fetch(`/api/entity/expand?${params}`, { cache: 'no-store' });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || `HTTP ${res.status}`); }
       const data = await res.json();

@@ -429,6 +429,8 @@ function wdCacheGet(key) {
 }
 
 function wdCacheSet(key, data) {
+  // Never cache empty results — a transient failure shouldn't poison the cache
+  if (!data || (Array.isArray(data.nodes) && data.nodes.length === 0)) return;
   if (wdCache.size >= WIKIDATA_CACHE_MAX) {
     const oldest = wdCache.keys().next().value;
     wdCache.delete(oldest);
@@ -805,7 +807,7 @@ async function resolveVessel(id, props = {}) {
   // and prefer the human-readable name from props.vesselName for text searches.
   const isNumeric = /^\d+$/.test(id);
   const hintImo  = props.imo  || (isNumeric && id.length <= 7 ? id : null);
-  const hintMmsi = props.mmsi || (isNumeric && id.length === 9 ? id : null);
+  let   hintMmsi = props.mmsi || (isNumeric && id.length === 9 ? id : null);
   const searchName = props.vesselName || (isNumeric ? null : id);
 
   // Use name as display/cache key when available so the graph labels correctly
@@ -817,6 +819,23 @@ async function resolveVessel(id, props = {}) {
 
   const sid = sanitizeId(displayId);
   let resolvedImo = hintImo || null;
+
+  // Seed with AIS-layer data the map already carries — flag, ship type, destination.
+  // These arrive instantly (no API call) and ensure every vessel shows at least its
+  // known flag country even when all external lookups fail or return nothing.
+  if (props.flag) {
+    const flagLabel = CC[props.flag.toLowerCase()] || props.flag;
+    const cid = `country:${flagLabel}`;
+    nodes.push({ id: cid, label: flagLabel, type: 'country', properties: { source: 'AIS' } });
+    links.push({ source: rootId, target: cid, label: 'FLAG STATE' });
+  }
+  const aisProps = {};
+  if (props.ship_type)   aisProps.vessel_type  = props.ship_type;
+  if (props.destination) aisProps.destination  = props.destination;
+  if (props.call_sign)   aisProps.call_sign    = props.call_sign;
+  if (Object.keys(aisProps).length > 0) {
+    nodes.push({ id: rootId, label: displayId, type: 'vessel', properties: { ...aisProps, source: 'AIS' } });
+  }
 
   try {
     // wdSearch returns up to 3 QIDs. Build a VALUES clause with all of them, but constrain to
@@ -832,16 +851,19 @@ async function resolveVessel(id, props = {}) {
 
     const results = await sparql(`
       SELECT ?item ?itemLabel ?ownerLabel ?countryLabel ?operatorLabel ?flagLabel
-             ?imoNumber ?grossTonnage ?builtYear ?vesselTypeLabel WHERE {
+             ?imoNumber ?mmsi ?grossTonnage ?builtYear ?vesselTypeLabel ?length ?beam WHERE {
         ${filter}
         OPTIONAL { ?item wdt:P127 ?owner . }
         OPTIONAL { ?item wdt:P17 ?country . }
         OPTIONAL { ?item wdt:P137 ?operator . }
         OPTIONAL { ?item wdt:P8047 ?flag . }
         OPTIONAL { ?item wdt:P458 ?imoNumber . }
+        OPTIONAL { ?item wdt:P587 ?mmsi . }
         OPTIONAL { ?item wdt:P1093 ?grossTonnage . }
         OPTIONAL { ?item wdt:P571 ?builtYear . }
         OPTIONAL { ?item wdt:P31 ?vesselType . }
+        OPTIONAL { ?item wdt:P2043 ?length . }
+        OPTIONAL { ?item wdt:P2049 ?beam . }
         SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
       } LIMIT 10`);
 
@@ -850,9 +872,12 @@ async function resolveVessel(id, props = {}) {
       if (!vesselPropsSet) {
         const props = { source: 'Wikidata' };
         if (r.imoNumber?.value)       { props.imo           = r.imoNumber.value; resolvedImo = r.imoNumber.value; }
+        if (r.mmsi?.value)            { props.mmsi          = r.mmsi.value; if (!hintMmsi) hintMmsi = r.mmsi.value; }
         if (r.grossTonnage?.value)      props.gross_tonnage = r.grossTonnage.value;
         if (r.builtYear?.value)         props.year_built    = r.builtYear.value.substring(0, 4);
         if (r.vesselTypeLabel?.value)   props.vessel_type   = r.vesselTypeLabel.value;
+        if (r.length?.value)            props.length_m      = r.length.value;
+        if (r.beam?.value)              props.beam_m        = r.beam.value;
         nodes.push({ id: rootId, label: id, type: 'vessel', properties: props });
         vesselPropsSet = true;
       }
@@ -1051,15 +1076,18 @@ async function resolveVessel(id, props = {}) {
     }
   }
 
-  // Wikipedia — notable ships (naval vessels, cruise ships, famous commercial ships)
-  // Only attach if the article title reasonably matches the vessel name
+  // Wikipedia — notable ships (naval vessels, cruise ships, famous commercial ships).
+  // Strict title check: the returned article title must contain at least the first word
+  // of the vessel name (≥4 chars) to avoid false positives like "Chinese treasure ship"
+  // appearing for a search of "XIN XIA MEN ship".
   if (searchName) {
     try {
       const wiki = await fetchWikipedia(`${searchName} ship`);
       if (wiki?.extract) {
-        const titleMatch = wiki.title.toLowerCase().includes(searchName.toLowerCase().slice(0, 4));
-        const descMatch  = (wiki.description || '').toLowerCase().match(/ship|vessel|tanker|cruiser|destroyer|frigate|carrier|submarine|ferry/);
-        if (titleMatch || descMatch) {
+        const firstWord = searchName.toLowerCase().split(/\s+/)[0];
+        const titleLower = wiki.title.toLowerCase();
+        const titleMatch = firstWord.length >= 4 && titleLower.includes(firstWord);
+        if (titleMatch) {
           nodes.push({ id: rootId, label: displayId, type: 'vessel', properties: { intel_brief: wiki.extract, source: 'Wikipedia' } });
         }
       }
