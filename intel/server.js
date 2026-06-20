@@ -397,11 +397,10 @@ async function resolveVessel(id) {
   if (cached) return { ...cached };
 
   try {
-    // Name-based QID lookup first so vessels not indexed by IMO number are found
-    const qid = await wdSearch(id);
-    const filter = qid
-      ? `VALUES ?item { wd:${qid} }`
-      : `{ ?item wdt:P458 "${sanitizeId(id)}" . } UNION { ?item rdfs:label "${sanitizeId(id)}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . }`;
+    // wdSearch() is unconstrained and conflates vessel names with same-named cities/places.
+    // Use ship-typed SPARQL directly: IMO number (P458) or label constrained to ship class (Q11446).
+    const sid = sanitizeId(id);
+    const filter = `{ ?item wdt:P458 "${sid}" . } UNION { ?item rdfs:label "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . } UNION { ?item skos:altLabel "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . }`;
 
     const results = await sparql(`
       SELECT ?item ?itemLabel ?ownerLabel ?countryLabel ?operatorLabel ?flagLabel
