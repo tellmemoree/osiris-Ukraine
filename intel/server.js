@@ -841,13 +841,13 @@ async function resolveVessel(id, props = {}) {
     nodes.push({ id: cid, label: flagLabel, type: 'country', properties: { source: 'AIS' } });
     links.push({ source: rootId, target: cid, label: 'FLAG STATE' });
   }
-  const aisProps = {};
+  // Always seed the root vessel node — later blocks may overwrite with richer data
+  // but this ensures the vessel appears even when every API call fails.
+  const aisProps = { source: 'AIS' };
   if (props.ship_type)   aisProps.vessel_type  = props.ship_type;
   if (props.destination) aisProps.destination  = props.destination;
   if (props.call_sign)   aisProps.call_sign    = props.call_sign;
-  if (Object.keys(aisProps).length > 0) {
-    nodes.push({ id: rootId, label: displayId, type: 'vessel', properties: { ...aisProps, source: 'AIS' } });
-  }
+  nodes.push({ id: rootId, label: displayId, type: 'vessel', properties: aisProps });
 
   try {
     // wdSearch returns up to 3 QIDs. Build a VALUES clause with all of them, but constrain to
