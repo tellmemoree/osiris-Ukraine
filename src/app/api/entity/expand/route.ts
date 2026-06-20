@@ -43,8 +43,8 @@ export async function GET(req: Request) {
 
   try {
     const params = new URLSearchParams({ type, id });
-    // Forward extra aircraft properties to the intel brain
-    for (const key of ['registration', 'model', 'icao24']) {
+    // Forward extra properties to the intel brain
+    for (const key of ['registration', 'model', 'icao24', 'imo', 'mmsi', 'vesselName']) {
       const val = searchParams.get(key);
       if (val) params.set(key, val);
     }

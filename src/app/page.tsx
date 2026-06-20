@@ -382,7 +382,7 @@ export default function Dashboard() {
         setEntityGraphTarget({ type: 'aircraft', id: entity.callsign?.trim() || entity.icao24, label: entity.callsign?.trim() || entity.icao24, properties: { model: entity.model, registration: entity.registration, icao24: entity.icao24 } });
         setShowEntityGraph(true);
       } else if (entity?.type === 'vessel' || entity?.mmsi || entity?.imo) {
-        setEntityGraphTarget({ type: 'vessel', id: entity.imo || entity.mmsi || entity.name, label: entity.name || entity.imo, properties: { flag: entity.flag, speed: entity.speed, destination: entity.destination } });
+        setEntityGraphTarget({ type: 'vessel', id: entity.name || entity.imo || entity.mmsi, label: entity.name || entity.imo, properties: { flag: entity.flag, speed: entity.speed, destination: entity.destination, imo: entity.imo, mmsi: entity.mmsi, vesselName: entity.name } });
         setShowEntityGraph(true);
       } else if (entity?.type === 'ip' && entity?.ip) {
         setEntityGraphTarget({ type: 'ip', id: entity.ip, label: entity.ip, properties: { threat_type: entity.threat_type, status: entity.status } });

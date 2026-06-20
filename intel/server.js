@@ -528,24 +528,36 @@ async function resolveAircraft(id, properties = {}) {
   return result;
 }
 
-async function resolveVessel(id) {
-  const rootId = `vessel:${id}`;
+async function resolveVessel(id, props = {}) {
+  // When a vessel is clicked from the map, the id may be an IMO or MMSI number.
+  // Normalize: if id is purely numeric, treat it as IMO (7 digits) or MMSI (9 digits)
+  // and prefer the human-readable name from props.vesselName for text searches.
+  const isNumeric = /^\d+$/.test(id);
+  const hintImo  = props.imo  || (isNumeric && id.length <= 7 ? id : null);
+  const hintMmsi = props.mmsi || (isNumeric && id.length === 9 ? id : null);
+  const searchName = props.vesselName || (isNumeric ? null : id);
+
+  // Use name as display/cache key when available so the graph labels correctly
+  const displayId = searchName || id;
+  const rootId = `vessel:${displayId}`;
   const nodes = [], links = [];
-  const cached = wdCacheGet(`vessel:${id}`);
+  const cached = wdCacheGet(`vessel:${displayId}`);
   if (cached) return { ...cached };
 
-  const sid = sanitizeId(id);
-  let resolvedImo = null;
+  const sid = sanitizeId(displayId);
+  let resolvedImo = hintImo || null;
 
   try {
     // wdSearch returns up to 3 QIDs. Build a VALUES clause with all of them, but constrain to
     // ship class (Q11446) in the same SPARQL — if a QID is a city, the join fails and only
     // the label/IMO branches produce results.
-    const qids = await wdSearch(id);
+    const qids = searchName ? await wdSearch(searchName) : [];
     const qidFilter = qids.length
       ? `{ VALUES ?item { ${qids.map(q => `wd:${q}`).join(' ')} } . ?item wdt:P31/wdt:P279* wd:Q11446 . } UNION `
       : '';
-    const filter = `${qidFilter}{ ?item wdt:P458 "${sid}" . } UNION { ?item rdfs:label "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . } UNION { ?item skos:altLabel "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . }`;
+    // Include IMO-number branch when we have a hint so Wikidata can find the vessel by IMO
+    const imoFilter = resolvedImo ? `{ ?item wdt:P458 "${resolvedImo}" . } UNION ` : '';
+    const filter = `${qidFilter}${imoFilter}{ ?item wdt:P458 "${sid}" . } UNION { ?item rdfs:label "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . } UNION { ?item skos:altLabel "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . }`;
 
     const results = await sparql(`
       SELECT ?item ?itemLabel ?ownerLabel ?countryLabel ?operatorLabel ?flagLabel
@@ -597,8 +609,12 @@ async function resolveVessel(id) {
   // (different ship with same name) doesn't silently suppress the sanctioned entity.
   try {
     let osEntity = null;
-    if (resolvedImo) osEntity = await opensanctionsByProp('Vessel', 'imoNumber', resolvedImo);
-    if (!osEntity)   osEntity = await opensanctionsSearch(id, 'Vessel');
+    // OS stores IMO as "IMO9312884" — try prefixed form first, then bare
+    if (resolvedImo) osEntity = await opensanctionsByProp('Vessel', 'imoNumber', `IMO${resolvedImo}`);
+    if (!osEntity && resolvedImo) osEntity = await opensanctionsByProp('Vessel', 'imoNumber', resolvedImo);
+    if (!osEntity && hintMmsi) osEntity = await opensanctionsByProp('Vessel', 'mmsi', hintMmsi);
+    if (!osEntity && searchName) osEntity = await opensanctionsSearch(searchName, 'Vessel');
+    if (!osEntity && !searchName) osEntity = await opensanctionsSearch(id, 'Vessel');
 
     if (osEntity) {
       const p = osEntity.properties || {};
@@ -714,9 +730,10 @@ async function resolveVessel(id) {
     }
   } catch (e) { console.warn('[INTEL] OpenSanctions vessel error:', e.message); }
 
-  addSanctionsToGraph(id, rootId, nodes, links);
+  if (searchName) addSanctionsToGraph(searchName, rootId, nodes, links);
+  addSanctionsToGraph(displayId, rootId, nodes, links);
   const result = dedup(nodes, links);
-  wdCacheSet(`vessel:${id}`, result);
+  wdCacheSet(`vessel:${displayId}`, result);
   return result;
 }
 
@@ -1230,6 +1247,9 @@ app.get('/resolve', async (req, res) => {
     if (req.query.registration) props.registration = sanitizeId(req.query.registration);
     if (req.query.model) props.model = sanitizeId(req.query.model);
     if (req.query.icao24) props.icao24 = sanitizeId(req.query.icao24);
+    if (req.query.imo) props.imo = req.query.imo.replace(/[^0-9]/g, '').slice(0, 10);
+    if (req.query.mmsi) props.mmsi = req.query.mmsi.replace(/[^0-9]/g, '').slice(0, 9);
+    if (req.query.vesselName) props.vesselName = sanitizeId(req.query.vesselName);
     const result = await resolver(id, props);
     res.set('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=7200');
     res.json({

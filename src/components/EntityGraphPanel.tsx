@@ -152,6 +152,9 @@ function EntityGraphPanel({ entity, onClose }: Props) {
       if (properties?.registration) params.set('registration', properties.registration);
       if (properties?.model) params.set('model', properties.model);
       if (properties?.icao24) params.set('icao24', properties.icao24);
+      if (properties?.imo) params.set('imo', properties.imo);
+      if (properties?.mmsi) params.set('mmsi', properties.mmsi);
+      if (properties?.vesselName) params.set('vesselName', properties.vesselName);
       const res = await fetch(`/api/entity/expand?${params}`, { cache: 'no-store' });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || `HTTP ${res.status}`); }
       const data = await res.json();
