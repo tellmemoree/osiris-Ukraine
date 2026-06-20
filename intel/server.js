@@ -39,6 +39,52 @@ const SHODAN_API_KEY         = process.env.SHODAN_API_KEY         || '';
 const ABUSEIPDB_KEY          = process.env.ABUSEIPDB_KEY          || '';
 const OPENSANCTIONS_API_KEY  = process.env.OPENSANCTIONS_API_KEY  || '';
 
+// ISO 3166-1 alpha-2 → full country name (covers all codes seen in sanctions/AIS/OSINT data)
+const CC = {
+  af:'Afghanistan',al:'Albania',dz:'Algeria',ao:'Angola',ag:'Antigua and Barbuda',
+  ar:'Argentina',am:'Armenia',au:'Australia',at:'Austria',az:'Azerbaijan',
+  bs:'Bahamas',bh:'Bahrain',bd:'Bangladesh',bb:'Barbados',by:'Belarus',
+  be:'Belgium',bz:'Belize',bj:'Benin',bo:'Bolivia',ba:'Bosnia and Herzegovina',
+  bw:'Botswana',br:'Brazil',bn:'Brunei',bg:'Bulgaria',bf:'Burkina Faso',
+  bi:'Burundi',cv:'Cape Verde',kh:'Cambodia',cm:'Cameroon',ca:'Canada',
+  cf:'Central African Republic',td:'Chad',cl:'Chile',cn:'China',co:'Colombia',
+  cd:'DR Congo',cg:'Congo',cr:'Costa Rica',hr:'Croatia',cu:'Cuba',cw:'Curaçao',
+  cy:'Cyprus',cz:'Czech Republic',dk:'Denmark',dj:'Djibouti',do:'Dominican Republic',
+  ec:'Ecuador',eg:'Egypt',sv:'El Salvador',gq:'Equatorial Guinea',er:'Eritrea',
+  ee:'Estonia',et:'Ethiopia',fj:'Fiji',fi:'Finland',fr:'France',
+  ga:'Gabon',gm:'Gambia',ge:'Georgia',de:'Germany',gh:'Ghana',
+  gr:'Greece',gt:'Guatemala',gn:'Guinea',gw:'Guinea-Bissau',gy:'Guyana',
+  ht:'Haiti',hn:'Honduras',hk:'Hong Kong',hu:'Hungary',
+  is:'Iceland',in:'India',id:'Indonesia',ir:'Iran',iq:'Iraq',
+  ie:'Ireland',il:'Israel',it:'Italy',jm:'Jamaica',jp:'Japan',
+  jo:'Jordan',kz:'Kazakhstan',ke:'Kenya',kp:'North Korea',kr:'South Korea',
+  kw:'Kuwait',kg:'Kyrgyzstan',la:'Laos',lv:'Latvia',lb:'Lebanon',
+  ly:'Libya',lt:'Lithuania',lu:'Luxembourg',mo:'Macau',mg:'Madagascar',
+  mw:'Malawi',my:'Malaysia',mv:'Maldives',ml:'Mali',mt:'Malta',
+  mr:'Mauritania',mu:'Mauritius',mx:'Mexico',md:'Moldova',mn:'Mongolia',
+  me:'Montenegro',ma:'Morocco',mz:'Mozambique',mm:'Myanmar',na:'Namibia',
+  np:'Nepal',nl:'Netherlands',nz:'New Zealand',ni:'Nicaragua',ne:'Niger',
+  ng:'Nigeria',mk:'North Macedonia',no:'Norway',om:'Oman',pk:'Pakistan',
+  pa:'Panama',pg:'Papua New Guinea',py:'Paraguay',pe:'Peru',ph:'Philippines',
+  pl:'Poland',pt:'Portugal',qa:'Qatar',ro:'Romania',ru:'Russia',
+  rw:'Rwanda',sa:'Saudi Arabia',sn:'Senegal',rs:'Serbia',sl:'Sierra Leone',
+  sg:'Singapore',sk:'Slovakia',si:'Slovenia',so:'Somalia',za:'South Africa',
+  ss:'South Sudan',es:'Spain',lk:'Sri Lanka',sd:'Sudan',sr:'Suriname',
+  se:'Sweden',ch:'Switzerland',sy:'Syria',tw:'Taiwan',tj:'Tajikistan',
+  tz:'Tanzania',th:'Thailand',tl:'Timor-Leste',tg:'Togo',tt:'Trinidad and Tobago',
+  tn:'Tunisia',tr:'Turkey',tm:'Turkmenistan',tc:'Turks and Caicos',
+  ug:'Uganda',ua:'Ukraine',ae:'UAE',gb:'United Kingdom',us:'United States',
+  uy:'Uruguay',uz:'Uzbekistan',ve:'Venezuela',vn:'Vietnam',
+  eh:'Western Sahara',ye:'Yemen',zm:'Zambia',zw:'Zimbabwe',
+  lr:'Liberia',mh:'Marshall Islands',sc:'Seychelles',vc:'Saint Vincent',
+  kn:'Saint Kitts and Nevis',vg:'British Virgin Islands',ky:'Cayman Islands',
+  gi:'Gibraltar',im:'Isle of Man',je:'Jersey',gg:'Guernsey',
+  bm:'Bermuda',ai:'Anguilla',ms:'Montserrat',tc2:'Turks and Caicos',
+  ax:'Åland Islands',fo:'Faroe Islands',gl:'Greenland',nc:'New Caledonia',
+  pf:'French Polynesia',ws:'Samoa',to:'Tonga',vu:'Vanuatu',sb:'Solomon Islands',
+  ki:'Kiribati',fm:'Micronesia',pw:'Palau',nr:'Nauru',tv:'Tuvalu',
+};
+
 const ALLOWED_DOMAINS = new Set([
   'query.wikidata.org', 'data.opensanctions.org', 'www.wikidata.org',
   'ip-api.com', 'stat.ripe.net', 'api.opencorporates.com',
@@ -546,19 +592,15 @@ async function resolveVessel(id) {
         },
       });
 
-      // Flag states (current + past)
-      const countryCodeMap = { ru:'Russia', ua:'Ukraine', lr:'Liberia', ga:'Gabon', pa:'Panama',
-        bs:'Bahamas', mh:'Marshall Islands', kn:'Saint Kitts and Nevis', sc:'Seychelles',
-        tc:'Turks and Caicos', vg:'British Virgin Islands', cy:'Cyprus', mt:'Malta',
-        bz:'Belize', kh:'Cambodia', mn:'Mongolia', cw:'Curaçao', tg:'Togo', cm:'Cameroon' };
+      // Flag states (current + past) — resolve ISO code to full name via module-level CC map
       for (const code of [...new Set(p.flag || [])]) {
-        const label = countryCodeMap[code] || code.toUpperCase();
+        const label = CC[code] || code.toUpperCase();
         const cid = `country:${label}`;
         nodes.push({ id: cid, label, type: 'country', properties: { code, source: 'OpenSanctions' } });
         links.push({ source: rootId, target: cid, label: 'FLAG STATE' });
       }
       for (const code of [...new Set(p.pastFlags || [])]) {
-        const label = countryCodeMap[code] || code.toUpperCase();
+        const label = CC[code] || code.toUpperCase();
         const cid = `country:${label}`;
         nodes.push({ id: cid, label, type: 'country', properties: { code, source: 'OpenSanctions' } });
         links.push({ source: rootId, target: cid, label: 'PAST FLAG' });
