@@ -323,6 +323,39 @@ function linkCountry(countryCode, sourceId, nodes, links, label = 'BASED IN') {
   links.push({ source: sourceId, target: cid, label });
 }
 
+// Fetch directors/officers for a company entity from the OpenSanctions adjacent API.
+// directorshipOrganization results contain inline Person objects with caption + topics + country.
+async function fetchOsDirectors(entityId, companyNodeId, nodes, links) {
+  if (!OPENSANCTIONS_API_KEY || !entityId) return;
+  const url = `https://api.opensanctions.org/entities/${entityId}/adjacent`;
+  if (!ALLOWED_DOMAINS.has(new URL(url).hostname)) return;
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: { Authorization: `ApiKey ${OPENSANCTIONS_API_KEY}`, Accept: 'application/json', 'User-Agent': WIKIDATA_UA },
+    });
+    if (!res.ok) return;
+    const adj = (await res.json()).adjacent || {};
+    for (const rel of (adj.directorshipOrganization?.results || [])) {
+      for (const personObj of [rel.properties?.director].flat().filter(o => o && typeof o === 'object')) {
+        const name = personObj.caption || personObj.properties?.name?.[0];
+        if (!name) continue;
+        const pid = `person:${name}`;
+        const role = rel.properties?.role?.[0] || 'Director';
+        nodes.push({ id: pid, label: name, type: 'person', properties: {
+          role, source: 'OpenSanctions',
+          topics: (personObj.properties?.topics || []).join(', ') || undefined,
+        }});
+        links.push({ source: companyNodeId, target: pid, label: role.toUpperCase() });
+        for (const cc of (personObj.properties?.nationality || personObj.properties?.country || [])) {
+          linkCountry(cc, pid, nodes, links, 'NATIONALITY');
+        }
+        addSanctionsToGraph(name, companyNodeId, nodes, links);
+      }
+    }
+  } catch (e) { console.warn('[INTEL] OS directors fetch error:', e.message); }
+}
+
 function addSanctionsToGraph(query, rootId, nodes, links) {
   const matches = sanctionsSearch(query);
   for (const m of matches) {
@@ -659,6 +692,7 @@ async function resolveVessel(id) {
                   links.push({ source: rootId, target: eid, label: role === 'owner' ? 'OWNED BY' : role.toUpperCase() });
                   for (const cc of (ownerObj.properties?.country || [])) linkCountry(cc, eid, nodes, links);
                   addSanctionsToGraph(name, rootId, nodes, links);
+                  if (type === 'company') await fetchOsDirectors(ownerObj.id, eid, nodes, links);
                 }
               }
               for (const rel of (adjacent.operationalRelationshipAsset?.results || [])) {
@@ -750,6 +784,7 @@ async function resolveCompany(id) {
         nodes.push({ id: `company:${name}`, label: name, type: 'company', properties: { source: 'OpenSanctions' } });
         links.push({ source: rootId, target: `company:${name}`, label: 'AKA' });
       }
+      await fetchOsDirectors(osEntity.id, rootId, nodes, links);
     }
   } catch (e) { console.warn('[INTEL] OpenSanctions company error:', e.message); }
 
