@@ -618,10 +618,53 @@ async function resolveVessel(id) {
         links.push({ source: rootId, target: oid, label: 'OPERATED BY' });
       }
 
-      // Datasets the entity appears in — sanity link
+      // Datasets the entity appears in
       const datasetList = (osEntity.datasets || []).join(', ');
       if (datasetList) {
         nodes.push({ id: rootId, label: id, type: 'vessel', properties: { sanctions_datasets: datasetList, source: 'OpenSanctions' } });
+      }
+
+      // Fetch adjacent entities to get structured owner/operator relationships.
+      // The adjacent API expands inline entity objects (owner → Company with caption + topics).
+      if (OPENSANCTIONS_API_KEY && osEntity.id) {
+        try {
+          const adjUrl = `https://api.opensanctions.org/entities/${osEntity.id}/adjacent`;
+          if (ALLOWED_DOMAINS.has(new URL(adjUrl).hostname)) {
+            const adjRes = await fetch(adjUrl, {
+              signal: AbortSignal.timeout(8000),
+              headers: { Authorization: `ApiKey ${OPENSANCTIONS_API_KEY}`, Accept: 'application/json', 'User-Agent': WIKIDATA_UA },
+            });
+            if (adjRes.ok) {
+              const adj = await adjRes.json();
+              const adjacent = adj.adjacent || {};
+              // ownershipAsset: inline 'owner' entity objects
+              for (const rel of (adjacent.ownershipAsset?.results || [])) {
+                for (const ownerObj of [rel.properties?.owner].flat().filter(o => o && typeof o === 'object')) {
+                  const name = ownerObj.caption || ownerObj.properties?.name?.[0];
+                  if (!name) continue;
+                  const type = ownerObj.schema === 'Person' ? 'person' : 'company';
+                  const eid = `${type}:${name}`;
+                  const role = rel.properties?.role?.[0] || 'owner';
+                  nodes.push({ id: eid, label: name, type, properties: { source: 'OpenSanctions', topics: (ownerObj.properties?.topics || []).join(', ') || undefined } });
+                  links.push({ source: rootId, target: eid, label: role === 'owner' ? 'OWNED BY' : role.toUpperCase() });
+                  addSanctionsToGraph(name, rootId, nodes, links);
+                }
+              }
+              // operationalRelationshipAsset: inline 'operator' entity objects
+              for (const rel of (adjacent.operationalRelationshipAsset?.results || [])) {
+                for (const opObj of [rel.properties?.operator].flat().filter(o => o && typeof o === 'object')) {
+                  const name = opObj.caption || opObj.properties?.name?.[0];
+                  if (!name) continue;
+                  const type = opObj.schema === 'Person' ? 'person' : 'company';
+                  const eid = `${type}:${name}`;
+                  nodes.push({ id: eid, label: name, type, properties: { source: 'OpenSanctions', topics: (opObj.properties?.topics || []).join(', ') || undefined } });
+                  links.push({ source: rootId, target: eid, label: 'OPERATED BY' });
+                  addSanctionsToGraph(name, rootId, nodes, links);
+                }
+              }
+            }
+          }
+        } catch (e) { console.warn('[INTEL] OpenSanctions adjacent error:', e.message); }
       }
     }
   } catch (e) { console.warn('[INTEL] OpenSanctions vessel error:', e.message); }
