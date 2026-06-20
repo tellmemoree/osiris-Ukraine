@@ -360,13 +360,25 @@ function sanctionsSearch(query, limit = 5) {
   const exact = sanctionsIndex.byNorm.get(q) || [];
   if (exact.length > 0) return exact.slice(0, limit);
 
+  // Fuzzy: match only at word boundaries so "SAND" doesn't hit "aleksander".
+  // The query must appear at the start of a word (^word or space+word) in the
+  // normalized name. Single-token queries under 5 chars skip fuzzy entirely —
+  // too many false positives on short common words.
+  const qWords = q.split(' ');
+  const isSingleShort = qWords.length === 1 && q.length < 5;
+  if (isSingleShort) return [];
+
+  // Compile once: each query word must appear at start-of-word in the name
+  const wordRegexes = qWords.map(w => new RegExp('(?:^|\\s)' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const matchesFuzzy = (name) => wordRegexes.every(re => re.test(name));
+
   const results = [];
   const seen = new Set();
   for (const entry of sanctionsIndex.entries) {
     if (results.length >= limit) break;
     if (seen.has(entry.id)) continue;
     const n = normName(entry.name);
-    if (n.includes(q) || entry.aliases.some(a => normName(a).includes(q))) {
+    if (matchesFuzzy(n) || entry.aliases.some(a => matchesFuzzy(normName(a)))) {
       seen.add(entry.id);
       results.push(entry);
     }
@@ -1753,11 +1765,15 @@ app.get('/resolve', async (req, res) => {
     // Pass extra properties for aircraft resolution (registration, model, etc.)
     const props = {};
     if (req.query.registration) props.registration = sanitizeId(req.query.registration);
-    if (req.query.model) props.model = sanitizeId(req.query.model);
-    if (req.query.icao24) props.icao24 = sanitizeId(req.query.icao24);
-    if (req.query.imo) props.imo = req.query.imo.replace(/[^0-9]/g, '').slice(0, 10);
-    if (req.query.mmsi) props.mmsi = req.query.mmsi.replace(/[^0-9]/g, '').slice(0, 9);
-    if (req.query.vesselName) props.vesselName = sanitizeId(req.query.vesselName);
+    if (req.query.model)        props.model        = sanitizeId(req.query.model);
+    if (req.query.icao24)       props.icao24       = sanitizeId(req.query.icao24);
+    if (req.query.imo)          props.imo          = req.query.imo.replace(/[^0-9]/g, '').slice(0, 10);
+    if (req.query.mmsi)         props.mmsi         = req.query.mmsi.replace(/[^0-9]/g, '').slice(0, 9);
+    if (req.query.vesselName)   props.vesselName   = sanitizeId(req.query.vesselName);
+    if (req.query.flag)         props.flag         = sanitizeId(req.query.flag);
+    if (req.query.ship_type)    props.ship_type    = sanitizeId(req.query.ship_type);
+    if (req.query.destination)  props.destination  = sanitizeId(req.query.destination);
+    if (req.query.call_sign)    props.call_sign    = sanitizeId(req.query.call_sign);
     const result = await resolver(id, props);
     res.set('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=7200');
     res.json({
