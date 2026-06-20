@@ -264,15 +264,14 @@ function EntityGraphPanel({ entity, onClose }: Props) {
     const { source: s, target: t } = link;
     if (!s.x || !t.x) return;
     ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(t.x, t.y);
-    // Smooth, thin, non-dashed lines
-    ctx.strokeStyle = 'rgba(212,175,55,0.15)'; // faint gold
-    ctx.lineWidth = Math.max(0.5, 1 / globalScale); 
+    ctx.strokeStyle = 'rgba(212,175,55,0.55)';
+    ctx.lineWidth = Math.max(0.8, 1.5 / globalScale);
     ctx.stroke();
-    
+
     const fs = Math.max(8 / globalScale, 2);
     if (fs > 3) {
-      ctx.font = `${fs}px 'JetBrains Mono', monospace`; 
-      ctx.fillStyle = 'rgba(212,175,55,0.4)';
+      ctx.font = `${fs}px 'JetBrains Mono', monospace`;
+      ctx.fillStyle = 'rgba(212,175,55,0.7)';
       ctx.textAlign = 'center'; ctx.fillText(link.label || '', (s.x + t.x) / 2, (s.y + t.y) / 2);
     }
   }, []);
