@@ -129,6 +129,22 @@ page.tsx (useEffect)
   └─ Migrate callers to /api/conflict-events and delete this file
 ```
 
+### Entity Graph (osiris-intel container, port 4000)
+
+```
+/api/entity/expand → proxy → http://osiris-intel:4000/resolve
+  ├─ Aircraft: ICAO airline SPARQL, FAA N-number registry, expanded registration prefix table
+  ├─ Vessel:  Wikidata name search (wdSearch) + IMO/owner/flag/tonnage/year SPARQL
+  ├─ Company: Wikidata (wdSearch) + OpenCorporates officers/jurisdiction (500 req/day free)
+  ├─ Person:  Wikidata SPARQL (birth date, nationality, positions)
+  ├─ IP:      ip-api.com + RIPEstat ASN + Shodan ports/CVEs + AbuseIPDB reputation
+  ├─ Country: Wikidata SPARQL (capital, leader, neighbors)
+  └─ Sanctions: OFAC SDN + EU FSF + UN SC + UK HMT (OpenSanctions CSV, 24h refresh, tagged per list)
+
+Rebuild: docker compose build osiris-intel && docker compose up -d osiris-intel
+Env vars required for full enrichment: SHODAN_API_KEY (in osiris container .env), ABUSEIPDB_KEY
+```
+
 ### Intelligence Feed Flow
 
 ```
@@ -257,7 +273,8 @@ export async function GET() {
 AIS_API_KEY                    # aisstream.io — live vessel positions (aisstream API key)
 
 # OSINT enrichment
-SHODAN_API_KEY                 # Free tier works for lookups; paid (~$49) for discovery
+SHODAN_API_KEY                 # IP intel: open ports, CVEs, tags — free tier works; read by osiris-intel container
+ABUSEIPDB_KEY                  # IP abuse reputation (api.abuseipdb.com) — get free key at abuseipdb.com
 CENSYS_API_ID                  # Censys API ID (PAT or legacy key)
 CENSYS_API_SECRET              # Optional; only for legacy key+secret auth
 
