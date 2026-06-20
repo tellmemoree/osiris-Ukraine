@@ -206,6 +206,63 @@ async function loadSanctions() {
   console.log(`[INTEL] Sanctions index: ${allEntries.length} entities across ${SANCTIONS_SOURCES.length} lists, ${byNorm.size} name keys`);
 }
 
+// ════════════════════════════════════════════════════
+// §2b — OpenSanctions FtM relationship index
+//
+// Streams entities.ftm.json (NDJSON, no API key, no rate limit).
+// Provides structured ownership/directorship chains for vessels
+// in the ua_war_sanctions dataset — fully offline once loaded.
+// ════════════════════════════════════════════════════
+
+const ftmById             = new Map(); // entity id → entity
+const ftmVesselByImo      = new Map(); // "IMO1234567" → entity
+const ftmVesselByMmsi     = new Map(); // "338123456" → entity
+const ftmVesselByName     = new Map(); // UPPER name → entity
+const ftmOwnershipByAsset = new Map(); // asset entity id → Ownership[]
+
+async function loadFtmRelationships(datasetName) {
+  const url = `https://data.opensanctions.org/datasets/latest/${datasetName}/entities.ftm.json`;
+  if (!ALLOWED_DOMAINS.has(new URL(url).hostname)) return;
+  const { createInterface } = require('readline');
+  let vesselCount = 0, ownershipCount = 0;
+  return new Promise((resolve) => {
+    const https = require('https');
+    const req = https.get(url, { headers: { 'User-Agent': WIKIDATA_UA, 'Accept-Encoding': 'identity' } }, (res) => {
+      if (res.statusCode !== 200) {
+        console.warn(`[INTEL] FtM ${datasetName}: HTTP ${res.statusCode}`);
+        res.resume(); return resolve();
+      }
+      const rl = createInterface({ input: res, crlfDelay: Infinity });
+      rl.on('line', (line) => {
+        if (!line.trim()) return;
+        try {
+          const e = JSON.parse(line);
+          const { id, schema, properties: p = {} } = e;
+          ftmById.set(id, e);
+          if (schema === 'Vessel') {
+            for (const imo  of (p.imoNumber  || [])) ftmVesselByImo.set(imo.toUpperCase(), e);
+            for (const mmsi of (p.mmsi       || [])) ftmVesselByMmsi.set(mmsi, e);
+            for (const name of (p.name       || [])) ftmVesselByName.set(name.toUpperCase(), e);
+            vesselCount++;
+          } else if (schema === 'Ownership') {
+            for (const assetId of (p.asset || [])) {
+              if (!ftmOwnershipByAsset.has(assetId)) ftmOwnershipByAsset.set(assetId, []);
+              ftmOwnershipByAsset.get(assetId).push(e);
+            }
+            ownershipCount++;
+          }
+        } catch { /* skip malformed lines */ }
+      });
+      rl.on('close', () => {
+        console.log(`[INTEL] FtM ${datasetName}: ${vesselCount} vessels, ${ownershipCount} ownership edges`);
+        resolve();
+      });
+    });
+    req.on('error', (e) => { console.warn('[INTEL] FtM load error:', e.message); resolve(); });
+    req.setTimeout(90_000, () => { req.destroy(); console.warn('[INTEL] FtM load timeout'); resolve(); });
+  });
+}
+
 function sanctionsSearch(query, limit = 5) {
   if (!query || query.length < 3) return [];
   const q = normName(query);
@@ -783,6 +840,46 @@ async function resolveVessel(id, props = {}) {
     }
   } catch (e) { console.warn('[INTEL] OpenSanctions vessel error:', e.message); }
 
+  // FtM offline graph — structured ownership chains from ua_war_sanctions
+  // (works without API key, no rate limit, runs in background at startup)
+  const ftmKey = resolvedImo ? `IMO${resolvedImo}` : null;
+  const ftmVessel = (ftmKey && ftmVesselByImo.get(ftmKey))
+    || (hintMmsi && ftmVesselByMmsi.get(hintMmsi))
+    || (searchName && ftmVesselByName.get(searchName.toUpperCase()));
+  if (ftmVessel) {
+    const fp = ftmVessel.properties || {};
+    // Include first 2 sentences of the UA-WAR intelligence brief as a node property
+    const desc = (fp.description || [])[0] || '';
+    const brief = desc.replace(/\s+/g, ' ').split(/(?<=\.)\s+/).slice(0, 2).join(' ');
+    if (brief) nodes.push({ id: rootId, label: displayId, type: 'vessel', properties: { intel_brief: brief.slice(0, 400), source: 'UA-WAR-SANCTIONS' } });
+    // Flag states from FtM
+    for (const code of [...new Set([...(fp.flag || []), ...(fp.pastFlags || [])])]) {
+      const label = CC[code.toLowerCase()] || code.toUpperCase();
+      const cid = `country:${label}`;
+      nodes.push({ id: cid, label, type: 'country', properties: { code, source: 'UA-WAR-SANCTIONS' } });
+      links.push({ source: rootId, target: cid, label: (fp.flag || []).includes(code) ? 'FLAG STATE' : 'PAST FLAG' });
+    }
+    // Structured Ownership edges
+    const ownerships = ftmOwnershipByAsset.get(ftmVessel.id) || [];
+    for (const own of ownerships) {
+      const op = own.properties || {};
+      for (const ownerId of (op.owner || [])) {
+        const ownerEnt = ftmById.get(ownerId);
+        if (!ownerEnt) continue;
+        const oName = (ownerEnt.properties?.name || [])[0];
+        if (!oName) continue;
+        const isOrg = ownerEnt.schema !== 'Person';
+        const eid  = isOrg ? `company:${oName}` : `person:${oName}`;
+        const etype = isOrg ? 'company' : 'person';
+        const country = (ownerEnt.properties?.country || [])[0];
+        nodes.push({ id: eid, label: oName, type: etype, properties: { source: 'UA-WAR-SANCTIONS', ...(country && { country }) } });
+        links.push({ source: rootId, target: eid, label: (op.role || [])[0]?.toUpperCase() || 'OWNED BY' });
+        if (country) linkCountry(country, eid, nodes, links, isOrg ? 'BASED IN' : 'NATIONALITY');
+        addSanctionsToGraph(oName, eid, nodes, links);
+      }
+    }
+  }
+
   if (searchName) addSanctionsToGraph(searchName, rootId, nodes, links);
   addSanctionsToGraph(displayId, rootId, nodes, links);
   const result = dedup(nodes, links);
@@ -1326,14 +1423,19 @@ app.get('/resolve', async (req, res) => {
 
 async function boot() {
   console.log('[INTEL] OSIRIS Intelligence Layer starting...');
+  // Load sanctions CSVs and FtM relationship graph in parallel — FtM is large (36MB)
+  // so run it concurrently with sanctions; server becomes available before FtM finishes.
+  const ftmPromise = loadFtmRelationships('ua_war_sanctions');
   await loadSanctions();
-  // Refresh sanctions every 24h
   setInterval(() => loadSanctions(), SDN_REFRESH_MS);
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[INTEL] Intelligence Layer ready on port ${PORT}`);
     console.log(`[INTEL] Sanctions: ${sanctionsIndex.entries.length} entities indexed`);
     console.log(`[INTEL] Resolve endpoint: GET /resolve?type=<type>&id=<id>`);
+    // FtM continues loading in background; vessel resolves that land before it finishes
+    // will still get CSV sanctions data; FtM enrichment kicks in once it completes.
+    ftmPromise.then(() => console.log(`[INTEL] FtM index ready: ${ftmVesselByImo.size} vessels indexed`));
   });
 }
 
