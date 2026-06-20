@@ -54,6 +54,9 @@ services:
     container_name: osiris-intel
     ports:
       - "4000:4000"
+    env_file:
+      - path: .env
+        required: false
     restart: unless-stopped
     networks:
       - default

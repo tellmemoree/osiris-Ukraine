@@ -286,16 +286,29 @@ function addSanctionsToGraph(query, rootId, nodes, links) {
 }
 
 function dedup(nodes, links) {
-  const seen = new Set();
-  const uNodes = [];
-  for (const n of nodes) { if (!seen.has(n.id)) { seen.add(n.id); uNodes.push(n); } }
+  // Merge properties from duplicate nodes rather than discarding later entries.
+  // Earlier sources (Wikidata) populate the base; later sources (OpenSanctions) fill gaps.
+  const byId = new Map();
+  for (const n of nodes) {
+    if (!byId.has(n.id)) {
+      byId.set(n.id, { ...n, properties: { ...n.properties } });
+    } else {
+      const existing = byId.get(n.id);
+      // Fill in missing properties; never overwrite an already-set value
+      for (const [k, v] of Object.entries(n.properties || {})) {
+        if (v !== undefined && v !== null && v !== '' && !existing.properties[k]) {
+          existing.properties[k] = v;
+        }
+      }
+    }
+  }
   const lSeen = new Set();
   const uLinks = [];
   for (const l of links) {
     const k = `${l.source}→${l.target}→${l.label}`;
     if (!lSeen.has(k)) { lSeen.add(k); uLinks.push(l); }
   }
-  return { nodes: uNodes, links: uLinks };
+  return { nodes: [...byId.values()], links: uLinks };
 }
 
 async function resolveAircraft(id, properties = {}) {
@@ -490,45 +503,83 @@ async function resolveVessel(id) {
     }
   } catch (e) { console.warn('[INTEL] Wikidata vessel error:', e.message); }
 
-  // OpenSanctions entity API — richer structured data (flag, aliases, owner notes, designation date)
-  // Search by IMO if Wikidata gave us one; otherwise search by name.
+  // OpenSanctions entity API — structured data the bulk CSV doesn't carry.
+  // Try by IMO first; always fall through to name search so Wikidata IMO mismatch
+  // (different ship with same name) doesn't silently suppress the sanctioned entity.
   try {
-    const osEntity = resolvedImo
-      ? await opensanctionsByProp('Vessel', 'imoNumber', resolvedImo)
-      : await opensanctionsSearch(id, 'Vessel');
+    let osEntity = null;
+    if (resolvedImo) osEntity = await opensanctionsByProp('Vessel', 'imoNumber', resolvedImo);
+    if (!osEntity)   osEntity = await opensanctionsSearch(id, 'Vessel');
+
     if (osEntity) {
-      const props = osEntity.properties || {};
-      const flag = props.flag?.[0];
-      const owner = props.owner?.[0];
-      const operator = props.operator?.[0];
-      const mmsi = props.mmsi?.[0];
-      const imo = props.imoNumber?.[0];
-      const notes = props.notes?.[0];
-      if (flag) {
-        const cid = `country:${flag}`;
-        nodes.push({ id: cid, label: flag, type: 'country', properties: { source: 'OpenSanctions' } });
+      const p = osEntity.properties || {};
+
+      // Normalize IMO: OpenSanctions stores "IMO9312884", strip the prefix
+      const osImo = (p.imoNumber?.[0] || '').replace(/^IMO/i, '');
+      const mmsis = (p.mmsi || []).join(', ');
+      const callSigns = (p.callSign || []).join(', ');
+      const vesselType = (p.type || []).find(t => !t.includes('|')) || p.type?.[0];
+      const builtYear = p.buildDate?.[0];
+      const tonnage = p.tonnage?.[0];
+      const dwt = p.deadweightTonnage?.[0];
+      const prevNames = (p.previousName || []).join('; ');
+      const description = p.description?.[0]?.slice(0, 300);
+      const programs = (p.programId || []).join(', ');
+      const topics = (p.topics || []).join(', ');
+
+      // Enrich root vessel node with OS structured properties
+      nodes.push({
+        id: rootId, label: id, type: 'vessel',
+        properties: {
+          ...(osImo      && { imo: osImo }),
+          ...(mmsis      && { mmsi: mmsis }),
+          ...(callSigns  && { call_sign: callSigns }),
+          ...(vesselType && { vessel_type: vesselType }),
+          ...(builtYear  && { year_built: builtYear }),
+          ...(tonnage    && { gross_tonnage: tonnage }),
+          ...(dwt        && { dwt }),
+          ...(prevNames  && { previous_names: prevNames }),
+          ...(programs   && { sanction_programs: programs }),
+          ...(topics     && { topics }),
+          ...(description && { description }),
+          source: 'OpenSanctions',
+        },
+      });
+
+      // Flag states (current + past)
+      const countryCodeMap = { ru:'Russia', ua:'Ukraine', lr:'Liberia', ga:'Gabon', pa:'Panama',
+        bs:'Bahamas', mh:'Marshall Islands', kn:'Saint Kitts and Nevis', sc:'Seychelles',
+        tc:'Turks and Caicos', vg:'British Virgin Islands', cy:'Cyprus', mt:'Malta',
+        bz:'Belize', kh:'Cambodia', mn:'Mongolia', cw:'Curaçao', tg:'Togo', cm:'Cameroon' };
+      for (const code of [...new Set(p.flag || [])]) {
+        const label = countryCodeMap[code] || code.toUpperCase();
+        const cid = `country:${label}`;
+        nodes.push({ id: cid, label, type: 'country', properties: { code, source: 'OpenSanctions' } });
         links.push({ source: rootId, target: cid, label: 'FLAG STATE' });
       }
-      if (owner) {
+      for (const code of [...new Set(p.pastFlags || [])]) {
+        const label = countryCodeMap[code] || code.toUpperCase();
+        const cid = `country:${label}`;
+        nodes.push({ id: cid, label, type: 'country', properties: { code, source: 'OpenSanctions' } });
+        links.push({ source: rootId, target: cid, label: 'PAST FLAG' });
+      }
+
+      // Owner / operator
+      for (const owner of (p.owner || [])) {
         const oid = `company:${owner}`;
         nodes.push({ id: oid, label: owner, type: 'company', properties: { source: 'OpenSanctions' } });
         links.push({ source: rootId, target: oid, label: 'OWNED BY' });
       }
-      if (operator) {
-        const oid = `company:${operator}`;
-        nodes.push({ id: oid, label: operator, type: 'company', properties: { source: 'OpenSanctions' } });
+      for (const op of (p.operator || [])) {
+        const oid = `company:${op}`;
+        nodes.push({ id: oid, label: op, type: 'company', properties: { source: 'OpenSanctions' } });
         links.push({ source: rootId, target: oid, label: 'OPERATED BY' });
       }
-      if (mmsi || imo || notes) {
-        nodes.push({
-          id: rootId, label: id, type: 'vessel',
-          properties: {
-            ...(mmsi && { mmsi }),
-            ...(imo && !resolvedImo && { imo }),
-            ...(notes && { notes: notes.slice(0, 200) }),
-            source: 'OpenSanctions',
-          },
-        });
+
+      // Datasets the entity appears in — sanity link
+      const datasetList = (osEntity.datasets || []).join(', ');
+      if (datasetList) {
+        nodes.push({ id: rootId, label: id, type: 'vessel', properties: { sanctions_datasets: datasetList, source: 'OpenSanctions' } });
       }
     }
   } catch (e) { console.warn('[INTEL] OpenSanctions vessel error:', e.message); }
