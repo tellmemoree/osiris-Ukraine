@@ -222,6 +222,7 @@ const ftmOwnershipByAsset = new Map(); // asset entity id → Ownership[]
 const ftmCompanyByName    = new Map(); // UPPER name → entity (LegalEntity/Company/Org)
 const ftmPersonByName     = new Map(); // UPPER name → entity
 const ftmDirByOrg         = new Map(); // org entity id → Directorship[]
+const ftmDirByDirector    = new Map(); // director entity id → Directorship[]
 const ftmUnknownBySubject = new Map(); // subject entity id → UnknownLink[]
 
 async function loadFtmRelationships(datasetName) {
@@ -263,6 +264,10 @@ async function loadFtmRelationships(datasetName) {
             for (const orgId of (p.organization || [])) {
               if (!ftmDirByOrg.has(orgId)) ftmDirByOrg.set(orgId, []);
               ftmDirByOrg.get(orgId).push(e);
+            }
+            for (const dirId of (p.director || [])) {
+              if (!ftmDirByDirector.has(dirId)) ftmDirByDirector.set(dirId, []);
+              ftmDirByDirector.get(dirId).push(e);
             }
             dirCount++;
           } else if (schema === 'UnknownLink') {
@@ -1165,6 +1170,38 @@ async function resolvePerson(id) {
     }
   } catch (e) { console.warn('[INTEL] OpenSanctions person error:', e.message); }
 
+  // FtM offline lookup — Person entities from OFAC SDN (nationality/citizenship, position)
+  // plus reverse Directorship edges to show which companies this person leads
+  const ftmPerson = ftmPersonByName.get(id.toUpperCase());
+  if (ftmPerson) {
+    const fp = ftmPerson.properties || {};
+    const cc = (fp.nationality || fp.citizenship || fp.country || [])[0];
+    if (cc) linkCountry(cc, rootId, nodes, links, 'NATIONALITY');
+    const position = (fp.position || [])[0];
+    const birthDate = (fp.birthDate || [])[0];
+    if (position || birthDate) {
+      nodes.push({ id: rootId, label: id, type: 'person', properties: {
+        ...(position  && { position }),
+        ...(birthDate && { birth_date: birthDate }),
+        source: 'OFAC/UA-WAR-SANCTIONS',
+      }});
+    }
+    // Reverse Directorship lookup: find all organizations this person leads
+    for (const dir of (ftmDirByDirector.get(ftmPerson.id) || [])) {
+      const orgId = (dir.properties?.organization || [])[0];
+      if (!orgId) continue;
+      const orgEnt = ftmById.get(orgId);
+      if (!orgEnt) continue;
+      const orgName = (orgEnt.properties?.name || [])[0];
+      if (!orgName) continue;
+      const role = (dir.properties?.role || [])[0] || 'Director';
+      const cid = `company:${orgName}`;
+      nodes.push({ id: cid, label: orgName, type: 'company', properties: { source: 'OFAC/UA-WAR-SANCTIONS' } });
+      links.push({ source: rootId, target: cid, label: role.toUpperCase() });
+      addSanctionsToGraph(orgName, cid, nodes, links);
+    }
+  }
+
   addSanctionsToGraph(id, rootId, nodes, links);
   const result = dedup(nodes, links);
   wdCacheSet(`person:${id}`, result);
@@ -1527,9 +1564,14 @@ app.get('/resolve', async (req, res) => {
 
 async function boot() {
   console.log('[INTEL] OSIRIS Intelligence Layer starting...');
-  // Load sanctions CSVs and FtM relationship graph in parallel — FtM is large (36MB)
-  // so run it concurrently with sanctions; server becomes available before FtM finishes.
-  const ftmPromise = loadFtmRelationships('ua_war_sanctions');
+  // Load FtM datasets in parallel with sanctions CSVs. Both stream in background so the
+  // server becomes available as soon as the CSV load completes (~10s).
+  // ua_war_sanctions: 1,400 shadow fleet vessels + 8,600 companies + ownership edges
+  // us_ofac_sdn:      1,500 vessels + 9,600 orgs + 422 Directorship edges (people connections)
+  const ftmPromise = Promise.all([
+    loadFtmRelationships('ua_war_sanctions'),
+    loadFtmRelationships('us_ofac_sdn'),
+  ]);
   await loadSanctions();
   setInterval(() => loadSanctions(), SDN_REFRESH_MS);
 
@@ -1537,9 +1579,7 @@ async function boot() {
     console.log(`[INTEL] Intelligence Layer ready on port ${PORT}`);
     console.log(`[INTEL] Sanctions: ${sanctionsIndex.entries.length} entities indexed`);
     console.log(`[INTEL] Resolve endpoint: GET /resolve?type=<type>&id=<id>`);
-    // FtM continues loading in background; vessel resolves that land before it finishes
-    // will still get CSV sanctions data; FtM enrichment kicks in once it completes.
-    ftmPromise.then(() => console.log(`[INTEL] FtM index ready: ${ftmVesselByImo.size} vessels indexed`));
+    ftmPromise.then(() => console.log(`[INTEL] FtM index ready: ${ftmVesselByImo.size} vessels, ${ftmDirByOrg.size} company-director maps, ${ftmCompanyByName.size} companies indexed`));
   });
 }
 
