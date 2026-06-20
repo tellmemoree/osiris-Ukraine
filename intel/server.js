@@ -16,6 +16,8 @@
  */
 
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const app = express();
 const PORT = process.env.INTEL_PORT || 4000;
 
@@ -24,10 +26,15 @@ const PORT = process.env.INTEL_PORT || 4000;
 // ════════════════════════════════════════════════════
 
 const SANCTIONS_SOURCES = [
-  { url: 'https://data.opensanctions.org/datasets/latest/us_ofac_sdn/targets.simple.csv',     label: 'OFAC SDN' },
-  { url: 'https://data.opensanctions.org/datasets/latest/eu_fsf/targets.simple.csv',          label: 'EU FSF'   },
-  { url: 'https://data.opensanctions.org/datasets/latest/un_sc_sanctions/targets.simple.csv', label: 'UN SC'    },
-  // gb_hmt_sanctions has target_count=0 in OpenSanctions (HMT data doesn't map to targets.simple.csv format)
+  { url: 'https://data.opensanctions.org/datasets/latest/us_ofac_sdn/targets.simple.csv',      label: 'OFAC SDN'   },
+  { url: 'https://data.opensanctions.org/datasets/latest/eu_fsf/targets.simple.csv',           label: 'EU FSF'     },
+  { url: 'https://data.opensanctions.org/datasets/latest/un_sc_sanctions/targets.simple.csv',  label: 'UN SC'      },
+  { url: 'https://data.opensanctions.org/datasets/latest/ua_war_sanctions/targets.simple.csv', label: 'UA WAR'     },
+  { url: 'https://data.opensanctions.org/datasets/latest/au_dfat_sanctions/targets.simple.csv',label: 'AU DFAT'    },
+  { url: 'https://data.opensanctions.org/datasets/latest/ch_seco_sanctions/targets.simple.csv',label: 'CH SECO'    },
+  { url: 'https://data.opensanctions.org/datasets/latest/ca_sema_sema/targets.simple.csv',     label: 'CA SEMA'    },
+  { url: 'https://data.opensanctions.org/datasets/latest/gb_hmt_sanctions/targets.simple.csv', label: 'UK HMT'     },
+  // gb_hmt_sanctions simple CSV was empty in 2025; keeping it in case the dataset is populated later
 ];
 const WIKIDATA_ENDPOINT = 'https://query.wikidata.org/sparql';
 const WIKIDATA_UA = 'OSIRIS-Intel/1.0 (https://osirisai.live; ontology engine)';
@@ -38,6 +45,13 @@ const WIKIDATA_CACHE_MAX = 10_000;
 const SHODAN_API_KEY         = process.env.SHODAN_API_KEY         || '';
 const ABUSEIPDB_KEY          = process.env.ABUSEIPDB_KEY          || '';
 const OPENSANCTIONS_API_KEY  = process.env.OPENSANCTIONS_API_KEY  || '';
+
+// Persist resolved entities across restarts so rate-limited API calls aren't re-made.
+// /data is a volume mount in production; falls back to a local dir in dev.
+const DISK_CACHE_DIR  = process.env.INTEL_CACHE_DIR || '/data/intel';
+const DISK_CACHE_FILE = path.join(DISK_CACHE_DIR, 'resolve-cache.json');
+const DISK_CACHE_SAVE_DEBOUNCE_MS = 30_000; // write at most once per 30s
+let diskCacheSaveTimer = null;
 
 // ISO 3166-1 alpha-2 → full country name (covers all codes seen in sanctions/AIS/OSINT data)
 const CC = {
@@ -213,10 +227,48 @@ function sanctionsSearch(query, limit = 5) {
 }
 
 // ════════════════════════════════════════════════════
-// §3 — WIKIDATA LRU CACHE
+// §3 — WIKIDATA LRU CACHE (in-memory + disk persistence)
 // ════════════════════════════════════════════════════
 
 const wdCache = new Map(); // key → { data, ts }
+
+// Load persisted cache from disk so resolved entities survive restarts.
+// Stale entries (older than WIKIDATA_CACHE_TTL) are skipped on load.
+try {
+  fs.mkdirSync(DISK_CACHE_DIR, { recursive: true });
+  if (fs.existsSync(DISK_CACHE_FILE)) {
+    const saved = JSON.parse(fs.readFileSync(DISK_CACHE_FILE, 'utf8'));
+    const now = Date.now();
+    let loaded = 0;
+    for (const [k, v] of Object.entries(saved)) {
+      if (v?.ts && now - v.ts < WIKIDATA_CACHE_TTL) {
+        wdCache.set(k, v);
+        loaded++;
+      }
+    }
+    console.log(`[INTEL] Loaded ${loaded} cached entries from disk (${DISK_CACHE_FILE})`);
+  }
+} catch (e) { console.warn('[INTEL] Disk cache load error:', e.message); }
+
+function saveCacheToDisk() {
+  try {
+    const obj = {};
+    for (const [k, v] of wdCache.entries()) obj[k] = v;
+    fs.writeFileSync(DISK_CACHE_FILE, JSON.stringify(obj));
+  } catch (e) { console.warn('[INTEL] Disk cache save error:', e.message); }
+}
+
+function scheduleCacheSave() {
+  if (diskCacheSaveTimer) return;
+  diskCacheSaveTimer = setTimeout(() => {
+    diskCacheSaveTimer = null;
+    saveCacheToDisk();
+  }, DISK_CACHE_SAVE_DEBOUNCE_MS);
+}
+
+// Flush on exit so the last batch of resolutions isn't lost
+process.on('SIGTERM', () => { saveCacheToDisk(); process.exit(0); });
+process.on('SIGINT',  () => { saveCacheToDisk(); process.exit(0); });
 
 function wdCacheGet(key) {
   const entry = wdCache.get(key);
@@ -234,6 +286,7 @@ function wdCacheSet(key, data) {
     wdCache.delete(oldest);
   }
   wdCache.set(key, { data, ts: Date.now() });
+  scheduleCacheSave();
 }
 
 // ════════════════════════════════════════════════════
