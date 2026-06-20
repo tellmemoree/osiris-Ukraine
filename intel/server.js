@@ -99,10 +99,76 @@ const CC = {
   ki:'Kiribati',fm:'Micronesia',pw:'Palau',nr:'Nauru',tv:'Tuvalu',
 };
 
+// MMSI Maritime Identification Digits (first 3 digits → country name)
+const MID = {
+  201:'Albania',202:'Andorra',203:'Austria',204:'Portugal',205:'Belgium',206:'Belarus',
+  207:'Bulgaria',208:'Vatican City',209:'Cyprus',210:'Cyprus',211:'Germany',212:'Cyprus',
+  213:'Georgia',214:'Moldova',215:'Malta',216:'Armenia',219:'Denmark',220:'Denmark',
+  224:'Spain',225:'Spain',226:'France',227:'France',228:'France',229:'Malta',
+  230:'Finland',231:'Faroe Islands',232:'United Kingdom',233:'United Kingdom',234:'United Kingdom',235:'United Kingdom',
+  236:'Gibraltar',237:'Greece',238:'Croatia',239:'Greece',240:'Greece',241:'Greece',
+  242:'Morocco',243:'Hungary',244:'Netherlands',245:'Netherlands',246:'Netherlands',
+  247:'Italy',248:'Malta',249:'Malta',250:'Ireland',251:'Iceland',252:'Liechtenstein',
+  253:'Luxembourg',254:'Monaco',255:'Portugal',256:'Malta',257:'Norway',258:'Norway',259:'Norway',
+  261:'Poland',262:'Montenegro',263:'Portugal',264:'Romania',265:'Sweden',266:'Sweden',
+  267:'Slovakia',268:'San Marino',269:'Switzerland',270:'Czech Republic',271:'Turkey',
+  272:'Ukraine',273:'Russia',274:'North Macedonia',275:'Latvia',276:'Estonia',277:'Lithuania',
+  278:'Slovenia',279:'Serbia',281:'Bosnia-Herzegovina',301:'Antigua and Barbuda',
+  303:'United States',304:'Antigua and Barbuda',305:'Antigua and Barbuda',306:'Netherlands Antilles',
+  307:'Aruba',308:'Bahamas',309:'Bahamas',310:'Bermuda',311:'Bahamas',312:'Belize',
+  314:'Barbados',316:'Canada',319:'Cayman Islands',321:'Costa Rica',323:'Cuba',
+  325:'Dominica',327:'Dominican Republic',329:'Guadeloupe',330:'Grenada',331:'Greenland',
+  332:'Guatemala',334:'Honduras',336:'Haiti',338:'United States',339:'Jamaica',
+  341:'Saint Kitts and Nevis',343:'Saint Lucia',345:'Mexico',347:'Martinique',
+  348:'Montserrat',350:'Nicaragua',351:'Panama',352:'Panama',353:'Panama',354:'Panama',
+  355:'Panama',356:'Panama',357:'Panama',358:'Puerto Rico',359:'El Salvador',
+  361:'Saint Pierre and Miquelon',362:'Trinidad and Tobago',364:'Turks and Caicos Islands',
+  366:'United States',367:'United States',368:'United States',369:'United States',
+  370:'Panama',371:'Panama',372:'Panama',373:'Panama',374:'Panama',
+  375:'Saint Vincent and the Grenadines',376:'Saint Vincent and the Grenadines',377:'Saint Vincent and the Grenadines',
+  378:'British Virgin Islands',379:'US Virgin Islands',
+  401:'Afghanistan',403:'Saudi Arabia',405:'Bangladesh',408:'Bahrain',410:'Bhutan',
+  412:'China',413:'China',414:'China',416:'Taiwan',422:'Iran',423:'Azerbaijan',
+  425:'Iraq',428:'Israel',431:'Japan',432:'Japan',434:'Turkmenistan',436:'Kazakhstan',
+  437:'Uzbekistan',438:'Jordan',440:'South Korea',441:'South Korea',443:'Palestine',
+  445:'North Korea',447:'Kuwait',450:'Lebanon',451:'Kyrgyzstan',453:'Macau',
+  455:'Maldives',457:'Mongolia',459:'Nepal',461:'Oman',463:'Pakistan',466:'Qatar',
+  468:'Syria',470:'UAE',472:'Tajikistan',477:'Hong Kong',478:'Bosnia-Herzegovina',
+  503:'Australia',506:'Myanmar',508:'Brunei',510:'Micronesia',511:'Palau',
+  512:'New Zealand',514:'Cambodia',515:'Cambodia',516:'Christmas Island',518:'Cook Islands',
+  520:'Fiji',523:'Cocos Islands',525:'Indonesia',529:'Kiribati',531:'Laos',
+  533:'Malaysia',536:'Northern Mariana Islands',538:'Marshall Islands',540:'New Caledonia',
+  542:'Niue',544:'Nauru',546:'French Polynesia',548:'Philippines',553:'Papua New Guinea',
+  555:'Pitcairn Island',557:'Solomon Islands',559:'American Samoa',561:'Samoa',
+  563:'Singapore',564:'Singapore',565:'Singapore',566:'Singapore',567:'Thailand',
+  570:'Tonga',572:'Tuvalu',574:'Vietnam',576:'Vanuatu',578:'Wallis and Futuna',
+  601:'South Africa',603:'Angola',605:'Algeria',608:'Ascension Island',609:'Burundi',
+  610:'Benin',611:'Botswana',612:'Central African Republic',613:'Cameroon',615:'Congo',
+  616:'Comoros',617:'Cape Verde',619:'Ivory Coast',621:'Djibouti',622:'Egypt',
+  624:'Ethiopia',625:'Eritrea',626:'Gabon',627:'Ghana',629:'Gambia',630:'Guinea-Bissau',
+  631:'Equatorial Guinea',632:'Guinea',633:'Burkina Faso',634:'Kenya',636:'Liberia',637:'Liberia',
+  638:'South Sudan',642:'Libya',644:'Lesotho',645:'Mauritius',647:'Madagascar',
+  649:'Mali',650:'Mozambique',654:'Mauritania',655:'Malawi',656:'Niger',657:'Nigeria',
+  659:'Namibia',660:'Reunion',661:'Rwanda',662:'Sudan',663:'Senegal',664:'Seychelles',
+  665:'Saint Helena',666:'Somalia',667:'Sierra Leone',668:'Sao Tome and Principe',
+  669:'Swaziland',670:'Chad',671:'Togo',672:'Tunisia',674:'Tanzania',675:'Uganda',
+  676:'Mozambique',677:'Tanzania',678:'Zimbabwe',679:'Zambia',
+  701:'Argentina',710:'Brazil',720:'Bolivia',725:'Chile',730:'Colombia',735:'Ecuador',
+  740:'Falkland Islands',745:'French Guiana',748:'Guyana',750:'Paraguay',755:'Peru',
+  760:'Suriname',765:'Uruguay',770:'Venezuela',
+};
+function mmsiToCountry(mmsi) {
+  if (!mmsi || mmsi.length < 3) return null;
+  return MID[parseInt(mmsi.substring(0, 3), 10)] || null;
+}
+
 const ALLOWED_DOMAINS = new Set([
   'query.wikidata.org', 'data.opensanctions.org', 'www.wikidata.org',
   'ip-api.com', 'stat.ripe.net', 'api.opencorporates.com',
   'api.shodan.io', 'api.abuseipdb.com', 'registry.faa.gov',
+  'en.wikipedia.org',       // article summaries — vessels, companies, persons
+  'api.adsb.lol',           // ADS-B live state + registration by ICAO24
+  'api.hackertarget.com',   // reverse IP → co-hosted domains
   ...(OPENSANCTIONS_API_KEY ? ['api.opensanctions.org'] : []),
 ]);
 
@@ -491,6 +557,26 @@ async function fetchOsDirectors(entityId, companyNodeId, nodes, links) {
   } catch (e) { console.warn('[INTEL] OS directors fetch error:', e.message); }
 }
 
+// Wikipedia summary — ships, companies, people, aircraft types.
+// Searches for the term and returns {title, description, extract}.
+// Returns null when no article is found or the request fails.
+async function fetchWikipedia(term) {
+  try {
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(term)}&format=json&srlimit=1&srprop=snippet`;
+    if (!ALLOWED_DOMAINS.has('en.wikipedia.org')) return null;
+    const sr = await fetch(searchUrl, { signal: AbortSignal.timeout(5000), headers: { 'User-Agent': WIKIDATA_UA } });
+    if (!sr.ok) return null;
+    const sd = await sr.json();
+    const title = sd?.query?.search?.[0]?.title;
+    if (!title) return null;
+    const summUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`;
+    const rr = await fetch(summUrl, { signal: AbortSignal.timeout(5000), headers: { 'User-Agent': WIKIDATA_UA } });
+    if (!rr.ok) return null;
+    const d = await rr.json();
+    return { title: d.title, description: d.description || null, extract: d.extract ? d.extract.slice(0, 400) : null };
+  } catch { return null; }
+}
+
 function addSanctionsToGraph(query, rootId, nodes, links) {
   const matches = sanctionsSearch(query);
   for (const m of matches) {
@@ -653,14 +739,57 @@ async function resolveAircraft(id, properties = {}) {
     }
   }
 
-  // Step 3: Add aircraft model info
+  // Step 3: ADSB.lol — live registration + type from ADS-B broadcast (ICAO24 hex)
+  const icao24 = (properties.icao24 || '').toLowerCase();
+  if (icao24) {
+    try {
+      const adsbUrl = `https://api.adsb.lol/v2/hex/${icao24}`;
+      if (!ALLOWED_DOMAINS.has('api.adsb.lol')) throw new Error('blocked');
+      const adsbRes = await fetch(adsbUrl, { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': WIKIDATA_UA } });
+      if (adsbRes.ok) {
+        const d = await adsbRes.json();
+        const ac = (d.ac || [])[0];
+        if (ac) {
+          const regFromAdsb = ac.r || '';
+          const typecode = ac.t || '';
+          if (regFromAdsb || typecode) {
+            nodes.push({ id: rootId, label: id, type: 'aircraft', properties: {
+              ...(regFromAdsb && !registration && { registration: regFromAdsb }),
+              ...(typecode && { typecode }),
+              source: 'ADSB.lol',
+            }});
+          }
+          // Registration country from ADSB.lol ac.r prefix (fills gap if not in REG_PREFIXES)
+          if (regFromAdsb && !registration) {
+            const rc2 = REG_PREFIXES[regFromAdsb.substring(0, 2)] || REG_PREFIXES[regFromAdsb.substring(0, 1)];
+            if (rc2 && !nodes.find(n => n.type === 'country' && n.label === rc2)) {
+              const cid = `country:${rc2}`;
+              nodes.push({ id: cid, label: rc2, type: 'country', properties: { source: 'ADSB.lol' } });
+              links.push({ source: rootId, target: cid, label: 'REGISTERED IN' });
+            }
+          }
+        }
+      }
+    } catch (e) { console.warn('[INTEL] ADSB.lol error:', e.message); }
+  }
+
+  // Step 4: Add aircraft model info
   if (model) {
     const mid = `aircraft:model:${model}`;
     nodes.push({ id: mid, label: model, type: 'aircraft', properties: { type: 'model', source: 'ADS-B' } });
     links.push({ source: rootId, target: mid, label: 'AIRCRAFT TYPE' });
   }
 
-  // Step 4: Cross-ref sanctions on airline name + callsign
+  // Step 5: Wikipedia — useful for airlines and notable aircraft types
+  const wikiTerm = airlineName || (model ? `${model} aircraft` : null);
+  if (wikiTerm) {
+    try {
+      const wiki = await fetchWikipedia(wikiTerm);
+      if (wiki?.extract) nodes.push({ id: rootId, label: id, type: 'aircraft', properties: { intel_brief: wiki.extract, source: 'Wikipedia' } });
+    } catch (e) { console.warn('[INTEL] Wikipedia aircraft error:', e.message); }
+  }
+
+  // Step 6: Cross-ref sanctions on airline name + callsign
   addSanctionsToGraph(callsign, rootId, nodes, links);
   if (airlineName) addSanctionsToGraph(airlineName, rootId, nodes, links);
   if (registration) addSanctionsToGraph(registration, rootId, nodes, links);
@@ -912,6 +1041,31 @@ async function resolveVessel(id, props = {}) {
     }
   }
 
+  // MMSI prefix → registration country (offline MID table — works for any MMSI vessel)
+  if (hintMmsi) {
+    const mmsiCountry = mmsiToCountry(hintMmsi);
+    if (mmsiCountry) {
+      const cid = `country:${mmsiCountry}`;
+      nodes.push({ id: cid, label: mmsiCountry, type: 'country', properties: { source: 'MMSI MID' } });
+      links.push({ source: rootId, target: cid, label: 'MMSI REGISTRY' });
+    }
+  }
+
+  // Wikipedia — notable ships (naval vessels, cruise ships, famous commercial ships)
+  // Only attach if the article title reasonably matches the vessel name
+  if (searchName) {
+    try {
+      const wiki = await fetchWikipedia(`${searchName} ship`);
+      if (wiki?.extract) {
+        const titleMatch = wiki.title.toLowerCase().includes(searchName.toLowerCase().slice(0, 4));
+        const descMatch  = (wiki.description || '').toLowerCase().match(/ship|vessel|tanker|cruiser|destroyer|frigate|carrier|submarine|ferry/);
+        if (titleMatch || descMatch) {
+          nodes.push({ id: rootId, label: displayId, type: 'vessel', properties: { intel_brief: wiki.extract, source: 'Wikipedia' } });
+        }
+      }
+    } catch (e) { console.warn('[INTEL] Wikipedia vessel error:', e.message); }
+  }
+
   if (searchName) addSanctionsToGraph(searchName, rootId, nodes, links);
   addSanctionsToGraph(displayId, rootId, nodes, links);
   const result = dedup(nodes, links);
@@ -1096,6 +1250,12 @@ async function resolveCompany(id) {
     }
   }
 
+  // Wikipedia — description + extract for companies not in Wikidata or missing descriptions
+  try {
+    const wiki = await fetchWikipedia(id);
+    if (wiki?.extract) nodes.push({ id: rootId, label: id, type: 'company', properties: { description: wiki.extract, source: 'Wikipedia' } });
+  } catch (e) { console.warn('[INTEL] Wikipedia company error:', e.message); }
+
   addSanctionsToGraph(id, rootId, nodes, links);
   const result = dedup(nodes, links);
   wdCacheSet(`company:${id}`, result);
@@ -1201,6 +1361,18 @@ async function resolvePerson(id) {
       addSanctionsToGraph(orgName, cid, nodes, links);
     }
   }
+
+  // Wikipedia — biography for politicians, oligarchs, military commanders not in Wikidata
+  try {
+    const wiki = await fetchWikipedia(id);
+    if (wiki?.description || wiki?.extract) {
+      nodes.push({ id: rootId, label: id, type: 'person', properties: {
+        ...(wiki.description && { role: wiki.description }),
+        ...(wiki.extract    && { intel_brief: wiki.extract }),
+        source: 'Wikipedia',
+      }});
+    }
+  } catch (e) { console.warn('[INTEL] Wikipedia person error:', e.message); }
 
   addSanctionsToGraph(id, rootId, nodes, links);
   const result = dedup(nodes, links);
@@ -1335,7 +1507,24 @@ async function resolveIP(id) {
     }
   } catch (e) { console.warn('[INTEL] RIPEstat network-info error:', e.message); }
 
-  // Step 5: Shodan host intelligence
+  // Step 5: HackerTarget reverse IP — find co-hosted domains (shared servers / C2 clustering)
+  try {
+    const htUrl = `https://api.hackertarget.com/reverseiplookup/?q=${encodeURIComponent(id)}`;
+    if (!ALLOWED_DOMAINS.has('api.hackertarget.com')) throw new Error('blocked');
+    const htRes = await fetch(htUrl, { signal: AbortSignal.timeout(7000), headers: { 'User-Agent': WIKIDATA_UA } });
+    if (htRes.ok) {
+      const text = await htRes.text();
+      const domains = text.split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('error') && !s.includes('API count') && s.includes('.'));
+      if (domains.length > 0 && domains.length <= 100) {
+        const htId = `event:cohosted:${id}`;
+        nodes.push({ id: htId, label: `Co-hosted: ${domains.slice(0, 4).join(', ')}${domains.length > 4 ? ` +${domains.length - 4} more` : ''}`,
+          type: 'event', properties: { domains: domains.slice(0, 30).join(', '), count: domains.length, source: 'HackerTarget' } });
+        links.push({ source: rootId, target: htId, label: `CO-HOSTED DOMAINS (${domains.length})` });
+      }
+    }
+  } catch (e) { console.warn('[INTEL] HackerTarget error:', e.message); }
+
+  // Step 6: Shodan host intelligence
   if (SHODAN_API_KEY) {
     try {
       const shodanUrl = `https://api.shodan.io/shodan/host/${encodeURIComponent(id)}?key=${SHODAN_API_KEY}`;
@@ -1369,7 +1558,7 @@ async function resolveIP(id) {
     } catch (e) { console.warn('[INTEL] Shodan error:', e.message); }
   }
 
-  // Step 6: AbuseIPDB reputation
+  // Step 7: AbuseIPDB reputation
   if (ABUSEIPDB_KEY) {
     try {
       const abuseUrl = `https://api.abuseipdb.com/api/v2/check?ipAddress=${encodeURIComponent(id)}&maxAgeInDays=90`;
