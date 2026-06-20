@@ -219,12 +219,16 @@ const ftmVesselByImo      = new Map(); // "IMO1234567" → entity
 const ftmVesselByMmsi     = new Map(); // "338123456" → entity
 const ftmVesselByName     = new Map(); // UPPER name → entity
 const ftmOwnershipByAsset = new Map(); // asset entity id → Ownership[]
+const ftmCompanyByName    = new Map(); // UPPER name → entity (LegalEntity/Company/Org)
+const ftmPersonByName     = new Map(); // UPPER name → entity
+const ftmDirByOrg         = new Map(); // org entity id → Directorship[]
+const ftmUnknownBySubject = new Map(); // subject entity id → UnknownLink[]
 
 async function loadFtmRelationships(datasetName) {
   const url = `https://data.opensanctions.org/datasets/latest/${datasetName}/entities.ftm.json`;
   if (!ALLOWED_DOMAINS.has(new URL(url).hostname)) return;
   const { createInterface } = require('readline');
-  let vesselCount = 0, ownershipCount = 0;
+  let vesselCount = 0, ownershipCount = 0, companyCount = 0, dirCount = 0;
   return new Promise((resolve) => {
     const https = require('https');
     const req = https.get(url, { headers: { 'User-Agent': WIKIDATA_UA, 'Accept-Encoding': 'identity' } }, (res) => {
@@ -250,11 +254,27 @@ async function loadFtmRelationships(datasetName) {
               ftmOwnershipByAsset.get(assetId).push(e);
             }
             ownershipCount++;
+          } else if (['LegalEntity', 'Company', 'Organization'].includes(schema)) {
+            for (const name of (p.name || [])) ftmCompanyByName.set(name.toUpperCase(), e);
+            companyCount++;
+          } else if (schema === 'Person') {
+            for (const name of (p.name || [])) ftmPersonByName.set(name.toUpperCase(), e);
+          } else if (schema === 'Directorship') {
+            for (const orgId of (p.organization || [])) {
+              if (!ftmDirByOrg.has(orgId)) ftmDirByOrg.set(orgId, []);
+              ftmDirByOrg.get(orgId).push(e);
+            }
+            dirCount++;
+          } else if (schema === 'UnknownLink') {
+            for (const subjId of (p.subject || [])) {
+              if (!ftmUnknownBySubject.has(subjId)) ftmUnknownBySubject.set(subjId, []);
+              ftmUnknownBySubject.get(subjId).push(e);
+            }
           }
         } catch { /* skip malformed lines */ }
       });
       rl.on('close', () => {
-        console.log(`[INTEL] FtM ${datasetName}: ${vesselCount} vessels, ${ownershipCount} ownership edges`);
+        console.log(`[INTEL] FtM ${datasetName}: ${vesselCount} vessels, ${companyCount} companies, ${ownershipCount} ownership, ${dirCount} directorships`);
         resolve();
       });
     });
@@ -362,7 +382,7 @@ async function sparql(query) {
   }
   const res = await fetch(url, {
     headers: { 'User-Agent': WIKIDATA_UA, Accept: 'application/sparql-results+json' },
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(18000),
   });
   if (!res.ok) return [];
   const json = await res.json();
@@ -481,6 +501,13 @@ function addSanctionsToGraph(query, rootId, nodes, links) {
       },
     });
     links.push({ source: rootId, target: sid, label: 'SANCTIONS MATCH' });
+    // Emit country nodes for sanctioned companies/orgs — the CSV `countries` field
+    // is the jurisdiction of the sanctioned entity, not the sanctioning authority.
+    if (['Company', 'LegalEntity', 'Organization'].includes(m.schema)) {
+      for (const cc of m.countries) {
+        if (cc && cc.length <= 3) linkCountry(cc, rootId, nodes, links, 'BASED IN');
+      }
+    }
   }
 }
 
@@ -896,21 +923,24 @@ async function resolveCompany(id) {
   const cSid = sanitizeId(id);
   try {
     const qids = await wdSearch(id);
-    // Constrain QID branch to organization types so we don't conflate a company name with a
-    // same-named place or person. Fall back to label search with the same constraint.
-    const qidFilter = qids.length
-      ? `{ VALUES ?item { ${qids.map(q => `wd:${q}`).join(' ')} } . { ?item wdt:P31/wdt:P279* wd:Q4830453 . } UNION { ?item wdt:P31/wdt:P279* wd:Q43229 . } } UNION `
-      : '';
-    const filter = `${qidFilter}{ ?item rdfs:label "${cSid}"@en . { ?item wdt:P31/wdt:P279* wd:Q4830453 . } UNION { ?item wdt:P31/wdt:P279* wd:Q43229 . } }`;
+    // When we have QIDs from the search API, query by VALUES — no type filter needed
+    // (the API already matched the label). Only fall back to the slow transitive type
+    // constraint when the search API returns nothing.
+    const filter = qids.length
+      ? `VALUES ?item { ${qids.map(q => `wd:${q}`).join(' ')} }`
+      : `{ ?item rdfs:label "${cSid}"@en . ?item wdt:P31 ?t . FILTER(?t IN (wd:Q4830453, wd:Q43229, wd:Q891723, wd:Q6881511)) }`;
     const results = await sparql(`
-      SELECT ?item ?itemLabel ?countryLabel ?parentLabel ?ceoLabel ?industryLabel WHERE {
+      SELECT ?item ?itemLabel ?countryLabel ?parentLabel ?ceoLabel ?chairLabel ?keyPersonLabel ?ownerLabel WHERE {
         ${filter}
-        OPTIONAL { ?item wdt:P17 ?country . }
+        OPTIONAL { ?item wdt:P17  ?country . }
         OPTIONAL { ?item wdt:P749 ?parent . }
         OPTIONAL { ?item wdt:P169 ?ceo . }
-        OPTIONAL { ?item wdt:P452 ?industry . }
+        OPTIONAL { ?item wdt:P488 ?chair . }
+        OPTIONAL { ?item wdt:P3220 ?keyPerson . }
+        OPTIONAL { ?item wdt:P127 ?owner . }
         SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
-      } LIMIT 10`);
+      } LIMIT 12`);
+    const seenPeople = new Set();
     for (const r of results) {
       if (r.countryLabel?.value) {
         const cid = `country:${r.countryLabel.value}`;
@@ -922,10 +952,19 @@ async function resolveCompany(id) {
         nodes.push({ id: pid, label: r.parentLabel.value, type: 'company', properties: { source: 'Wikidata' } });
         links.push({ source: rootId, target: pid, label: 'PARENT ORG' });
       }
-      if (r.ceoLabel?.value) {
-        const pid = `person:${r.ceoLabel.value}`;
-        nodes.push({ id: pid, label: r.ceoLabel.value, type: 'person', properties: { role: 'CEO', source: 'Wikidata' } });
-        links.push({ source: rootId, target: pid, label: 'CEO' });
+      if (r.ownerLabel?.value) {
+        const pid = `company:${r.ownerLabel.value}`;
+        nodes.push({ id: pid, label: r.ownerLabel.value, type: 'company', properties: { source: 'Wikidata' } });
+        links.push({ source: rootId, target: pid, label: 'OWNED BY' });
+      }
+      for (const [roleKey, roleLabel] of [['ceoLabel','CEO'], ['chairLabel','CHAIRPERSON'], ['keyPersonLabel','KEY PERSON']]) {
+        const name = r[roleKey]?.value;
+        if (name && !seenPeople.has(name)) {
+          seenPeople.add(name);
+          const pid = `person:${name}`;
+          nodes.push({ id: pid, label: name, type: 'person', properties: { role: roleLabel, source: 'Wikidata' } });
+          links.push({ source: rootId, target: pid, label: roleLabel });
+        }
       }
     }
   } catch (e) { console.warn('[INTEL] Wikidata company error:', e.message); }
@@ -955,7 +994,8 @@ async function resolveCompany(id) {
     }
   } catch (e) { console.warn('[INTEL] OpenSanctions company error:', e.message); }
 
-  // OpenCorporates — 500 req/day free tier, no key needed
+  // OpenCorporates — search returns basic info; officers require a separate detail fetch.
+  // Free tier: 500 req/day. We use 2 requests per company (search + detail).
   try {
     const ocUrl = `https://api.opencorporates.com/v0.4/companies/search?q=${encodeURIComponent(id)}&format=json&per_page=1`;
     if (!ALLOWED_DOMAINS.has(new URL(ocUrl).hostname)) throw new Error('Blocked domain');
@@ -964,11 +1004,13 @@ async function resolveCompany(id) {
       const json = await res.json();
       const co = json.results?.companies?.[0]?.company;
       if (co) {
+        const jur = co.jurisdiction_code || '';
+        const num = co.company_number || '';
         nodes.push({
           id: rootId, label: id, type: 'company',
           properties: {
-            jurisdiction: co.jurisdiction_code,
-            company_number: co.company_number,
+            jurisdiction: jur,
+            company_number: num,
             company_type: co.company_type,
             status: co.current_status,
             incorporation_date: co.incorporation_date,
@@ -976,16 +1018,78 @@ async function resolveCompany(id) {
             source: 'OpenCorporates',
           },
         });
-        for (const o of (co.officers || []).slice(0, 5)) {
-          const off = o.officer;
-          if (!off?.name) continue;
-          const pid = `person:${off.name}`;
-          nodes.push({ id: pid, label: off.name, type: 'person', properties: { role: off.position || 'Officer', source: 'OpenCorporates' } });
-          links.push({ source: rootId, target: pid, label: (off.position || 'OFFICER').toUpperCase() });
+        // Country from jurisdiction code (e.g. "ru" → Russia, "gb" → United Kingdom)
+        if (jur) {
+          const jurCountry = jur.split('_')[0]; // "gb_england-wales" → "gb"
+          linkCountry(jurCountry, rootId, nodes, links, 'BASED IN');
+        }
+        // Officers are NOT in search results — fetch company detail endpoint
+        if (jur && num) {
+          const detailUrl = `https://api.opencorporates.com/v0.4/companies/${jur}/${num}`;
+          const dRes = await fetch(detailUrl, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': WIKIDATA_UA } });
+          if (dRes.ok) {
+            const dJson = await dRes.json();
+            for (const o of (dJson.results?.company?.officers || []).slice(0, 8)) {
+              const off = o.officer;
+              if (!off?.name) continue;
+              const pid = `person:${off.name}`;
+              const role = off.position || 'Officer';
+              nodes.push({ id: pid, label: off.name, type: 'person', properties: { role, source: 'OpenCorporates', ...(off.nationality && { nationality: off.nationality }) } });
+              links.push({ source: rootId, target: pid, label: role.toUpperCase() });
+              if (off.nationality) linkCountry(off.nationality.slice(0, 2).toLowerCase(), pid, nodes, links, 'NATIONALITY');
+            }
+          }
         }
       }
     }
   } catch (e) { console.warn('[INTEL] OpenCorporates error:', e.message); }
+
+  // FtM offline lookup — ua_war_sanctions has structured company → country + director edges
+  const ftmCo = ftmCompanyByName.get(id.toUpperCase());
+  if (ftmCo) {
+    const fp = ftmCo.properties || {};
+    const country = (fp.country || fp.jurisdiction || [])[0];
+    if (country) linkCountry(country, rootId, nodes, links, 'BASED IN');
+    const regNum = (fp.registrationNumber || fp.innCode || fp.taxNumber || [])[0];
+    const addr   = (fp.address || [])[0];
+    if (regNum || addr) {
+      nodes.push({ id: rootId, label: id, type: 'company', properties: {
+        ...(regNum && { registration_number: regNum }),
+        ...(addr   && { registered_address: addr.slice(0, 150) }),
+        source: 'UA-WAR-SANCTIONS',
+      }});
+    }
+    for (const dir of (ftmDirByOrg.get(ftmCo.id) || [])) {
+      const dp   = dir.properties || {};
+      const role = (dp.role || [])[0] || 'Director';
+      for (const personId of (dp.director || [])) {
+        const pEnt  = ftmById.get(personId);
+        if (!pEnt) continue;
+        const pName = (pEnt.properties?.name || [])[0];
+        if (!pName) continue;
+        const pid = `person:${pName}`;
+        nodes.push({ id: pid, label: pName, type: 'person', properties: { role, source: 'UA-WAR-SANCTIONS' } });
+        links.push({ source: rootId, target: pid, label: role.toUpperCase() });
+        // ua_war_sanctions uses `citizenship` not `nationality`
+        const pcc = (pEnt.properties?.citizenship || pEnt.properties?.nationality || pEnt.properties?.country || [])[0];
+        if (pcc) linkCountry(pcc, pid, nodes, links, 'NATIONALITY');
+        addSanctionsToGraph(pName, pid, nodes, links);
+      }
+    }
+    // UnknownLink: company → vessel (shows what vessels this company operates)
+    for (const lnk of (ftmUnknownBySubject.get(ftmCo.id) || [])) {
+      for (const objId of (lnk.properties?.object || [])) {
+        const objEnt = ftmById.get(objId);
+        if (!objEnt || objEnt.schema !== 'Vessel') continue;
+        const vName = (objEnt.properties?.name || [])[0];
+        if (!vName) continue;
+        const vid = `vessel:${vName}`;
+        const imo  = (objEnt.properties?.imoNumber || [])[0];
+        nodes.push({ id: vid, label: vName, type: 'vessel', properties: { source: 'UA-WAR-SANCTIONS', ...(imo && { imo }) } });
+        links.push({ source: rootId, target: vid, label: 'OPERATES' });
+      }
+    }
+  }
 
   addSanctionsToGraph(id, rootId, nodes, links);
   const result = dedup(nodes, links);
