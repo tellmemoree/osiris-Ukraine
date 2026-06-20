@@ -23,14 +23,26 @@ const PORT = process.env.INTEL_PORT || 4000;
 // §1 — CONFIGURATION
 // ════════════════════════════════════════════════════
 
-const SDN_CSV_URL = 'https://data.opensanctions.org/datasets/latest/us_ofac_sdn/targets.simple.csv';
+const SANCTIONS_SOURCES = [
+  { url: 'https://data.opensanctions.org/datasets/latest/us_ofac_sdn/targets.simple.csv',      label: 'OFAC SDN' },
+  { url: 'https://data.opensanctions.org/datasets/latest/eu_fsf/targets.simple.csv',           label: 'EU FSF'   },
+  { url: 'https://data.opensanctions.org/datasets/latest/un_sc_sanctions/targets.simple.csv',  label: 'UN SC'    },
+  { url: 'https://data.opensanctions.org/datasets/latest/gb_hmt_sanctions/targets.simple.csv', label: 'UK HMT'  },
+];
 const WIKIDATA_ENDPOINT = 'https://query.wikidata.org/sparql';
 const WIKIDATA_UA = 'OSIRIS-Intel/1.0 (https://osirisai.live; ontology engine)';
 const SDN_REFRESH_MS = 24 * 60 * 60 * 1000; // 24h
 const WIKIDATA_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
 const WIKIDATA_CACHE_MAX = 10_000;
 
-const ALLOWED_DOMAINS = new Set(['query.wikidata.org', 'data.opensanctions.org', 'www.wikidata.org', 'ip-api.com', 'stat.ripe.net']);
+const SHODAN_API_KEY = process.env.SHODAN_API_KEY || '';
+const ABUSEIPDB_KEY  = process.env.ABUSEIPDB_KEY  || '';
+
+const ALLOWED_DOMAINS = new Set([
+  'query.wikidata.org', 'data.opensanctions.org', 'www.wikidata.org',
+  'ip-api.com', 'stat.ripe.net', 'api.opencorporates.com',
+  'api.shodan.io', 'api.abuseipdb.com', 'registry.faa.gov',
+]);
 
 // ════════════════════════════════════════════════════
 // §2 — SANCTIONS INDEX (in-memory graph)
@@ -63,61 +75,73 @@ function parseCsv(text) {
   return rows;
 }
 
-async function loadSanctions() {
-  console.log('[INTEL] Loading OpenSanctions OFAC SDN...');
-  try {
-    const res = await fetch(SDN_CSV_URL, {
-      signal: AbortSignal.timeout(30000),
-      headers: { Accept: 'text/csv' },
+function parseSanctionsRows(rows, label) {
+  const headers = rows[0];
+  const idx = (col) => headers.indexOf(col);
+  const i = {
+    id: idx('id'), schema: idx('schema'), name: idx('name'),
+    aliases: idx('aliases'), countries: idx('countries'),
+    programs: idx('program_ids'), sanctions: idx('sanctions'),
+    first_seen: idx('first_seen'),
+  };
+  const entries = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row[i.name]) continue;
+    entries.push({
+      id: row[i.id] || '',
+      schema: row[i.schema] || 'LegalEntity',
+      name: row[i.name],
+      aliases: (row[i.aliases] || '').split(';').map(s => s.trim()).filter(Boolean),
+      countries: (row[i.countries] || '').split(';').map(s => s.trim()).filter(Boolean),
+      programs: (row[i.programs] || '').split(';').map(s => s.trim()).filter(Boolean),
+      sanctions: row[i.sanctions] || '',
+      first_seen: i.first_seen >= 0 ? row[i.first_seen] : undefined,
+      sanctionsList: label,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const text = await res.text();
-    const rows = parseCsv(text);
-    if (rows.length < 2) throw new Error('CSV empty');
+  }
+  return entries;
+}
 
-    const headers = rows[0];
-    const idx = (col) => headers.indexOf(col);
-    const i = {
-      id: idx('id'), schema: idx('schema'), name: idx('name'),
-      aliases: idx('aliases'), countries: idx('countries'),
-      programs: idx('program_ids'), sanctions: idx('sanctions'),
-      first_seen: idx('first_seen'), last_seen: idx('last_seen'),
-    };
+async function loadSanctions() {
+  console.log('[INTEL] Loading sanctions lists (OFAC SDN, EU FSF, UN SC, UK HMT)...');
+  const results = await Promise.allSettled(
+    SANCTIONS_SOURCES.map(async ({ url, label }) => {
+      const res = await fetch(url, { signal: AbortSignal.timeout(30000), headers: { Accept: 'text/csv' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const rows = parseCsv(text);
+      if (rows.length < 2) throw new Error('CSV empty');
+      const entries = parseSanctionsRows(rows, label);
+      console.log(`[INTEL] ${label}: ${entries.length} entities`);
+      return entries;
+    })
+  );
 
-    const entries = [];
-    const byNorm = new Map();
-
-    for (let r = 1; r < rows.length; r++) {
-      const row = rows[r];
-      if (!row[i.name]) continue;
-      const entry = {
-        id: row[i.id] || '',
-        schema: row[i.schema] || 'LegalEntity',
-        name: row[i.name],
-        aliases: (row[i.aliases] || '').split(';').map(s => s.trim()).filter(Boolean),
-        countries: (row[i.countries] || '').split(';').map(s => s.trim()).filter(Boolean),
-        programs: (row[i.programs] || '').split(';').map(s => s.trim()).filter(Boolean),
-        sanctions: row[i.sanctions] || '',
-        first_seen: i.first_seen >= 0 ? row[i.first_seen] : undefined,
-      };
-      entries.push(entry);
-
-      const keys = new Set([entry.name, ...entry.aliases].map(normName));
-      for (const key of keys) {
-        if (!key) continue;
-        if (!byNorm.has(key)) byNorm.set(key, []);
-        byNorm.get(key).push(entry);
+  const allEntries = [];
+  const byNorm = new Map();
+  for (const r of results) {
+    if (r.status === 'fulfilled') {
+      for (const entry of r.value) {
+        allEntries.push(entry);
+        const keys = new Set([entry.name, ...entry.aliases].map(normName));
+        for (const key of keys) {
+          if (!key) continue;
+          if (!byNorm.has(key)) byNorm.set(key, []);
+          byNorm.get(key).push(entry);
+        }
       }
-    }
-
-    sanctionsIndex = { entries, byNorm, fetchedAt: Date.now() };
-    console.log(`[INTEL] Sanctions index loaded: ${entries.length} entities, ${byNorm.size} name keys`);
-  } catch (e) {
-    console.error('[INTEL] Sanctions load failed:', e.message);
-    if (sanctionsIndex.entries.length > 0) {
-      console.log('[INTEL] Keeping stale index');
+    } else {
+      console.error('[INTEL] Sanctions source failed:', r.reason?.message);
     }
   }
+
+  if (allEntries.length === 0 && sanctionsIndex.entries.length > 0) {
+    console.log('[INTEL] All sources failed — keeping stale index');
+    return;
+  }
+  sanctionsIndex = { entries: allEntries, byNorm, fetchedAt: Date.now() };
+  console.log(`[INTEL] Sanctions index: ${allEntries.length} entities across ${SANCTIONS_SOURCES.length} lists, ${byNorm.size} name keys`);
 }
 
 function sanctionsSearch(query, limit = 5) {
@@ -218,6 +242,7 @@ function addSanctionsToGraph(query, rootId, nodes, links) {
         programs: m.programs.join(', '), sanctions: m.sanctions,
         aliases: m.aliases.slice(0, 5).join('; '),
         first_seen: m.first_seen, sanctioned: true,
+        sanctions_list: m.sanctionsList || 'OFAC SDN',
       },
     });
     links.push({ source: rootId, target: sid, label: 'SANCTIONS MATCH' });
@@ -292,23 +317,32 @@ async function resolveAircraft(id, properties = {}) {
     } catch (e) { console.warn('[INTEL] Airline ICAO lookup error:', e.message); }
   }
 
-  // Step 2: Decode registration prefix → country (e.g. TC → Turkey, N → USA, G → UK)
+  // Step 2: Decode registration prefix → country
   const REG_PREFIXES = {
     'N':'United States','G':'United Kingdom','F':'France','D':'Germany','I':'Italy',
     'JA':'Japan','HL':'South Korea','B':'China','VT':'India','TC':'Turkey',
-    'SU':'Russia','RA':'Russia','UR':'Ukraine','A6':'UAE','A7':'Qatar','9V':'Singapore',
+    'RA':'Russia','UN':'Russia','UR':'Ukraine','A6':'UAE','A7':'Qatar','9V':'Singapore',
     'VH':'Australia','C':'Canada','PP':'Brazil','PR':'Brazil','PT':'Brazil',
-    'EC':'Spain','PH':'Philippines','HS':'Thailand','9M':'Malaysia','PK':'Pakistan',
-    'EP':'Iran','YI':'Iraq','HZ':'Saudi Arabia','4X':'Israel','SX':'Greece',
-    'OE':'Austria','HB':'Switzerland','SE':'Sweden','OH':'Finland','LN':'Norway',
-    'OY':'Denmark','PH':'Netherlands','OO':'Belgium','CS':'Portugal','SP':'Poland',
-    'OK':'Czech Republic','HA':'Hungary','YR':'Romania','LZ':'Bulgaria',
-    'EI':'Ireland','EW':'Belarus','ES':'Estonia','YL':'Latvia','LY':'Lithuania',
+    'EC':'Spain','HS':'Thailand','9M':'Malaysia','EP':'Iran','YI':'Iraq',
+    'HZ':'Saudi Arabia','4X':'Israel','SX':'Greece','OE':'Austria','HB':'Switzerland',
+    'SE':'Sweden','OH':'Finland','LN':'Norway','OY':'Denmark','PH':'Netherlands',
+    'OO':'Belgium','CS':'Portugal','SP':'Poland','OK':'Czech Republic','HA':'Hungary',
+    'YR':'Romania','LZ':'Bulgaria','EI':'Ireland','EW':'Belarus','ES':'Estonia',
+    'YL':'Latvia','LY':'Lithuania','SU':'Egypt','AP':'Pakistan','CC':'Chile',
+    'CN':'Morocco','CP':'Bolivia','CU':'Cuba','LV':'Argentina','LX':'Luxembourg',
+    'OD':'Lebanon','P4':'Aruba','ST':'Sudan','TF':'Iceland','TJ':'Cameroon',
+    'TL':'Central African Republic','TR':'Gabon','TS':'Tunisia','TT':'Chad',
+    'TY':'Benin','TZ':'Mali','UK':'Uzbekistan','EK':'Armenia','EL':'Liberia',
+    'EX':'Kyrgyzstan','EY':'Tajikistan','EZ':'Turkmenistan','S2':'Bangladesh',
+    'XU':'Cambodia','XY':'Myanmar','ZK':'New Zealand','Z':'Zimbabwe',
+    '4L':'Georgia','5A':'Libya','5N':'Nigeria','5T':'Mauritania','5X':'Uganda',
+    '5Y':'Kenya','6V':'Senegal','7P':'Lesotho','7Q':'Malawi','7T':'Algeria',
+    '9U':'Burundi','A2':'Botswana','9G':'Ghana','9J':'Zambia',
+    'JU':'Mongolia','JY':'Jordan','OB':'Peru','RX':'Philippines','SY':'Greece',
   };
 
   if (registration) {
     let regCountry = null;
-    // Try 2-char prefix first, then 1-char
     if (REG_PREFIXES[registration.substring(0, 2)]) regCountry = REG_PREFIXES[registration.substring(0, 2)];
     else if (REG_PREFIXES[registration.substring(0, 1)]) regCountry = REG_PREFIXES[registration.substring(0, 1)];
 
@@ -316,6 +350,26 @@ async function resolveAircraft(id, properties = {}) {
       const cid = `country:${regCountry}`;
       nodes.push({ id: cid, label: regCountry, type: 'country', properties: { source: 'Registration prefix' } });
       links.push({ source: rootId, target: cid, label: 'REGISTERED IN' });
+    }
+
+    // FAA registry lookup for US N-number registrations
+    if (registration.startsWith('N') && /^N\d/.test(registration)) {
+      try {
+        const faaUrl = `https://registry.faa.gov/api/1.0/aircraft/${encodeURIComponent(registration)}`;
+        if (!ALLOWED_DOMAINS.has(new URL(faaUrl).hostname)) throw new Error('Blocked domain');
+        const res = await fetch(faaUrl, { signal: AbortSignal.timeout(7000), headers: { Accept: 'application/json' } });
+        if (res.ok) {
+          const d = await res.json();
+          if (d.manufacturer || d.name) {
+            const ownerId = `company:${d.name || d.manufacturer}`;
+            nodes.push({
+              id: ownerId, label: d.name || d.manufacturer, type: 'company',
+              properties: { manufacturer: d.manufacturer, model: d.model, year: d.year_mfr, engine: d.engine_type, source: 'FAA Registry' },
+            });
+            links.push({ source: rootId, target: ownerId, label: 'REGISTERED OWNER' });
+          }
+        }
+      } catch (e) { console.warn('[INTEL] FAA registry error:', e.message); }
     }
   }
 
@@ -343,17 +397,38 @@ async function resolveVessel(id) {
   if (cached) return { ...cached };
 
   try {
+    // Name-based QID lookup first so vessels not indexed by IMO number are found
+    const qid = await wdSearch(id);
+    const filter = qid
+      ? `VALUES ?item { wd:${qid} }`
+      : `{ ?item wdt:P458 "${sanitizeId(id)}" . } UNION { ?item rdfs:label "${sanitizeId(id)}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . }`;
+
     const results = await sparql(`
-      SELECT ?item ?itemLabel ?ownerLabel ?countryLabel ?operatorLabel ?flagLabel WHERE {
-        { ?item wdt:P458 "${id}" . }
-        UNION { ?item rdfs:label "${id}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . }
+      SELECT ?item ?itemLabel ?ownerLabel ?countryLabel ?operatorLabel ?flagLabel
+             ?imoNumber ?grossTonnage ?builtYear ?vesselTypeLabel WHERE {
+        ${filter}
         OPTIONAL { ?item wdt:P127 ?owner . }
         OPTIONAL { ?item wdt:P17 ?country . }
         OPTIONAL { ?item wdt:P137 ?operator . }
         OPTIONAL { ?item wdt:P8047 ?flag . }
+        OPTIONAL { ?item wdt:P458 ?imoNumber . }
+        OPTIONAL { ?item wdt:P1093 ?grossTonnage . }
+        OPTIONAL { ?item wdt:P571 ?builtYear . }
+        OPTIONAL { ?item wdt:P31 ?vesselType . }
         SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
       } LIMIT 10`);
+
+    let vesselPropsSet = false;
     for (const r of results) {
+      if (!vesselPropsSet) {
+        const props = { source: 'Wikidata' };
+        if (r.imoNumber?.value)    props.imo           = r.imoNumber.value;
+        if (r.grossTonnage?.value) props.gross_tonnage = r.grossTonnage.value;
+        if (r.builtYear?.value)    props.year_built    = r.builtYear.value.substring(0, 4);
+        if (r.vesselTypeLabel?.value) props.vessel_type = r.vesselTypeLabel.value;
+        nodes.push({ id: rootId, label: id, type: 'vessel', properties: props });
+        vesselPropsSet = true;
+      }
       if (r.ownerLabel?.value) {
         const oid = `company:${r.ownerLabel.value}`;
         nodes.push({ id: oid, label: r.ownerLabel.value, type: 'company', properties: { source: 'Wikidata' } });
@@ -418,6 +493,38 @@ async function resolveCompany(id) {
       }
     }
   } catch (e) { console.warn('[INTEL] Wikidata company error:', e.message); }
+
+  // OpenCorporates — 500 req/day free tier, no key needed
+  try {
+    const ocUrl = `https://api.opencorporates.com/v0.4/companies/search?q=${encodeURIComponent(id)}&format=json&per_page=1`;
+    if (!ALLOWED_DOMAINS.has(new URL(ocUrl).hostname)) throw new Error('Blocked domain');
+    const res = await fetch(ocUrl, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': WIKIDATA_UA } });
+    if (res.ok) {
+      const json = await res.json();
+      const co = json.results?.companies?.[0]?.company;
+      if (co) {
+        nodes.push({
+          id: rootId, label: id, type: 'company',
+          properties: {
+            jurisdiction: co.jurisdiction_code,
+            company_number: co.company_number,
+            company_type: co.company_type,
+            status: co.current_status,
+            incorporation_date: co.incorporation_date,
+            registered_address: co.registered_address_in_full,
+            source: 'OpenCorporates',
+          },
+        });
+        for (const o of (co.officers || []).slice(0, 5)) {
+          const off = o.officer;
+          if (!off?.name) continue;
+          const pid = `person:${off.name}`;
+          nodes.push({ id: pid, label: off.name, type: 'person', properties: { role: off.position || 'Officer', source: 'OpenCorporates' } });
+          links.push({ source: rootId, target: pid, label: (off.position || 'OFFICER').toUpperCase() });
+        }
+      }
+    }
+  } catch (e) { console.warn('[INTEL] OpenCorporates error:', e.message); }
 
   addSanctionsToGraph(id, rootId, nodes, links);
   const result = dedup(nodes, links);
@@ -595,6 +702,64 @@ async function resolveIP(id) {
       }
     }
   } catch (e) { console.warn('[INTEL] RIPEstat network-info error:', e.message); }
+
+  // Step 5: Shodan host intelligence
+  if (SHODAN_API_KEY) {
+    try {
+      const shodanUrl = `https://api.shodan.io/shodan/host/${encodeURIComponent(id)}?key=${SHODAN_API_KEY}`;
+      if (!ALLOWED_DOMAINS.has(new URL(shodanUrl).hostname)) throw new Error('Blocked domain');
+      const res = await fetch(shodanUrl, { signal: AbortSignal.timeout(9000) });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.ports?.length > 0) {
+          const services = [...new Set((d.data || []).map(b => b.product).filter(Boolean))].slice(0, 6).join(', ');
+          const portId = `event:ports:${id}`;
+          nodes.push({
+            id: portId, label: `Open ports: ${d.ports.slice(0, 8).join(', ')}${d.ports.length > 8 ? '…' : ''}`,
+            type: 'event',
+            properties: { ports: d.ports.join(', '), services: services || undefined, hostnames: (d.hostnames || []).join(', ') || undefined, source: 'Shodan' },
+          });
+          links.push({ source: rootId, target: portId, label: 'OPEN PORTS' });
+        }
+        if (d.vulns && Object.keys(d.vulns).length > 0) {
+          const topVuln = Object.entries(d.vulns).sort((a, b) => (b[1].cvss || 0) - (a[1].cvss || 0))[0];
+          const vulnId = `event:vuln:${topVuln[0]}`;
+          nodes.push({
+            id: vulnId, label: topVuln[0], type: 'event',
+            properties: { cvss: topVuln[1].cvss, description: (topVuln[1].summary || '').slice(0, 120), source: 'Shodan' },
+          });
+          links.push({ source: rootId, target: vulnId, label: `VULNERABLE (${Object.keys(d.vulns).length} CVEs)` });
+        }
+        if (d.tags?.length > 0) {
+          nodes.push({ id: rootId, label: id, type: 'ip', properties: { shodan_tags: d.tags.join(', '), source: 'Shodan' } });
+        }
+      }
+    } catch (e) { console.warn('[INTEL] Shodan error:', e.message); }
+  }
+
+  // Step 6: AbuseIPDB reputation
+  if (ABUSEIPDB_KEY) {
+    try {
+      const abuseUrl = `https://api.abuseipdb.com/api/v2/check?ipAddress=${encodeURIComponent(id)}&maxAgeInDays=90`;
+      if (!ALLOWED_DOMAINS.has(new URL(abuseUrl).hostname)) throw new Error('Blocked domain');
+      const res = await fetch(abuseUrl, {
+        signal: AbortSignal.timeout(6000),
+        headers: { Key: ABUSEIPDB_KEY, Accept: 'application/json' },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const d = json.data;
+        if (d?.abuseConfidenceScore > 0) {
+          const abuseId = `event:abuse:${id}`;
+          nodes.push({
+            id: abuseId, label: `Abuse score: ${d.abuseConfidenceScore}%`, type: 'event',
+            properties: { score: d.abuseConfidenceScore, reports: d.totalReports, last_reported: d.lastReportedAt, usage_type: d.usageType, source: 'AbuseIPDB' },
+          });
+          links.push({ source: rootId, target: abuseId, label: d.abuseConfidenceScore >= 50 ? 'HIGH ABUSE RISK' : 'ABUSE REPORTS' });
+        }
+      }
+    } catch (e) { console.warn('[INTEL] AbuseIPDB error:', e.message); }
+  }
 
   const result = dedup(nodes, links);
   wdCacheSet(`ip:${id}`, result);
