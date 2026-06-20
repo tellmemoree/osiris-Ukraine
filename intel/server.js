@@ -313,6 +313,16 @@ async function opensanctionsByProp(schema, prop, value) {
 // §5 — RESOLVERS (the intelligence)
 // ════════════════════════════════════════════════════
 
+// Add a country node + link for an ISO-2 code attached to an entity node.
+// Used by vessel adjacent entities, company OS results, person OS results.
+function linkCountry(countryCode, sourceId, nodes, links, label = 'BASED IN') {
+  if (!countryCode) return;
+  const name = CC[countryCode.toLowerCase()] || countryCode.toUpperCase();
+  const cid = `country:${name}`;
+  nodes.push({ id: cid, label: name, type: 'country', properties: { code: countryCode.toLowerCase(), source: 'OpenSanctions' } });
+  links.push({ source: sourceId, target: cid, label });
+}
+
 function addSanctionsToGraph(query, rootId, nodes, links) {
   const matches = sanctionsSearch(query);
   for (const m of matches) {
@@ -647,10 +657,10 @@ async function resolveVessel(id) {
                   const role = rel.properties?.role?.[0] || 'owner';
                   nodes.push({ id: eid, label: name, type, properties: { source: 'OpenSanctions', topics: (ownerObj.properties?.topics || []).join(', ') || undefined } });
                   links.push({ source: rootId, target: eid, label: role === 'owner' ? 'OWNED BY' : role.toUpperCase() });
+                  for (const cc of (ownerObj.properties?.country || [])) linkCountry(cc, eid, nodes, links);
                   addSanctionsToGraph(name, rootId, nodes, links);
                 }
               }
-              // operationalRelationshipAsset: inline 'operator' entity objects
               for (const rel of (adjacent.operationalRelationshipAsset?.results || [])) {
                 for (const opObj of [rel.properties?.operator].flat().filter(o => o && typeof o === 'object')) {
                   const name = opObj.caption || opObj.properties?.name?.[0];
@@ -659,6 +669,7 @@ async function resolveVessel(id) {
                   const eid = `${type}:${name}`;
                   nodes.push({ id: eid, label: name, type, properties: { source: 'OpenSanctions', topics: (opObj.properties?.topics || []).join(', ') || undefined } });
                   links.push({ source: rootId, target: eid, label: 'OPERATED BY' });
+                  for (const cc of (opObj.properties?.country || [])) linkCountry(cc, eid, nodes, links);
                   addSanctionsToGraph(name, rootId, nodes, links);
                 }
               }
@@ -729,12 +740,12 @@ async function resolveCompany(id) {
       const addr = props.address?.[0];
       if (country || regNum || addr) {
         nodes.push({ id: rootId, label: id, type: 'company', properties: {
-          ...(country && { os_country: country }),
           ...(regNum  && { registration_number: regNum }),
           ...(addr    && { registered_address: addr.slice(0, 150) }),
           source: 'OpenSanctions',
         }});
       }
+      if (country) linkCountry(country, rootId, nodes, links, 'BASED IN');
       for (const name of (osEntity.properties?.name || []).slice(1, 4)) {
         nodes.push({ id: `company:${name}`, label: name, type: 'company', properties: { source: 'OpenSanctions' } });
         links.push({ source: rootId, target: `company:${name}`, label: 'AKA' });
@@ -833,14 +844,14 @@ async function resolvePerson(id) {
       const birthDate = props.birthDate?.[0];
       const nationality = props.nationality?.[0] || props.country?.[0];
       const passportNum = props.passportNumber?.[0];
-      if (birthDate || nationality || passportNum) {
+      if (birthDate || passportNum) {
         nodes.push({ id: rootId, label: id, type: 'person', properties: {
           ...(birthDate    && { birth_date: birthDate }),
-          ...(nationality  && { os_nationality: nationality }),
           ...(passportNum  && { passport_number: passportNum }),
           source: 'OpenSanctions',
         }});
       }
+      if (nationality) linkCountry(nationality, rootId, nodes, links, 'NATIONALITY');
       for (const alias of (props.alias || []).slice(0, 4)) {
         nodes.push({ id: `person:${alias}`, label: alias, type: 'person', properties: { source: 'OpenSanctions' } });
         links.push({ source: rootId, target: `person:${alias}`, label: 'ALIAS' });
