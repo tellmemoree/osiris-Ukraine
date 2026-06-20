@@ -45,6 +45,9 @@ const WIKIDATA_CACHE_MAX = 10_000;
 const SHODAN_API_KEY         = process.env.SHODAN_API_KEY         || '';
 const ABUSEIPDB_KEY          = process.env.ABUSEIPDB_KEY          || '';
 const OPENSANCTIONS_API_KEY  = process.env.OPENSANCTIONS_API_KEY  || '';
+const GFW_API_KEY            = process.env.GFW_API_KEY            || '';
+const FLEETMON_API_USER      = process.env.FLEETMON_API_USER      || '';
+const FLEETMON_API_KEY       = process.env.FLEETMON_API_KEY       || '';
 
 // Persist resolved entities across restarts so rate-limited API calls aren't re-made.
 // /data is a volume mount in production; falls back to a local dir in dev.
@@ -166,10 +169,12 @@ const ALLOWED_DOMAINS = new Set([
   'query.wikidata.org', 'data.opensanctions.org', 'www.wikidata.org',
   'ip-api.com', 'stat.ripe.net', 'api.opencorporates.com',
   'api.shodan.io', 'api.abuseipdb.com', 'registry.faa.gov',
-  'en.wikipedia.org',       // article summaries — vessels, companies, persons
-  'api.adsb.lol',           // ADS-B live state + registration by ICAO24
-  'api.hackertarget.com',   // reverse IP → co-hosted domains
+  'en.wikipedia.org',                   // article summaries — vessels, companies, persons
+  'api.adsb.lol',                       // ADS-B live state + registration by ICAO24
+  'api.hackertarget.com',               // reverse IP → co-hosted domains
   ...(OPENSANCTIONS_API_KEY ? ['api.opensanctions.org'] : []),
+  ...(GFW_API_KEY       ? ['gateway.api.globalfishingwatch.org'] : []),
+  ...(FLEETMON_API_USER ? ['www.fleetmon.com'] : []),
 ]);
 
 // ════════════════════════════════════════════════════
@@ -813,6 +818,49 @@ async function resolveAircraft(id, properties = {}) {
   return result;
 }
 
+// ─── GFW vessel identity lookup ────────────────────────────────────────────
+// Returns the best-matching registryInfo entry for a vessel (by IMO, MMSI, or name).
+// Covers shadow-fleet tankers and transshipment vessels with registeredOwner / owner.
+async function fetchGFWVessel(name, imo, mmsi) {
+  if (!GFW_API_KEY) return null;
+  const query = imo || mmsi || name;
+  if (!query) return null;
+  try {
+    const url = `https://gateway.api.globalfishingwatch.org/v3/vessels/search?query=${encodeURIComponent(query)}&datasets=public-global-vessel-identity:latest&limit=5`;
+    const r = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: { Authorization: `Bearer ${GFW_API_KEY}`, 'User-Agent': WIKIDATA_UA },
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    for (const entry of (d.entries || [])) {
+      for (const reg of (entry.registryInfo || [])) {
+        if (imo  && reg.imo   === imo)                          return reg;
+        if (mmsi && reg.ssvid === mmsi)                         return reg;
+        if (name && reg.shipname?.toUpperCase() === name.toUpperCase()) return reg;
+      }
+    }
+    return d.entries?.[0]?.registryInfo?.[0] || null;
+  } catch { return null; }
+}
+
+// ─── FleetMon vessel API ────────────────────────────────────────────────────
+// Free tier: 30 req/day per API key. Returns owner, operator, class society, dimensions.
+// Register at fleetmon.com → My Account → API Access.
+async function fetchFleetMon(imo) {
+  if (!FLEETMON_API_USER || !FLEETMON_API_KEY || !imo) return null;
+  try {
+    const url = `https://www.fleetmon.com/api/p/personal-v2/vessel/${encodeURIComponent(imo)}/?format=json`;
+    const creds = Buffer.from(`${FLEETMON_API_USER}:${FLEETMON_API_KEY}`).toString('base64');
+    const r = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: { Authorization: `Basic ${creds}`, 'User-Agent': WIKIDATA_UA },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
 async function resolveVessel(id, props = {}) {
   // When a vessel is clicked from the map, the id may be an IMO or MMSI number.
   // Normalize: if id is purely numeric, treat it as IMO (7 digits) or MMSI (9 digits)
@@ -862,13 +910,17 @@ async function resolveVessel(id, props = {}) {
     const filter = `${qidFilter}${imoFilter}{ ?item wdt:P458 "${sid}" . } UNION { ?item rdfs:label "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . } UNION { ?item skos:altLabel "${sid}"@en . ?item wdt:P31/wdt:P279* wd:Q11446 . }`;
 
     const results = await sparql(`
-      SELECT ?item ?itemLabel ?ownerLabel ?countryLabel ?operatorLabel ?flagLabel
+      SELECT ?item ?itemLabel ?ownerLabel ?ownerCountryLabel ?countryLabel
+             ?operatorLabel ?operatorCountryLabel ?flagLabel ?classSocietyLabel
              ?imoNumber ?mmsi ?grossTonnage ?builtYear ?vesselTypeLabel ?length ?beam WHERE {
         ${filter}
-        OPTIONAL { ?item wdt:P127 ?owner . }
+        OPTIONAL { ?item wdt:P127 ?owner .
+                   OPTIONAL { ?owner wdt:P17 ?ownerCountry . } }
         OPTIONAL { ?item wdt:P17 ?country . }
-        OPTIONAL { ?item wdt:P137 ?operator . }
+        OPTIONAL { ?item wdt:P137 ?operator .
+                   OPTIONAL { ?operator wdt:P17 ?operatorCountry . } }
         OPTIONAL { ?item wdt:P8047 ?flag . }
+        OPTIONAL { ?item wdt:P3455 ?classSociety . }
         OPTIONAL { ?item wdt:P458 ?imoNumber . }
         OPTIONAL { ?item wdt:P587 ?mmsi . }
         OPTIONAL { ?item wdt:P1093 ?grossTonnage . }
@@ -897,6 +949,11 @@ async function resolveVessel(id, props = {}) {
         const oid = `company:${r.ownerLabel.value}`;
         nodes.push({ id: oid, label: r.ownerLabel.value, type: 'company', properties: { source: 'Wikidata' } });
         links.push({ source: rootId, target: oid, label: 'OWNED BY' });
+        if (r.ownerCountryLabel?.value) {
+          const cid = `country:${r.ownerCountryLabel.value}`;
+          nodes.push({ id: cid, label: r.ownerCountryLabel.value, type: 'country', properties: { source: 'Wikidata' } });
+          links.push({ source: oid, target: cid, label: 'HQ' });
+        }
       }
       const flag = r.flagLabel?.value || r.countryLabel?.value;
       if (flag) {
@@ -908,6 +965,16 @@ async function resolveVessel(id, props = {}) {
         const oid = `company:${r.operatorLabel.value}`;
         nodes.push({ id: oid, label: r.operatorLabel.value, type: 'company', properties: { source: 'Wikidata' } });
         links.push({ source: rootId, target: oid, label: 'OPERATED BY' });
+        if (r.operatorCountryLabel?.value) {
+          const cid = `country:${r.operatorCountryLabel.value}`;
+          nodes.push({ id: cid, label: r.operatorCountryLabel.value, type: 'country', properties: { source: 'Wikidata' } });
+          links.push({ source: oid, target: cid, label: 'HQ' });
+        }
+      }
+      if (r.classSocietyLabel?.value) {
+        const csid = `company:${r.classSocietyLabel.value}`;
+        nodes.push({ id: csid, label: r.classSocietyLabel.value, type: 'company', properties: { source: 'Wikidata' } });
+        links.push({ source: rootId, target: csid, label: 'CLASSED BY' });
       }
     }
   } catch (e) { console.warn('[INTEL] Wikidata vessel error:', e.message); }
@@ -1104,6 +1171,62 @@ async function resolveVessel(id, props = {}) {
         }
       }
     } catch (e) { console.warn('[INTEL] Wikipedia vessel error:', e.message); }
+  }
+
+  // Global Fishing Watch — vessel identity with registeredOwner / owner.
+  // Best coverage for shadow-fleet tankers, transshipment, and fishing vessels.
+  // Set GFW_API_KEY env var (free at globalfishingwatch.org/data-download/).
+  try {
+    const gfw = await fetchGFWVessel(searchName, resolvedImo, hintMmsi);
+    if (gfw) {
+      // Prefer registeredOwner; fall back to owner; skip if identical to an existing node
+      const ownerName = gfw.registeredOwner?.trim() || gfw.owner?.trim();
+      if (ownerName) {
+        const oid = `company:${ownerName}`;
+        nodes.push({ id: oid, label: ownerName, type: 'company', properties: { source: 'GFW' } });
+        links.push({ source: rootId, target: oid, label: gfw.registeredOwner ? 'REGISTERED OWNER' : 'OPERATED BY' });
+      }
+      // Fill in identifiers not yet known from AIS
+      if (!resolvedImo && gfw.imo)   resolvedImo = gfw.imo;
+      if (!hintMmsi  && gfw.ssvid)   hintMmsi    = gfw.ssvid;
+      if (!hintMmsi  && gfw.mmsi)    hintMmsi    = gfw.mmsi;
+      // Physical dimensions if not already set by Wikidata
+      const dimProps = {};
+      if (gfw.lengthM    && !nodes.find(n => n.id === rootId && n.properties?.length_m))  dimProps.length_m      = Math.round(gfw.lengthM);
+      if (gfw.tonnageGt  && !nodes.find(n => n.id === rootId && n.properties?.gross_tonnage)) dimProps.gross_tonnage = Math.round(gfw.tonnageGt);
+      if (gfw.callsign)  dimProps.call_sign = gfw.callsign;
+      if (Object.keys(dimProps).length) nodes.push({ id: rootId, label: displayId, type: 'vessel', properties: { ...dimProps, source: 'GFW' } });
+    }
+  } catch (e) { console.warn('[INTEL] GFW vessel error:', e.message); }
+
+  // FleetMon — commercial vessel details by IMO (free 30 req/day).
+  // Set FLEETMON_API_USER + FLEETMON_API_KEY env vars (register at fleetmon.com).
+  if (resolvedImo) {
+    try {
+      const fm = await fetchFleetMon(resolvedImo);
+      if (fm) {
+        for (const [field, label] of [['owner', 'OWNED BY'], ['operator', 'OPERATED BY']]) {
+          const name = fm[field]?.trim();
+          if (name) {
+            const oid = `company:${name}`;
+            nodes.push({ id: oid, label: name, type: 'company', properties: { source: 'FleetMon' } });
+            links.push({ source: rootId, target: oid, label });
+          }
+        }
+        if (fm.class_society?.trim()) {
+          const csid = `company:${fm.class_society}`;
+          nodes.push({ id: csid, label: fm.class_society, type: 'company', properties: { source: 'FleetMon' } });
+          links.push({ source: rootId, target: csid, label: 'CLASSED BY' });
+        }
+        const fmProps = {};
+        if (fm.gross_tonnage)   fmProps.gross_tonnage = fm.gross_tonnage;
+        if (fm.year_of_build)   fmProps.year_built    = fm.year_of_build;
+        if (fm.length)          fmProps.length_m      = fm.length;
+        if (fm.beam)            fmProps.beam_m        = fm.beam;
+        if (fm.type_of_vessel)  fmProps.vessel_type   = fm.type_of_vessel;
+        if (Object.keys(fmProps).length) nodes.push({ id: rootId, label: displayId, type: 'vessel', properties: { ...fmProps, source: 'FleetMon' } });
+      }
+    } catch (e) { console.warn('[INTEL] FleetMon vessel error:', e.message); }
   }
 
   if (searchName) addSanctionsToGraph(searchName, rootId, nodes, links);
