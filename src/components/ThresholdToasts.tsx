@@ -98,6 +98,19 @@ function Toast({ alert, onDismiss, onLocate }: {
   );
 }
 
+// A collapsed group card mounts no <Toast>, so it would never auto-dismiss.
+// This render-nothing child arms the same 25s timer the Toast uses, calling the
+// latest onDismiss via a ref so re-renders don't reset the countdown.
+function GroupAutoDismiss({ onDismiss }: { onDismiss: () => void }) {
+  const ref = useRef(onDismiss);
+  ref.current = onDismiss;
+  useEffect(() => {
+    const t = setTimeout(() => ref.current(), AUTO_DISMISS_MS);
+    return () => clearTimeout(t);
+  }, []);
+  return null;
+}
+
 export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [groupExpanded, setGroupExpanded] = useState<Set<string>>(new Set());
@@ -179,6 +192,9 @@ export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props)
           >
             {/* Thin colored stripe at top — no animation */}
             <div className="h-0.5 w-full" style={{ background: color, opacity: 0.5 }} />
+
+            {/* Auto-dismiss the whole group after 25s even while collapsed */}
+            <GroupAutoDismiss onDismiss={() => dismissGroup(ruleAlerts)} />
 
             {/* Group header */}
             <div className="px-3 py-2.5">

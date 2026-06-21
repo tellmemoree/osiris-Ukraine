@@ -47,7 +47,11 @@ export async function loadTrackEntries(file: string): Promise<TrackEntry[]> {
     if (!Array.isArray(raw)) return [];
     return (raw as TrackEntry[]).filter(
       e => typeof e?.ts === 'number' && isFinite(e.ts) &&
-           typeof e?.lat === 'number' && typeof e?.lng === 'number',
+           typeof e?.lat === 'number' && isFinite(e.lat) &&
+           typeof e?.lng === 'number' && isFinite(e.lng) &&
+           typeof e?.weaponType === 'string' &&
+           typeof e?.channel === 'string' &&
+           typeof e?.oblast === 'string',
     );
   } catch {
     return [];
@@ -56,6 +60,7 @@ export async function loadTrackEntries(file: string): Promise<TrackEntry[]> {
 
 async function saveTrackEntries(file: string, entries: TrackEntry[]): Promise<void> {
   try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
     await fs.writeFile(file, JSON.stringify(entries));
   } catch { /* non-fatal */ }
 }
@@ -64,8 +69,13 @@ async function saveTrackEntries(file: string, entries: TrackEntry[]): Promise<vo
 
 /**
  * Merges `incoming` entries into the stored history, prunes entries older
- * than `ttlMs`, deduplicates by `${channel}:${ts}`, writes back to disk,
- * and returns the updated array.
+ * than `ttlMs`, deduplicates by `${weaponType}:${channel}:${ts}`, writes back
+ * to disk, and returns the updated array.
+ *
+ * weaponType is part of the dedup key because the missile file is shared by all
+ * missile types: a single message classified as two types (e.g. the generic
+ * `ракетн` fallback co-firing with a specific type) produces two entries with
+ * the same channel+ts but different weaponType, and both must be kept.
  */
 export async function mergeAndSaveTracks(
   file:     string,
@@ -82,9 +92,9 @@ export async function mergeAndSaveTracks(
   const cutoff  = Date.now() - ttlMs;
   const existing = (await loadTrackEntries(file)).filter(e => e.ts > cutoff);
 
-  const seen = new Set(existing.map(e => `${e.channel}:${e.ts}`));
+  const seen = new Set(existing.map(e => `${e.weaponType}:${e.channel}:${e.ts}`));
   for (const entry of incoming) {
-    const key = `${entry.channel}:${entry.ts}`;
+    const key = `${entry.weaponType}:${entry.channel}:${entry.ts}`;
     if (!seen.has(key)) {
       existing.push(entry);
       seen.add(key);
