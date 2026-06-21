@@ -124,21 +124,41 @@ function EntityGraphPanel({ entity, onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const mergeGraph = useCallback((existing: GraphData, incoming: GraphData): GraphData => {
-    const nodeMap = new Map<string, EntityNode>();
-    for (const n of existing.nodes) nodeMap.set(n.id, n);
-    for (const n of incoming.nodes) if (!nodeMap.has(n.id)) nodeMap.set(n.id, n);
-    const linkSet = new Set(existing.links.map(l => {
-      const s = typeof l.source === 'string' ? l.source : l.source.id;
-      const t = typeof l.target === 'string' ? l.target : l.target.id;
-      return `${s}→${t}→${l.label}`;
-    }));
+    // Case-insensitive dedup: "vessel:RIGEL" and "vessel:Rigel" are the same node.
+    const normId = (id: string): string => {
+      const c = id.indexOf(':');
+      if (c < 0) return id.trim().toLowerCase();
+      return `${id.slice(0, c)}:${id.slice(c + 1).trim().toLowerCase()}`;
+    };
+
+    const normToCanon = new Map<string, string>(); // normKey → canonical id (first seen)
+    const nodeMap = new Map<string, EntityNode>();  // normKey → node (existing keeps physics state)
+
+    for (const n of existing.nodes) {
+      const key = normId(n.id);
+      if (!nodeMap.has(key)) { normToCanon.set(key, n.id); nodeMap.set(key, n); }
+    }
+    for (const n of incoming.nodes) {
+      const key = normId(n.id);
+      if (!nodeMap.has(key)) { normToCanon.set(key, n.id); nodeMap.set(key, n); }
+    }
+
+    const rawId = (endpoint: string | EntityNode): string =>
+      typeof endpoint === 'string' ? endpoint : endpoint.id;
+    const resolveId = (id: string): string => normToCanon.get(normId(id)) ?? id;
+
+    const linkSet = new Set(existing.links.map(l =>
+      `${resolveId(rawId(l.source))}→${resolveId(rawId(l.target))}→${l.label}`
+    ));
+
     const merged = [...existing.links];
     for (const l of incoming.links) {
-      const s = typeof l.source === 'string' ? l.source : l.source.id;
-      const t = typeof l.target === 'string' ? l.target : l.target.id;
+      const s = resolveId(rawId(l.source));
+      const t = resolveId(rawId(l.target));
       const k = `${s}→${t}→${l.label}`;
-      if (!linkSet.has(k)) { linkSet.add(k); merged.push(l); }
+      if (!linkSet.has(k)) { linkSet.add(k); merged.push({ ...l, source: s, target: t }); }
     }
+
     return { nodes: Array.from(nodeMap.values()), links: merged };
   }, []);
 

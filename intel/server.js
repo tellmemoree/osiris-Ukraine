@@ -624,16 +624,26 @@ function addSanctionsToGraph(query, rootId, nodes, links) {
   }
 }
 
-function dedup(nodes, links) {
-  // Merge properties from duplicate nodes rather than discarding later entries.
-  // Earlier sources (Wikidata) populate the base; later sources (OpenSanctions) fill gaps.
-  const byId = new Map();
+function dedup(nodes, links, rootId = null) {
+  // Case-insensitive ID normalization: "vessel:RIGEL" and "vessel:Rigel" are the same node.
+  const normKey = id => {
+    if (!id) return String(id);
+    const s = String(id);
+    const c = s.indexOf(':');
+    if (c < 0) return s.trim().toLowerCase();
+    return `${s.slice(0, c)}:${s.slice(c + 1).trim().toLowerCase()}`;
+  };
+
+  const keyToCanon = new Map(); // normKey → canonical id (first seen)
+  const byKey = new Map();      // normKey → merged node
+
   for (const n of nodes) {
-    if (!byId.has(n.id)) {
-      byId.set(n.id, { ...n, properties: { ...n.properties } });
+    const key = normKey(n.id);
+    if (!byKey.has(key)) {
+      keyToCanon.set(key, n.id);
+      byKey.set(key, { ...n, properties: { ...n.properties } });
     } else {
-      const existing = byId.get(n.id);
-      // Fill in missing properties; never overwrite an already-set value
+      const existing = byKey.get(key);
       for (const [k, v] of Object.entries(n.properties || {})) {
         if (v !== undefined && v !== null && v !== '' && !existing.properties[k]) {
           existing.properties[k] = v;
@@ -641,13 +651,27 @@ function dedup(nodes, links) {
       }
     }
   }
+
+  // Remap link endpoints to canonical IDs, then dedup links.
+  const resolveId = id => keyToCanon.get(normKey(String(id))) || String(id);
   const lSeen = new Set();
   const uLinks = [];
   for (const l of links) {
-    const k = `${l.source}→${l.target}→${l.label}`;
-    if (!lSeen.has(k)) { lSeen.add(k); uLinks.push(l); }
+    const src = resolveId(l.source);
+    const tgt = resolveId(l.target);
+    const k = `${src}→${tgt}→${l.label}`;
+    if (!lSeen.has(k)) { lSeen.add(k); uLinks.push({ ...l, source: src, target: tgt }); }
   }
-  return { nodes: [...byId.values()], links: uLinks };
+
+  // Filter orphan nodes: any node with no link endpoints referencing it is noise.
+  // Always keep the root entity node; if there are no links yet, keep everything.
+  if (uLinks.length > 0) {
+    const linked = new Set(uLinks.flatMap(l => [l.source, l.target]));
+    const allNodes = [...byKey.values()].filter(n => linked.has(n.id) || n.id === rootId);
+    return { nodes: allNodes, links: uLinks };
+  }
+
+  return { nodes: [...byKey.values()], links: uLinks };
 }
 
 async function resolveAircraft(id, properties = {}) {
@@ -816,7 +840,7 @@ async function resolveAircraft(id, properties = {}) {
   if (airlineName) addSanctionsToGraph(airlineName, rootId, nodes, links);
   if (registration) addSanctionsToGraph(registration, rootId, nodes, links);
 
-  const result = dedup(nodes, links);
+  const result = dedup(nodes, links, rootId);
   wdCacheSet(cacheKey, result);
   return result;
 }
@@ -1234,7 +1258,7 @@ async function resolveVessel(id, props = {}) {
 
   if (searchName) addSanctionsToGraph(searchName, rootId, nodes, links);
   addSanctionsToGraph(displayId, rootId, nodes, links);
-  const result = dedup(nodes, links);
+  const result = dedup(nodes, links, rootId);
   wdCacheSet(`vessel:${displayId}`, result);
   return result;
 }
@@ -1550,7 +1574,7 @@ async function resolveCompany(id) {
   } catch (e) { console.warn('[INTEL] Wikipedia company error:', e.message); }
 
   addSanctionsToGraph(id, rootId, nodes, links);
-  const result = dedup(nodes, links);
+  const result = dedup(nodes, links, rootId);
   wdCacheSet(`company:${id}`, result);
   return result;
 }
@@ -1668,7 +1692,7 @@ async function resolvePerson(id) {
   } catch (e) { console.warn('[INTEL] Wikipedia person error:', e.message); }
 
   addSanctionsToGraph(id, rootId, nodes, links);
-  const result = dedup(nodes, links);
+  const result = dedup(nodes, links, rootId);
   wdCacheSet(`person:${id}`, result);
   return result;
 }
@@ -1875,7 +1899,7 @@ async function resolveIP(id) {
     } catch (e) { console.warn('[INTEL] AbuseIPDB error:', e.message); }
   }
 
-  const result = dedup(nodes, links);
+  const result = dedup(nodes, links, rootId);
   wdCacheSet(`ip:${id}`, result);
   return result;
 }
@@ -1959,7 +1983,7 @@ async function resolveCountry(id) {
   } catch (e) { console.warn('[INTEL] Wikidata country error:', e.message); }
 
   addSanctionsToGraph(id, rootId, nodes, links);
-  const result = dedup(nodes, links);
+  const result = dedup(nodes, links, rootId);
   wdCacheSet(`country:${id}`, result);
   return result;
 }
