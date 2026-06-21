@@ -48,6 +48,7 @@ const OPENSANCTIONS_API_KEY  = process.env.OPENSANCTIONS_API_KEY  || '';
 const GFW_API_KEY            = process.env.GFW_API_KEY            || '';
 const FLEETMON_API_USER      = process.env.FLEETMON_API_USER      || '';
 const FLEETMON_API_KEY       = process.env.FLEETMON_API_KEY       || '';
+const COMPANIES_HOUSE_KEY    = process.env.COMPANIES_HOUSE_KEY    || '';
 
 // Persist resolved entities across restarts so rate-limited API calls aren't re-made.
 // /data is a volume mount in production; falls back to a local dir in dev.
@@ -173,8 +174,10 @@ const ALLOWED_DOMAINS = new Set([
   'api.adsb.lol',                       // ADS-B live state + registration by ICAO24
   'api.hackertarget.com',               // reverse IP → co-hosted domains
   ...(OPENSANCTIONS_API_KEY ? ['api.opensanctions.org'] : []),
-  ...(GFW_API_KEY       ? ['gateway.api.globalfishingwatch.org'] : []),
-  ...(FLEETMON_API_USER ? ['www.fleetmon.com'] : []),
+  ...(GFW_API_KEY            ? ['gateway.api.globalfishingwatch.org'] : []),
+  ...(FLEETMON_API_USER      ? ['www.fleetmon.com'] : []),
+  'api.gleif.org',                      // LEI → parent company + country (keyless)
+  ...(COMPANIES_HOUSE_KEY    ? ['api.company-information.service.gov.uk'] : []),
 ]);
 
 // ════════════════════════════════════════════════════
@@ -1236,6 +1239,64 @@ async function resolveVessel(id, props = {}) {
   return result;
 }
 
+// ─── GLEIF LEI lookup ───────────────────────────────────────────────────────
+// Returns { lei, legalName, country, parentLei, parentName, parentCountry } or null.
+// Truly keyless. Useful for finding a company's incorporation country and parent chain.
+// The old fuzzycompanySearch endpoint was deprecated; this uses the current filter API.
+async function fetchGLEIF(companyName) {
+  try {
+    const url = `https://api.gleif.org/api/v1/lei-records?filter[entity.legalName]=${encodeURIComponent(companyName)}&page[size]=1`;
+    if (!ALLOWED_DOMAINS.has('api.gleif.org')) return null;
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': WIKIDATA_UA } });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const rec = d.data?.[0];
+    if (!rec) return null;
+    const ent = rec.attributes?.entity || {};
+    const result = {
+      lei:     rec.id,
+      legalName: ent.legalName?.name,
+      country: ent.legalAddress?.country,
+      status:  ent.status,
+    };
+    // Follow the direct-parent relationship link when present
+    const parentLink = d.data?.[0]?.relationships?.['direct-parent']?.links?.related;
+    if (parentLink && ALLOWED_DOMAINS.has(new URL(parentLink).hostname)) {
+      try {
+        const pr = await fetch(parentLink, { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': WIKIDATA_UA } });
+        if (pr.ok) {
+          const pd = await pr.json();
+          const pRec = pd.data?.[0];
+          if (pRec) {
+            result.parentLei     = pRec.id;
+            result.parentName    = pRec.attributes?.entity?.legalName?.name;
+            result.parentCountry = pRec.attributes?.entity?.legalAddress?.country;
+          }
+        }
+      } catch { /* parent fetch is best-effort */ }
+    }
+    return result;
+  } catch { return null; }
+}
+
+// ─── Companies House UK officers ────────────────────────────────────────────
+// Free API key (register at developer.company-information.service.gov.uk).
+// Returns active officers for a UK company number.
+async function fetchCompaniesHouseOfficers(companyNumber) {
+  if (!COMPANIES_HOUSE_KEY) return null;
+  try {
+    const url = `https://api.company-information.service.gov.uk/company/${encodeURIComponent(companyNumber)}/officers`;
+    if (!ALLOWED_DOMAINS.has(new URL(url).hostname)) return null;
+    const creds = Buffer.from(`${COMPANIES_HOUSE_KEY}:`).toString('base64');
+    const r = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: { Authorization: `Basic ${creds}`, 'User-Agent': WIKIDATA_UA },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
 async function resolveCompany(id) {
   const rootId = `company:${id}`;
   const nodes = [], links = [];
@@ -1252,13 +1313,16 @@ async function resolveCompany(id) {
       ? `VALUES ?item { ${qids.map(q => `wd:${q}`).join(' ')} }`
       : `{ ?item rdfs:label "${cSid}"@en . ?item wdt:P31 ?t . FILTER(?t IN (wd:Q4830453, wd:Q43229, wd:Q891723, wd:Q6881511)) }`;
     const results = await sparql(`
-      SELECT ?item ?itemLabel ?countryLabel ?parentLabel ?ceoLabel ?chairLabel ?keyPersonLabel ?ownerLabel WHERE {
+      SELECT ?item ?itemLabel ?countryLabel ?parentLabel ?ceoLabel ?chairLabel
+             ?boardMemberLabel ?directorLabel ?founderLabel ?ownerLabel WHERE {
         ${filter}
         OPTIONAL { ?item wdt:P17  ?country . }
         OPTIONAL { ?item wdt:P749 ?parent . }
         OPTIONAL { ?item wdt:P169 ?ceo . }
         OPTIONAL { ?item wdt:P488 ?chair . }
-        OPTIONAL { ?item wdt:P3220 ?keyPerson . }
+        OPTIONAL { ?item wdt:P3320 ?boardMember . }
+        OPTIONAL { ?item wdt:P1037 ?director . }
+        OPTIONAL { ?item wdt:P112  ?founder . }
         OPTIONAL { ?item wdt:P127 ?owner . }
         SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
       } LIMIT 12`);
@@ -1279,7 +1343,10 @@ async function resolveCompany(id) {
         nodes.push({ id: pid, label: r.ownerLabel.value, type: 'company', properties: { source: 'Wikidata' } });
         links.push({ source: rootId, target: pid, label: 'OWNED BY' });
       }
-      for (const [roleKey, roleLabel] of [['ceoLabel','CEO'], ['chairLabel','CHAIRPERSON'], ['keyPersonLabel','KEY PERSON']]) {
+      for (const [roleKey, roleLabel] of [
+        ['ceoLabel','CEO'], ['chairLabel','CHAIRPERSON'],
+        ['boardMemberLabel','BOARD MEMBER'], ['directorLabel','DIRECTOR'], ['founderLabel','FOUNDER'],
+      ]) {
         const name = r[roleKey]?.value;
         if (name && !seenPeople.has(name)) {
           seenPeople.add(name);
@@ -1288,6 +1355,29 @@ async function resolveCompany(id) {
           links.push({ source: rootId, target: pid, label: roleLabel });
         }
       }
+    }
+
+    // Reverse P108 lookup: find Wikidata persons whose employer is this company.
+    // Uses the same QIDs we already found — only runs when the company is in Wikidata.
+    if (qids.length > 0) {
+      try {
+        const empResults = await sparql(`
+          SELECT DISTINCT ?personLabel WHERE {
+            VALUES ?co { ${qids.map(q => `wd:${q}`).join(' ')} }
+            ?person wdt:P108 ?co .
+            ?person wdt:P31 wd:Q5 .
+            SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
+          } LIMIT 8`);
+        for (const r of empResults) {
+          const name = r.personLabel?.value;
+          if (name && !seenPeople.has(name)) {
+            seenPeople.add(name);
+            const pid = `person:${name}`;
+            nodes.push({ id: pid, label: name, type: 'person', properties: { role: 'employee', source: 'Wikidata' } });
+            links.push({ source: rootId, target: pid, label: 'EMPLOYEE' });
+          }
+        }
+      } catch { /* silent — reverse lookup is best-effort */ }
     }
   } catch (e) { console.warn('[INTEL] Wikidata company error:', e.message); }
 
@@ -1361,10 +1451,50 @@ async function resolveCompany(id) {
               if (off.nationality) linkCountry(off.nationality.slice(0, 2).toLowerCase(), pid, nodes, links, 'NATIONALITY');
             }
           }
+          // Companies House — UK-only, free API key, more complete/current than OpenCorporates
+          if (jur.startsWith('gb')) {
+            const chData = await fetchCompaniesHouseOfficers(num);
+            for (const item of (chData?.items || []).filter(i => !i.resigned_on).slice(0, 10)) {
+              if (!item.name) continue;
+              const pid = `person:${item.name}`;
+              const role = item.officer_role || 'Officer';
+              nodes.push({ id: pid, label: item.name, type: 'person', properties: { role, source: 'Companies House' } });
+              links.push({ source: rootId, target: pid, label: role.replace(/_/g, ' ').toUpperCase() });
+              if (item.nationality) linkCountry(item.nationality.slice(0, 2).toLowerCase(), pid, nodes, links, 'NATIONALITY');
+            }
+          }
         }
       }
     }
   } catch (e) { console.warn('[INTEL] OpenCorporates error:', e.message); }
+
+  // GLEIF LEI — incorporation country + direct parent company chain (keyless).
+  // Most useful for shell companies and holding structures in the shadow fleet.
+  try {
+    const gleif = await fetchGLEIF(id);
+    if (gleif?.lei) {
+      const gleifProps = { lei: gleif.lei, source: 'GLEIF' };
+      if (gleif.status) gleifProps.status = gleif.status;
+      nodes.push({ id: rootId, label: id, type: 'company', properties: gleifProps });
+      if (gleif.country) {
+        const cname = CC[gleif.country.toLowerCase()] || gleif.country;
+        const cid = `country:${cname}`;
+        nodes.push({ id: cid, label: cname, type: 'country', properties: { source: 'GLEIF' } });
+        links.push({ source: rootId, target: cid, label: 'INCORPORATED IN' });
+      }
+      if (gleif.parentName) {
+        const pid = `company:${gleif.parentName}`;
+        nodes.push({ id: pid, label: gleif.parentName, type: 'company', properties: { source: 'GLEIF', lei: gleif.parentLei } });
+        links.push({ source: rootId, target: pid, label: 'PARENT ORG' });
+        if (gleif.parentCountry) {
+          const cname = CC[gleif.parentCountry.toLowerCase()] || gleif.parentCountry;
+          const cid = `country:${cname}`;
+          nodes.push({ id: cid, label: cname, type: 'country', properties: { source: 'GLEIF' } });
+          links.push({ source: pid, target: cid, label: 'INCORPORATED IN' });
+        }
+      }
+    }
+  } catch (e) { console.warn('[INTEL] GLEIF error:', e.message); }
 
   // FtM offline lookup — ua_war_sanctions has structured company → country + director edges
   const ftmCo = ftmCompanyByName.get(id.toUpperCase());
