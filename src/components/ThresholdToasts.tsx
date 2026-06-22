@@ -98,6 +98,109 @@ function Toast({ alert, onDismiss, onLocate }: {
   );
 }
 
+function GroupCard({ rule, ruleAlerts, onDismissGroup, onLocate, groupExpanded, onToggle }: {
+  rule: string;
+  ruleAlerts: ThresholdAlert[];
+  onDismissGroup: (alerts: ThresholdAlert[]) => void;
+  onLocate?: (lat: number, lng: number) => void;
+  groupExpanded: boolean;
+  onToggle: () => void;
+}) {
+  // Auto-dismiss the group after 25 s, same as single Toast
+  useEffect(() => {
+    const timer = setTimeout(() => onDismissGroup(ruleAlerts), AUTO_DISMISS_MS);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- rule is stable identity for this group; ruleAlerts reference changes on every render but the group identity (rule) is the correct key
+  }, [rule]);
+
+  const color = (() => {
+    let best = ruleAlerts[0];
+    for (const a of ruleAlerts) {
+      if ((SEV_RANK[a.severity] ?? 0) > (SEV_RANK[best.severity] ?? 0)) best = a;
+    }
+    return SEV_COLOR[best.severity] ?? '#FFD700';
+  })();
+
+  const isExpanded = groupExpanded;
+  const count = ruleAlerts.length;
+
+  return (
+    <div
+      className="glass-panel pointer-events-auto overflow-hidden"
+      style={{ width: 300, borderColor: `${color}33` }}
+    >
+      {/* Thin colored stripe at top — no animation */}
+      <div className="h-0.5 w-full" style={{ background: color, opacity: 0.5 }} />
+
+      {/* Group header */}
+      <div className="px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <div
+              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              style={{ background: color, boxShadow: `0 0 6px ${color}80` }}
+            />
+            <span
+              className="text-[9px] font-mono font-bold tracking-widest uppercase truncate"
+              style={{ color }}
+            >
+              {rule}
+            </span>
+            {/* Count badge */}
+            <span
+              className="ml-1 flex-shrink-0 px-1 py-0.5 rounded text-[8px] font-mono font-bold leading-none"
+              style={{ background: `${color}33`, color }}
+            >
+              {count}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {/* Expand / collapse chevron */}
+            <button
+              onClick={onToggle}
+              className="text-white/30 hover:text-white/60"
+              aria-label={isExpanded ? 'Collapse group' : 'Expand group'}
+            >
+              {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            </button>
+            {/* Dismiss all */}
+            <button
+              onClick={() => onDismissGroup(ruleAlerts)}
+              className="text-white/30 hover:text-white/60"
+              aria-label="Dismiss all in group"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        </div>
+
+        {/* Summary line when collapsed */}
+        {!isExpanded && (
+          <p className="mt-1.5 text-[9px] font-mono text-white/45 leading-snug">
+            {ruleAlerts[0].title}
+            {count > 1 && <span className="text-white/30"> +{count - 1} more</span>}
+          </p>
+        )}
+      </div>
+
+      {/* Expanded individual toasts */}
+      {isExpanded && (
+        <div className="flex flex-col gap-1 px-1 pb-1">
+          {ruleAlerts.map(alert => (
+            <Toast
+              key={alert.id}
+              alert={alert}
+              onLocate={onLocate}
+              onDismiss={() => onDismissGroup([alert])}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [groupExpanded, setGroupExpanded] = useState<Set<string>>(new Set());
@@ -112,7 +215,7 @@ export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props)
     }
   }, [alerts, dismissed, onNewAlert]);
 
-  const visible = alerts.filter(a => !dismissed.has(a.id)).slice(0, 5);
+  const visible = alerts.filter(a => !dismissed.has(a.id));
   if (!visible.length) return null;
 
   // Build group map keyed on alert.rule
@@ -121,7 +224,8 @@ export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props)
     if (!groups.has(a.rule)) groups.set(a.rule, []);
     groups.get(a.rule)!.push(a);
   }
-  const groupList = Array.from(groups.entries()).slice(0, 4);
+  // Cap rendered groups (not raw alerts) to 5
+  const groupList = Array.from(groups.entries()).slice(0, 5);
 
   const dismissGroup = (ruleAlerts: ThresholdAlert[]) => {
     setDismissed(prev => new Set([...prev, ...ruleAlerts.map(a => a.id)]));
@@ -137,17 +241,6 @@ export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props)
       }
       return next;
     });
-  };
-
-  // Pick worst-severity color across a group
-  const worstColor = (ruleAlerts: ThresholdAlert[]): string => {
-    let best = ruleAlerts[0];
-    for (const a of ruleAlerts) {
-      if ((SEV_RANK[a.severity] ?? 0) > (SEV_RANK[best.severity] ?? 0)) {
-        best = a;
-      }
-    }
-    return SEV_COLOR[best.severity] ?? '#FFD700';
   };
 
   return (
@@ -167,85 +260,17 @@ export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props)
           );
         }
 
-        // Multiple alerts: render a group card
-        const color = worstColor(ruleAlerts);
-        const isExpanded = groupExpanded.has(rule);
-
+        // Multiple alerts: render GroupCard which owns the auto-dismiss timer
         return (
-          <div
+          <GroupCard
             key={rule}
-            className="glass-panel pointer-events-auto overflow-hidden"
-            style={{ width: 300, borderColor: `${color}33` }}
-          >
-            {/* Thin colored stripe at top — no animation */}
-            <div className="h-0.5 w-full" style={{ background: color, opacity: 0.5 }} />
-
-            {/* Group header */}
-            <div className="px-3 py-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                  <div
-                    className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                    style={{ background: color, boxShadow: `0 0 6px ${color}80` }}
-                  />
-                  <span
-                    className="text-[9px] font-mono font-bold tracking-widest uppercase truncate"
-                    style={{ color }}
-                  >
-                    {rule}
-                  </span>
-                  {/* Count badge */}
-                  <span
-                    className="ml-1 flex-shrink-0 px-1 py-0.5 rounded text-[8px] font-mono font-bold leading-none"
-                    style={{ background: `${color}33`, color }}
-                  >
-                    {count}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  {/* Expand / collapse chevron */}
-                  <button
-                    onClick={() => toggleGroup(rule)}
-                    className="text-white/30 hover:text-white/60"
-                    aria-label={isExpanded ? 'Collapse group' : 'Expand group'}
-                  >
-                    {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                  </button>
-                  {/* Dismiss all */}
-                  <button
-                    onClick={() => dismissGroup(ruleAlerts)}
-                    className="text-white/30 hover:text-white/60"
-                    aria-label="Dismiss all in group"
-                  >
-                    <X size={11} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Summary line when collapsed */}
-              {!isExpanded && (
-                <p className="mt-1.5 text-[9px] font-mono text-white/45 leading-snug">
-                  {ruleAlerts[0].title}
-                  {count > 1 && <span className="text-white/30"> +{count - 1} more</span>}
-                </p>
-              )}
-            </div>
-
-            {/* Expanded individual toasts */}
-            {isExpanded && (
-              <div className="flex flex-col gap-1 px-1 pb-1">
-                {ruleAlerts.map(alert => (
-                  <Toast
-                    key={alert.id}
-                    alert={alert}
-                    onLocate={onLocate}
-                    onDismiss={() => setDismissed(prev => new Set([...prev, alert.id]))}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+            rule={rule}
+            ruleAlerts={ruleAlerts}
+            onDismissGroup={dismissGroup}
+            onLocate={onLocate}
+            groupExpanded={groupExpanded.has(rule)}
+            onToggle={() => toggleGroup(rule)}
+          />
         );
       })}
     </div>

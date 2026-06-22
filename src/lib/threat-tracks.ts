@@ -48,7 +48,10 @@ export async function loadTrackEntries(file: string): Promise<TrackEntry[]> {
     if (!Array.isArray(raw)) return [];
     return (raw as TrackEntry[]).filter(
       e => typeof e?.ts === 'number' && isFinite(e.ts) &&
-           typeof e?.lat === 'number' && typeof e?.lng === 'number',
+           typeof e?.lat === 'number' && typeof e?.lng === 'number' &&
+           typeof e?.weaponType === 'string' && e.weaponType.length > 0 &&
+           typeof e?.channel === 'string' && e.channel.length > 0 &&
+           typeof e?.oblast === 'string' && e.oblast.length > 0,
     );
   } catch {
     return [];
@@ -57,6 +60,7 @@ export async function loadTrackEntries(file: string): Promise<TrackEntry[]> {
 
 async function saveTrackEntries(file: string, entries: TrackEntry[]): Promise<void> {
   try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
     await fs.writeFile(file, JSON.stringify(entries));
   } catch { /* non-fatal */ }
 }
@@ -65,7 +69,7 @@ async function saveTrackEntries(file: string, entries: TrackEntry[]): Promise<vo
 
 /**
  * Merges `incoming` entries into the stored history, prunes entries older
- * than `ttlMs`, deduplicates by `${channel}:${ts}`, writes back to disk,
+ * than `ttlMs`, deduplicates by `${weaponType}:${channel}:${ts}`, writes back to disk,
  * and returns the updated array.
  */
 export async function mergeAndSaveTracks(

@@ -396,9 +396,12 @@ function connectAisStream() {
           if (track.length === 0 || now - track[track.length - 1].ts >= TRACK_SAMPLE_MS) {
             const newLat = report.Latitude;
             const newLng = report.Longitude;
+            if (typeof newLat !== 'number' || isNaN(newLat) || newLat < -90 || newLat > 90 ||
+                typeof newLng !== 'number' || isNaN(newLng) || newLng < -180 || newLng > 180) {
+              // skip — invalid GPS fix
             // Reject ghost positions: if the implied speed from the last recorded
             // point exceeds MAX_SHIP_KPH the new fix is a GPS artifact, not movement.
-            if (track.length > 0) {
+            } else if (track.length > 0) {
               const prev = track[track.length - 1];
               const dtH = (now - prev.ts) / 3_600_000;
               const distKm = trackDistKm(prev.lat, prev.lng, newLat, newLng);
