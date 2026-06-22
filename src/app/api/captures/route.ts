@@ -165,6 +165,7 @@ export async function GET(req: Request) {
       source?: string; side_reported?: string; link?: string; date?: string; count: number;
       description?: string;
       conflicted: boolean;
+      confidence: 'high' | 'med' | 'low';
       other_name?: string;
       other_link?: string;
       other_source?: string;
@@ -209,6 +210,7 @@ export async function GET(req: Request) {
           source: item.source, side_reported: item.side, link: item.link, date: item.published, count: 1,
           description: item.description?.slice(0, 220),
           conflicted: false,
+          confidence: 'low',
         });
       }
     }
@@ -237,6 +239,10 @@ export async function GET(req: Request) {
       ua.other_link = ru.link;
       ua.other_source = ru.source;
       ua.other_side = 'ru';
+    }
+
+    for (const c of byCell.values()) {
+      c.confidence = captureConfidence(c.count, c.date, c.conflicted);
     }
 
     const captures = [...byCell.values()];
