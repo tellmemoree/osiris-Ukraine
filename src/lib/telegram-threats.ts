@@ -410,6 +410,20 @@ export async function extractGeoEvents(): Promise<{
   return out;
 }
 
+// ── fingerprinting ───────────────────────────────────────────────────────────
+
+/**
+ * Computes a dedup fingerprint for a Telegram message.
+ * Normalises whitespace, lower-cases, and truncates to 120 chars before
+ * bucketing into 10-minute epochs — so reposts of the same alert within the
+ * same 10-min window (across different channels) collapse to a single entry.
+ */
+export function msgFingerprint(text: string, ts: number): string {
+  const normalised = text.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 120);
+  const bucket = Math.floor(ts / 1_800_000); // 30-min epoch bucket — covers typical cross-channel repost lag
+  return `${bucket}:${normalised}`;
+}
+
 // ── route building ───────────────────────────────────────────────────────────
 
 // Messages matching these patterns are threat-level assessments or probability
@@ -461,8 +475,18 @@ export const WAVE_GAP_MS = 45 * 60 * 1000;
  * oblast in text order), preventing forecast posts from faking routes.
  */
 export function buildRoute(messages: TgMessage[], weaponType: WeaponType): RouteWave[] {
+  const seenFingerprints = new Set<string>();
+
   const relevant = messages
-    .filter(msg => classifyWeapons(msg.text).includes(weaponType) && !isAnalysis(msg.text))
+    .filter(msg => {
+      if (!classifyWeapons(msg.text).includes(weaponType)) return false;
+      if (isAnalysis(msg.text)) return false;
+      // Dedup reposts: same normalised text in the same 10-min bucket → skip
+      const fp = msgFingerprint(msg.text, msg.ts);
+      if (seenFingerprints.has(fp)) return false;
+      seenFingerprints.add(fp);
+      return true;
+    })
     .sort((a, b) => a.ts - b.ts);
 
   const waves: RouteWave[] = [];
@@ -498,4 +522,36 @@ export function buildRoute(messages: TgMessage[], weaponType: WeaponType): Route
 
   flush();
   return waves;
+}
+
+// ── UAV count extraction ─────────────────────────────────────────────────────
+
+/**
+ * Extracts the maximum single-strike UAV count mentioned across a set of
+ * (already-deduplicated) messages.  Takes the MAX, not the sum, because
+ * reposts of the same total figure must not inflate the count.
+ *
+ * Recognises Ukrainian patterns such as:
+ *   "28 × БПЛА", "28 x дрон", "28 Шахедів", "28 дронів", etc.
+ */
+export function extractUAVCount(messages: string[]): number {
+  // [×xх] covers: U+00D7 ×, ASCII x, U+0445 Cyrillic х — all used in UA reporting
+  const patterns = [
+    /(\d+)\s*[×xх]\s*бпла/giu,
+    /(\d+)\s*[×xх]\s*дрон/giu,
+    /(\d+)\s*[×xх]\s*шахед/giu,
+    /(\d+)\s+бпла/giu,
+    /(\d+)\s+дрон\w*/giu,
+    /(\d+)\s+шахед\w*/giu,
+  ];
+  let max = 0;
+  for (const msg of messages) {
+    for (const p of patterns) {
+      // Use matchAll to catch staged counts within one message ("10 БпЛА … now 28 БпЛА")
+      for (const m of msg.matchAll(p)) {
+        max = Math.max(max, parseInt(m[1], 10));
+      }
+    }
+  }
+  return max;
 }

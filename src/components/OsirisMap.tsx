@@ -294,7 +294,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       }
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality', 'ioda-outages', 'malware-nodes', 'thermal-aoi', 'captures', 'network-mesh', 'shadow-fleet-tracks'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'air-quality', 'ioda-outages', 'malware-nodes', 'thermal-aoi', 'captures', 'network-mesh', 'shadow-fleet-tracks', 'alarm-vectors'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -569,7 +569,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': 0.8 }});
       map.addLayer({ id: 'missile-route-arrows', type: 'symbol', source: 'missile-routes',
         filter: ['==', ['geometry-type'], 'LineString'],
-        layout: { 'symbol-placement': 'line', 'text-field': '▶', 'text-size': 10, 'text-font': ['Open Sans Regular'], 'symbol-spacing': 80 },
+        layout: { 'symbol-placement': 'line', 'text-field': '✦', 'text-size': 10, 'text-font': ['Open Sans Regular'], 'symbol-spacing': 80 },
         paint: { 'text-color': ['get', 'color'], 'text-halo-color': '#000', 'text-halo-width': 1 }});
       map.addLayer({ id: 'missile-route-nodes', type: 'circle', source: 'missile-routes',
         filter: ['==', ['geometry-type'], 'Point'],
@@ -585,6 +585,41 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         filter: ['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'isLatest'], true]],
         layout: { 'text-field': ['get', 'weaponLabel'], 'text-size': 9, 'text-font': ['Open Sans Regular'], 'text-offset': [0, 1.9], 'text-allow-overlap': false },
         paint: { 'text-color': ['get', 'color'], 'text-halo-color': '#000', 'text-halo-width': 1 }});
+
+      // Alarm-Vector inference layer — dashed lines + arrow markers derived from
+      // the temporal sequence of air-raid alarm activations across oblasts.
+      // Source is pre-registered in the sources array above; layers are controlled
+      // via activeLayers.alarm_vectors independently from the drone/missile toggles.
+      map.addLayer({
+        id: 'alarm-vector-line',
+        type: 'line',
+        source: 'alarm-vectors',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        paint: {
+          'line-color': '#FF9800',
+          'line-width': 1.5,
+          'line-opacity': 0.5,
+          'line-dasharray': [4, 3],
+        },
+      });
+      map.addLayer({
+        id: 'alarm-vector-arrow',
+        type: 'symbol',
+        source: 'alarm-vectors',
+        filter: ['==', ['geometry-type'], 'Point'],
+        layout: {
+          'text-field': '➤',
+          'text-size': 14,
+          'text-rotate': ['-', ['get', 'bearing'], 90],
+          'text-rotation-alignment': 'map',
+          'text-allow-overlap': true,
+        },
+        paint: {
+          'text-color': ['match', ['get', 'confidence'], 'high', '#FF9800', '#FF980088'],
+          'text-halo-color': '#000',
+          'text-halo-width': 1,
+        },
+      });
 
       // RU Oblast Alerts — red (Russian border oblast drone/strike incursions).
       // Note: 'ru-air-raids' is NOT in the sources array above — registered explicitly here.
@@ -1335,6 +1370,20 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Confirmed sighting signal — verify before acting.</div>
       </div>`);
     });
+
+    // ── Alarm-Vector Arrows — inferred wave-propagation vectors ──
+    map.on('click', 'alarm-vector-arrow', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      popup(coords, `<div style="${pStyle}border:1px solid rgba(255,152,0,0.4);max-width:260px;">
+        <div style="color:#FF9800;font-size:12px;font-weight:700;margin-bottom:4px;">⚡ INFERRED WAVE VECTOR</div>
+        <div style="font-size:9px;color:#5C5A54;margin-bottom:6px;">Derived from air-raid alarm activation sequence — NOT a GPS track</div>
+        <div style="font-size:9px;color:#E8E6E0;">Confidence: <span style="color:#FF9800;">${esc(p.confidence?.toUpperCase()||'—')}</span></div>
+      </div>`);
+    });
+    map.on('mouseenter', 'alarm-vector-arrow', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'alarm-vector-arrow', () => { map.getCanvas().style.cursor = ''; });
 
     // ── RU Oblast Alerts (Russian border oblast drone/strike incursions) ──
     map.on('click', 'ru-raid-dots', e => {
@@ -2284,6 +2333,29 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('missile-routes', features);
   }, [mapReady, data.missile_routes, activeLayers.missile_threats, setGeo]);
 
+  // Alarm-Vector inference layer — LineString from→to + Point arrow at destination.
+  // TODO: tighten AlarmVector[] type after backend merge (currently any[]).
+  useEffect(() => {
+    if (!mapReady) return;
+    const vectors: any[] = activeLayers.alarm_vectors && data.alarm_vectors ? data.alarm_vectors : [];
+    const features: any[] = [];
+    for (const v of vectors) {
+      // LineString from→to
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [[v.fromLng, v.fromLat], [v.toLng, v.toLat]] },
+        properties: { id: v.id, confidence: v.confidence, label: 'Inferred from alarm timing' },
+      });
+      // Point at destination for arrow
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [v.toLng, v.toLat] },
+        properties: { id: `${v.id}-arrow`, bearing: v.bearing, confidence: v.confidence },
+      });
+    }
+    setGeo('alarm-vectors', features);
+  }, [mapReady, data.alarm_vectors, activeLayers.alarm_vectors, setGeo]);
+
   // RU Oblast Alerts (Russian border oblast drone/strike incursions).
   useEffect(() => {
     if (!mapReady) return;
@@ -2403,6 +2475,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['kab-glow','kab-dots','kab-label'], activeLayers.kab_threats);
     setVis(['drone-route-line','drone-route-arrows','drone-route-nodes','drone-route-label'], activeLayers.drone_threats);
     setVis(['missile-route-line','missile-route-arrows','missile-route-nodes','missile-route-label'], activeLayers.missile_threats);
+    setVis(['alarm-vector-line','alarm-vector-arrow'], activeLayers.alarm_vectors);
     setVis(['ru-raid-glow','ru-raid-dots','ru-raid-label'], activeLayers.ru_air_raids);
     setVis(['thermal-aoi-glow','thermal-aoi-dots','thermal-aoi-label','thermal-aoi-unconfirmed-label'], activeLayers.thermal_aoi);
     setVis(['capture-glow','capture-dots'], activeLayers.captures);
