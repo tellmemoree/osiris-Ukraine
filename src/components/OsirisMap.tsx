@@ -591,17 +591,29 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       map.addSource('ru-air-raids', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       map.addLayer({ id: 'ru-raid-glow', type: 'circle', source: 'ru-air-raids', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 14, 5, 24, 10, 36],
-        'circle-color': '#EF5350', 'circle-opacity': 0.11, 'circle-blur': 1,
+        'circle-color': ['match', ['get', 'status'], 'all-clear', '#607D8B', 'unknown', '#FF9800', '#EF5350'],
+        'circle-opacity': ['match', ['get', 'status'], 'all-clear', 0.05, 0.11],
+        'circle-blur': 1,
       }});
       map.addLayer({ id: 'ru-raid-dots', type: 'circle', source: 'ru-air-raids', paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 5, 5, 9, 10, 13],
-        'circle-color': '#EF5350', 'circle-opacity': 0.85,
-        'circle-stroke-width': 2, 'circle-stroke-color': '#FF1744', 'circle-stroke-opacity': 0.5,
+        'circle-color': ['match', ['get', 'status'], 'all-clear', '#607D8B', 'unknown', '#FF9800', '#EF5350'],
+        'circle-opacity': ['match', ['get', 'status'], 'all-clear', 0.45, 0.85],
+        'circle-stroke-width': 2,
+        'circle-stroke-color': ['match', ['get', 'status'], 'all-clear', '#607D8B', 'unknown', '#FF9800', '#FF1744'],
+        'circle-stroke-opacity': 0.5,
       }});
       map.addLayer({ id: 'ru-raid-label', type: 'symbol', source: 'ru-air-raids', minzoom: 4, layout: {
-        'text-field': ['concat', 'RU ALERT: ', ['get','oblast']], 'text-size': 9, 'text-font': ['Open Sans Regular'],
+        'text-field': ['concat',
+          ['match', ['get', 'status'], 'all-clear', '[CLEAR] ', 'unknown', '[?] ', 'ALERT: '],
+          ['get', 'oblast'],
+        ],
+        'text-size': 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 1.9], 'text-allow-overlap': false,
-      }, paint: { 'text-color': '#EF5350', 'text-halo-color': '#000', 'text-halo-width': 1 }});
+      }, paint: {
+        'text-color': ['match', ['get', 'status'], 'all-clear', '#607D8B', 'unknown', '#FF9800', '#EF5350'],
+        'text-halo-color': '#000', 'text-halo-width': 1,
+      }});
 
       // Power Outages — amber/yellow grid-down indicators
       map.addLayer({ id: 'outage-glow', type: 'circle', source: 'power-outages', paint: {
@@ -1341,15 +1353,23 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       if (!e.features?.length) return;
       const p = e.features[0].properties as any;
       const coords = (e.features[0].geometry as any).coordinates;
-      popup(coords, `<div style="${pStyle}border:1px solid rgba(239,83,80,0.4);max-width:300px;">
-        <div style="color:#EF5350;font-size:13px;font-weight:700;margin-bottom:6px;">🇷🇺 RU OBLAST ALERT</div>
+      const statusColor = p.status === 'all-clear' ? '#607D8B' : p.status === 'unknown' ? '#FF9800' : '#EF5350';
+      const statusLabel = p.status === 'all-clear' ? '✓ ALL-CLEAR' : p.status === 'unknown' ? '? UNKNOWN' : '⚠ ACTIVE';
+      const confidenceLabel = p.confidence === 'high' ? 'HIGH' : p.confidence === 'medium' ? 'MED' : 'LOW';
+      popup(coords, `<div style="${pStyle}border:1px solid ${statusColor}40;max-width:300px;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          <span style="color:${statusColor};font-size:13px;font-weight:700;">🇷🇺 RU OBLAST ALERT</span>
+          <span style="background:${statusColor}22;color:${statusColor};font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;">${statusLabel}</span>
+        </div>
         <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${esc(p.oblast)||'Unknown oblast'}</div>
         <div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">Border oblast drone/strike incursion · 24h window</div>
-        <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid rgba(239,83,80,0.4);padding-left:6px;">${esc(p.snippet)}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
-          <div><span style="color:#5C5A54;">REPORTED</span><br/><span style="color:#E8E6E0;">${p.started_at ? new Date(p.started_at).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
-          <div><span style="color:#5C5A54;">SOURCE</span><br/><span style="color:#E8E6E0;font-size:8px;">${esc(p.source)||'—'}</span></div>
+        <div style="font-size:10px;color:#C8C6C0;line-height:1.35;margin-bottom:8px;border-left:2px solid ${statusColor}66;padding-left:6px;">${esc(p.snippet)}</div>
+        <div style="display:grid;grid-template-columns:${p.status === 'all-clear' && p.cleared_at ? '1fr 1fr 1fr' : '1fr 1fr'};gap:4px;font-size:9px;">
+          <div><span style="color:#5C5A54;">ALERTED</span><br/><span style="color:#E8E6E0;">${p.started_at ? new Date(p.started_at).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
+          ${p.status === 'all-clear' && p.cleared_at ? `<div><span style="color:#5C5A54;">CLEARED</span><br/><span style="color:#607D8B;">${new Date(p.cleared_at).toUTCString().slice(5,17)+' UTC'}</span></div>` : ''}
+          <div><span style="color:#5C5A54;">CONFIDENCE</span><br/><span style="color:#E8E6E0;">${confidenceLabel} (${Number(p.channel_count)||1} ch)</span></div>
         </div>
+        <div><span style="color:#5C5A54;font-size:9px;">SOURCE</span><br/><span style="color:#E8E6E0;font-size:8px;">${esc(p.source)||'—'}</span></div>
         <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Heuristic text signal — verify before acting.</div>
       </div>`);
     });
@@ -2291,7 +2311,16 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('ru-air-raids', events.map((e: any) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [e.lng, e.lat] },
-      properties: { oblast: e.oblast, started_at: e.started_at, source: e.source, snippet: e.snippet },
+      properties: {
+        oblast:        e.oblast,
+        started_at:    e.started_at,
+        status:        e.status ?? 'unknown',
+        cleared_at:    e.cleared_at ?? null,
+        confidence:    e.confidence ?? 'low',
+        channel_count: e.channel_count ?? 1,
+        source:        e.source,
+        snippet:       e.snippet,
+      },
     })));
   }, [mapReady, data.ru_air_raids, activeLayers.ru_air_raids, setGeo]);
 
