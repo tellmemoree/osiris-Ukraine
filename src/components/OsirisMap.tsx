@@ -112,6 +112,16 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
+// Maps weaponType strings (from missile-threats API) to the per-type activeLayers key.
+// Unknown types (not in this map) default to visible.
+const WEAPON_TOGGLE: Record<string, string> = {
+  CRUISE:    'missile_cruise',
+  BALLISTIC: 'missile_ballistic',
+  KINZHAL:   'missile_kinzhal',
+  KH22:      'missile_kh22',
+  S300:      'missile_s300',
+};
+
 function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom, replayTime = null, onMapReady }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -578,12 +588,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       map.addLayer({ id: 'missile-route-nodes', type: 'circle', source: 'missile-routes',
         filter: ['==', ['geometry-type'], 'Point'],
         paint: {
-          'circle-radius': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 6, 4],
+          // alarmConfirmed OR confidence >= 2 (corroborated by 2+ channels) → full visual treatment
+          'circle-radius': ['case', ['any', ['boolean', ['get', 'alarmConfirmed'], false], ['>=', ['coalesce', ['get', 'confidence'], 1], 2]], 6, 4],
           'circle-color': ['get', 'color'],
-          'circle-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 0.9, 0.45],
-          'circle-stroke-width': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 2.5, 1.0],
-          'circle-stroke-color': ['case', ['boolean', ['get', 'alarmConfirmed'], false], '#FF1744', ['get', 'color']],
-          'circle-stroke-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.3],
+          'circle-opacity': ['case', ['any', ['boolean', ['get', 'alarmConfirmed'], false], ['>=', ['coalesce', ['get', 'confidence'], 1], 2]], 0.9, 0.45],
+          'circle-stroke-width': ['case', ['any', ['boolean', ['get', 'alarmConfirmed'], false], ['>=', ['coalesce', ['get', 'confidence'], 1], 2]], 2.5, 1.0],
+          'circle-stroke-color': ['case', ['any', ['boolean', ['get', 'alarmConfirmed'], false], ['>=', ['coalesce', ['get', 'confidence'], 1], 2]], '#FF1744', ['get', 'color']],
+          'circle-stroke-opacity': ['case', ['any', ['boolean', ['get', 'alarmConfirmed'], false], ['>=', ['coalesce', ['get', 'confidence'], 1], 2]], 1.0, 0.3],
         }});
       map.addLayer({ id: 'missile-route-label', type: 'symbol', source: 'missile-routes', minzoom: 4,
         filter: ['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'isLatest'], true]],
@@ -1390,6 +1401,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const p = e.features[0].properties as any;
       const coords = (e.features[0].geometry as any).coordinates;
       const waveLabel = p.waveIndex > 0 ? ` · Wave ${p.waveIndex + 1}` : '';
+      const confidence = Number(p.confidence) || 1;
       popup(coords, `<div style="${pStyle}border:1px solid ${p.color}44;max-width:300px;">
         <div style="color:${p.color};font-size:13px;font-weight:700;margin-bottom:6px;">🚀 ${esc(p.weaponLabel||p.weaponType)}${waveLabel}</div>
         <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${esc(p.oblast)||'Unknown region'}</div>
@@ -1399,6 +1411,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           <div><span style="color:#5C5A54;">REPORTED</span><br/><span style="color:#E8E6E0;">${p.ts ? new Date(p.ts).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
           <div><span style="color:#5C5A54;">SOURCES</span><br/><span style="color:#E8E6E0;font-size:8px;">${esc(p.sources)||'—'}</span></div>
         </div>
+        ${confidence > 1 ? `<div style="margin-top:6px;font-size:9px;color:#5C5A54;">Sources: <span style="color:#00E676;">${confidence} channels</span></div>` : ''}
         ${p.alarmConfirmed ? '<div style="margin-top:6px;padding:3px 6px;background:rgba(255,23,68,0.15);border:1px solid rgba(255,23,68,0.4);border-radius:3px;color:#FF1744;font-size:8px;font-weight:700;letter-spacing:0.05em;">AIR RAID ALARM CORROBORATED</div>' : ''}
         <div style="font-size:8px;color:#5C5A54;margin-top:8px;font-style:italic;">Confirmed sighting signal — verify before acting.</div>
       </div>`);
@@ -2342,11 +2355,20 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // alarms have cleared. Applying the drone-swarm alarm filter here was stripping
   // routes to 0-1 waypoints (line needs ≥2). Show all; use alarmConfirmed for
   // visual dimming via data-driven paint expressions on missile-route-nodes.
+  //
+  // Per-weapon-type sub-toggles (missile_cruise, missile_ballistic, missile_kinzhal,
+  // missile_kh22, missile_s300) gate which weapon types contribute features. The
+  // single 'missile-routes' source is reused — no new sources are added.
   useEffect(() => {
     if (!mapReady) return;
     const routes: any[] = activeLayers.missile_threats && data.missile_routes ? data.missile_routes : [];
     const features: any[] = [];
     for (const route of routes) {
+      // Sub-toggle gate: if the weapon type has a toggle key, check it.
+      // Unknown weapon types default to visible (treat missing toggle as on).
+      const toggleKey = WEAPON_TOGGLE[route.weaponType as string];
+      if (toggleKey && activeLayers[toggleKey] === false) continue;
+
       for (const wave of (route.waves || [])) {
         const wps: any[] = wave.waypoints || [];
         if (wps.length === 0) continue;
@@ -2366,13 +2388,19 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
               isLatest: i === wps.length - 1, sequence: i + 1, waveIndex: wave.waveIndex,
               oblast: w.oblast, ts: w.ts, text: w.text, sources: route.sources?.join(', ') || '',
               alarmConfirmed: !!w.alarmConfirmed,
+              // confidence: number of independent channels that corroborated this waypoint.
+              // wp.confidence may be undefined for older disk entries — fall back to 1.
+              confidence: (w as any).confidence ?? 1,
             },
           });
         });
       }
     }
     setGeo('missile-routes', features);
-  }, [mapReady, data.missile_routes, activeLayers.missile_threats, setGeo]);
+  }, [mapReady, data.missile_routes, activeLayers.missile_threats,
+      activeLayers.missile_cruise, activeLayers.missile_ballistic,
+      activeLayers.missile_kinzhal, activeLayers.missile_kh22,
+      activeLayers.missile_s300, setGeo]);
 
   // Alarm-Vector inference layer — LineString from→to + Point arrow at destination.
   // TODO: tighten AlarmVector[] type after backend merge (currently any[]).

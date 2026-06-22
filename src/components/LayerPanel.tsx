@@ -407,6 +407,31 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
                                 )}
                               </>
                             )}
+                            {layer.key === 'missile_threats' && isLayerActive && (
+                              <>
+                                {([
+                                  { key: 'missile_cruise',    label: 'Cruise (Kalibr/Kh-101)', color: '#FF4444' },
+                                  { key: 'missile_ballistic', label: 'Ballistic (Iskander)',     color: '#FF8C00' },
+                                  { key: 'missile_kinzhal',   label: 'Kinzhal',                 color: '#FFD700' },
+                                  { key: 'missile_kh22',      label: 'Kh-22/32',                color: '#FF69B4' },
+                                  { key: 'missile_s300',      label: 'S-300 (ground strike)',   color: '#9C27B0' },
+                                ] as const).map(sub => (
+                                  <button
+                                    key={sub.key}
+                                    onClick={(e) => { e.stopPropagation(); toggle(sub.key); }}
+                                    className="w-full flex items-center gap-2 pl-6 pr-2 py-1 rounded bg-transparent hover:bg-white/5 transition-colors"
+                                  >
+                                    <div
+                                      className={`w-1.5 h-1.5 rounded-sm border flex-shrink-0 transition-all ${activeLayers[sub.key] ? 'bg-current border-current' : 'bg-transparent border-white/25'}`}
+                                      style={{ color: sub.color }}
+                                    />
+                                    <span className={`text-[10px] font-mono tracking-wider flex-1 text-left ${activeLayers[sub.key] ? 'text-white/80' : 'text-white/35'}`}>
+                                      {sub.label}
+                                    </span>
+                                  </button>
+                                ))}
+                              </>
+                            )}
                           </div>
                         );
                       })}
