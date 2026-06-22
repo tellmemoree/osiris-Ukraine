@@ -1,0 +1,172 @@
+/**
+ * OSIRIS — Drone / Missile Route Track Persistence
+ *
+ * Mirrors the shadow-fleet track ring-buffer pattern for drone and missile
+ * route waypoints. Each route-build extracts new waypoints from the corpus,
+ * merges them with the stored history, prunes old entries, and writes back.
+ *
+ * On cold-start, the stored history lets routes render immediately without
+ * waiting for a fresh Telegram scrape.
+ *
+ * File layout:
+ *   ~/.osiris-data/drone-route-tracks.json   — 24h rolling window
+ *   ~/.osiris-data/missile-route-tracks.json — 12h rolling window
+ */
+
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
+import { WAVE_GAP_MS, type RouteWave, type RouteWaypoint } from '@/lib/telegram-threats';
+
+const DATA_DIR = path.join(os.homedir(), '.osiris-data');
+
+export const DRONE_TRACKS_FILE   = path.join(DATA_DIR, 'drone-route-tracks.json');
+export const MISSILE_TRACKS_FILE = path.join(DATA_DIR, 'missile-route-tracks.json');
+
+export const DRONE_TRACK_TTL_MS   = 24 * 60 * 60 * 1000; // 24h — Shahed swarms span hours
+export const MISSILE_TRACK_TTL_MS = 12 * 60 * 60 * 1000; // 12h — missile strikes are fast
+
+// WAVE_GAP_MS imported from telegram-threats.ts — single source of truth
+
+export interface TrackEntry {
+  weaponType:     string;
+  ts:             number;  // epoch ms — sort key and dedup anchor
+  channel:        string;
+  oblast:         string;
+  lat:            number;
+  lng:            number;
+  text:           string;
+  alarmConfirmed: boolean;
+}
+
+// ── disk I/O ──────────────────────────────────────────────────────────────────
+
+export async function loadTrackEntries(file: string): Promise<TrackEntry[]> {
+  try {
+    const raw = JSON.parse(await fs.readFile(file, 'utf8'));
+    if (!Array.isArray(raw)) return [];
+    return (raw as TrackEntry[]).filter(
+      e => typeof e?.ts === 'number' && isFinite(e.ts) &&
+           typeof e?.lat === 'number' && typeof e?.lng === 'number',
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function saveTrackEntries(file: string, entries: TrackEntry[]): Promise<void> {
+  try {
+    await fs.writeFile(file, JSON.stringify(entries));
+  } catch { /* non-fatal */ }
+}
+
+// ── merge ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Merges `incoming` entries into the stored history, prunes entries older
+ * than `ttlMs`, deduplicates by `${channel}:${ts}`, writes back to disk,
+ * and returns the updated array.
+ */
+export async function mergeAndSaveTracks(
+  file:     string,
+  ttlMs:    number,
+  incoming: TrackEntry[],
+): Promise<TrackEntry[]> {
+  if (incoming.length === 0) {
+    // Still prune stale entries even if there is nothing new
+    const existing = (await loadTrackEntries(file)).filter(e => e.ts > Date.now() - ttlMs);
+    await saveTrackEntries(file, existing);
+    return existing;
+  }
+
+  const cutoff  = Date.now() - ttlMs;
+  const existing = (await loadTrackEntries(file)).filter(e => e.ts > cutoff);
+
+  const seen = new Set(existing.map(e => `${e.channel}:${e.ts}`));
+  for (const entry of incoming) {
+    const key = `${entry.channel}:${entry.ts}`;
+    if (!seen.has(key)) {
+      existing.push(entry);
+      seen.add(key);
+    }
+  }
+
+  existing.sort((a, b) => a.ts - b.ts);
+  await saveTrackEntries(file, existing);
+  return existing;
+}
+
+// ── wave building ─────────────────────────────────────────────────────────────
+
+/**
+ * Converts stored TrackEntry[] into RouteWave[] using the same logic as
+ * buildRoute() in telegram-threats.ts (sort by ts, 45-min wave gaps,
+ * skip consecutive same-oblast waypoints).
+ *
+ * Call this with the 24h (or 12h) accumulated entry set to get the full
+ * historical route back as waves the client already knows how to render.
+ */
+export function buildWavesFromEntries(entries: TrackEntry[]): RouteWave[] {
+  const sorted = [...entries].sort((a, b) => a.ts - b.ts);
+
+  const waves: RouteWave[] = [];
+  let current: RouteWaypoint[] = [];
+  let lastTs = 0;
+
+  const flush = () => {
+    if (current.length > 0) {
+      waves.push({
+        waveIndex:  waves.length,
+        startedAt:  current[0].ts,
+        waypoints:  [...current],
+      });
+      current = [];
+    }
+  };
+
+  for (const entry of sorted) {
+    if (lastTs && entry.ts - lastTs > WAVE_GAP_MS) flush();
+
+    const last = current[current.length - 1];
+    if (last && last.oblast === entry.oblast) {
+      // Same oblast back-to-back — update lastTs but don't add a duplicate waypoint
+      lastTs = entry.ts;
+      continue;
+    }
+
+    current.push({
+      lat:            entry.lat,
+      lng:            entry.lng,
+      oblast:         entry.oblast,
+      ts:             new Date(entry.ts).toISOString(),
+      text:           entry.text,
+      channel:        entry.channel,
+      alarmConfirmed: entry.alarmConfirmed,
+    });
+    lastTs = entry.ts;
+  }
+
+  flush();
+  return waves;
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+/** Converts RouteWave[] waypoints → TrackEntry[] for persistence. */
+export function wavesToTrackEntries(
+  waves:      RouteWave[],
+  weaponType: string,
+): TrackEntry[] {
+  return waves.flatMap(wave =>
+    wave.waypoints.map(wp => ({
+      weaponType,
+      ts:             new Date(wp.ts).getTime(),
+      channel:        wp.channel,
+      oblast:         wp.oblast,
+      lat:            wp.lat,
+      lng:            wp.lng,
+      text:           wp.text,
+      alarmConfirmed: !!wp.alarmConfirmed,
+    })),
+  );
+}
