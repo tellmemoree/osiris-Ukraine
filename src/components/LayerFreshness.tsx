@@ -41,7 +41,7 @@ export default function LayerFreshness({ activeLayers, layerTimestamps }: Props)
   if (entries.length === 0) return null;
 
   return (
-    <div className="absolute bottom-6 left-2 z-[150] flex flex-col gap-0.5 pointer-events-none">
+    <div className="absolute bottom-6 left-[320px] z-[150] flex flex-col gap-0.5 pointer-events-none">
       {entries.map(({ key, label, ageMins, isStale }) => (
         <div
           key={key}
