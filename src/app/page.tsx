@@ -638,6 +638,18 @@ export default function Dashboard() {
     if (activeLayers.shadow_fleet_tracks) {
       intervals.push(setInterval(() => fetchEndpoint('/api/maritime?tracks=1', (d: any) => ({ shadow_fleet_tracks: d.tracks ?? [] })), 300_000)); // 5 min
     }
+    if (activeLayers.ru_air_raids) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/ru-air-raids', d => ({ ru_air_raids: d.events })), 60000)); // 1 min
+    }
+    if (activeLayers.air_raids) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/weapon-threats', d => ({ weapon_threats: d.threats })), 60000)); // 1 min — enriches air-raid popups
+    }
+    if (activeLayers.internet_outages) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/radar', d => ({ ioda_outages: d.outages })), 900000)); // 15 min
+    }
+    if (activeLayers.malware) {
+      intervals.push(setInterval(() => fetchEndpoint('/api/malware', d => ({ malware_threats: d.threats })), 900000)); // 15 min
+    }
     return () => intervals.forEach(clearInterval);
   }, [activeLayers, fetchEndpoint]);
 
