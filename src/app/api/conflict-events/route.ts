@@ -98,7 +98,6 @@ async function fetchGdelt(): Promise<ConflictEvent[]> {
           html: typeof props.html === 'string' ? props.html : undefined,
           eventType: rawType as EventType,
           sources: ['gdelt'],
-          confidence: 'reported',
           deaths: undefined,
         });
       }
@@ -171,7 +170,6 @@ async function fetchGdeltRss(): Promise<ConflictEvent[]> {
         html: `<a href="${link}" target="_blank">${title}</a><br/><i>Source: ${feed.source}</i>`,
         eventType: 'conflict',
         sources: ['gdelt-rss'],
-        confidence: 'reported',
         published,
       });
     }
@@ -192,7 +190,6 @@ async function extractTelegramEvents(): Promise<ConflictEvent[]> {
       name: r.name,
       eventType: r.eventType as EventType,
       sources: r.sources,
-      confidence: 'unverified' as const,
       published: r.published,
     }));
   } catch {
@@ -248,7 +245,6 @@ async function fetchUcdp(): Promise<ConflictEvent[]> {
         name: r.where_description ?? 'UCDP Event',
         eventType,
         sources: ['ucdp'],
-        confidence: 'reported' as const,
         published: r.date_start ? new Date(r.date_start).toISOString() : undefined,
         deaths: deaths > 0 ? deaths : undefined,
       });
@@ -294,7 +290,6 @@ async function fetchReliefWeb(): Promise<ConflictEvent[]> {
         url: f.url,
         eventType: 'conflict',
         sources: ['reliefweb'],
-        confidence: 'reported',
         published: f.date?.created ? new Date(f.date.created).toISOString() : undefined,
       });
     }
