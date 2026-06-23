@@ -197,6 +197,14 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     });
   });
 
+  // Sort newest-first; feeds (no time) go to the end.
+  allAlerts.sort((a, b) => {
+    if (!a.time && !b.time) return 0;
+    if (!a.time) return 1;
+    if (!b.time) return -1;
+    return new Date(b.time).getTime() - new Date(a.time).getTime();
+  });
+
   // Assign stable IDs and filter out dismissed alerts.
   const alertsWithIds = allAlerts.map(a => ({ ...a, _id: hashAlert(a) }));
   const visibleAlerts = alertsWithIds.filter(a => !dismissedIds.has(a._id));
