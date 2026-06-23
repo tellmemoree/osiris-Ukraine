@@ -82,6 +82,14 @@ export const OBLAST_REFS: OblastRef[] = [
   { oblast: 'Vinnytsia oblast',      coords: [28.468, 49.233], tokens: ['вінниц', 'вінниці', 'vinnytsia', 'вінниця', 'жмеринк'] },
   { oblast: 'Khmelnytskyi oblast',   coords: [26.987, 49.423], tokens: ['хмельниц', 'khmelnytsk', 'хмельницьк', "кам'янець"] },
   { oblast: 'Kirovohrad oblast',     coords: [32.262, 48.508], tokens: ['кіровоград', 'kirovohrad', 'кропивниц', 'kropyvnytsk'] },
+  // ── Western oblasts (previously missing — strikes/drones reach these) ─────
+  { oblast: 'Lviv oblast',           coords: [24.030, 49.840], tokens: ['львів', 'львівщ', 'львівськ', 'lviv', 'дрогобич', 'drohobych', 'стрий', 'stryi'] },
+  { oblast: 'Ternopil oblast',       coords: [25.595, 49.554], tokens: ['тернопіл', 'тернопільщ', 'тернопільськ', 'ternopil', 'кременець'] },
+  { oblast: 'Volyn oblast',          coords: [25.325, 50.747], tokens: ['волин', 'волинськ', 'волинщ', 'volyn', 'луцьк', 'lutsk', 'ковель'] },
+  { oblast: 'Ivano-Frankivsk oblast',coords: [24.711, 48.923], tokens: ['івано-франківськ', 'івано-франківщ', 'прикарпатт', 'ivano-frankivsk', 'коломия', 'калуш'] },
+  { oblast: 'Zakarpattia oblast',    coords: [22.288, 48.621], tokens: ['закарпат', 'zakarpat', 'ужгород', 'uzhhorod', 'мукачев', 'mukachevo'] },
+  { oblast: 'Chernivtsi oblast',     coords: [25.935, 48.292], tokens: ['чернівц', 'чернівецьк', 'буковин', 'chernivtsi', 'буковина'] },
+  { oblast: 'Cherkasy oblast',       coords: [32.060, 49.445], tokens: ['черкащ', 'черкаськ', 'cherkasy', 'умань', 'uman', 'черкаси'] },
 ];
 
 // Precompiled leading-boundary matchers per oblast (same technique as kab-threats).
