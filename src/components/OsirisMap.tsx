@@ -1439,6 +1439,25 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       </div>`);
     });
 
+    // ── SIGINT RSS news dots ──
+    map.on('click', 'sigint-news-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      const pubTime = p.published ? new Date(p.published) : null;
+      const agoMs = pubTime ? Date.now() - pubTime.getTime() : null;
+      const agoLabel = agoMs == null ? '' : agoMs < 3_600_000 ? `${Math.round(agoMs / 60000)}m ago` : `${Math.round(agoMs / 3_600_000)}h ago`;
+      const riskScore: number = Number(p.risk_score) || 0;
+      const riskColor = riskScore >= 70 ? '#FF3D3D' : riskScore >= 40 ? '#FF9500' : '#D4AF37';
+      popup(coords, `<div style="${pStyle}border:1px solid ${riskColor}40;max-width:380px;">
+        <div style="color:${riskColor};font-size:11px;font-weight:700;letter-spacing:0.08em;margin-bottom:6px;">SIGINT · ${esc(p.source||'INTEL')}</div>
+        <div style="font-size:10px;color:#E8E6E0;line-height:1.5;margin-bottom:6px;">${esc(p.title||'Intelligence item')}</div>
+        ${pubTime ? `<div style="font-size:9px;color:#5C5A54;margin-bottom:8px;">${pubTime.toUTCString().slice(5,22)} UTC · ${agoLabel}</div>` : ''}
+        ${riskScore > 0 ? `<div style="font-size:9px;color:${riskColor};margin-bottom:8px;">RISK: ${riskScore}/100</div>` : ''}
+        ${p.link ? `<a href="${safeUrl(p.link)}" target="_blank" style="${linkStyle}color:${riskColor};border:1px solid ${riskColor}60;background:${riskColor}18;">READ SOURCE</a>` : ''}
+      </div>`);
+    });
+
     // ── Global Event / Conflict Markers ──
     map.on('click', 'conflict-icons', e => {
       if (!e.features?.length) return;

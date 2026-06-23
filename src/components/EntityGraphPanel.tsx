@@ -184,9 +184,10 @@ function EntityGraphPanel({ entity, onClose }: Props) {
       ctx.strokeStyle = `${color}30`; ctx.lineWidth = 1; ctx.stroke();
     }
 
-    // Clean label rendering
+    // Clean label rendering. fontSize in canvas units; canvas transform makes
+    // 3px canvas units look large on screen at high zoom — always render.
     const fontSize = Math.max(10 / globalScale, 3);
-    if (fontSize > 3.5 || isSelected) {
+    if (fontSize > 0 || isSelected) {
       ctx.font = `${isSelected ? 'bold ' : ''}${fontSize}px 'JetBrains Mono', monospace`;
       ctx.fillStyle = isSelected ? '#fff' : `${color}cc`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
