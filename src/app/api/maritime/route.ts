@@ -195,6 +195,8 @@ const globalForAis = globalThis as unknown as {
   shadowTracks: Map<number, { ts: number; lat: number; lng: number }[]>;
   // Throttle handle for the debounced disk-write of shadowTracks.
   tracksSaveTimer: ReturnType<typeof setTimeout> | null;
+  // Diagnostic: total messages received from the AIS WebSocket since last init.
+  aisMessageCount: number;
 };
 
 if (!globalForAis.shipsCache) {
@@ -204,6 +206,7 @@ if (!globalForAis.shipsCache) {
   globalForAis.shadowSaveTimer = null;
   globalForAis.shadowTracks = new Map();
   globalForAis.tracksSaveTimer = null;
+  globalForAis.aisMessageCount = 0;
   // Best-effort restore of the learned sanctioned-MMSI set. Mutates the same
   // Set the `shadowMmsi` const below references, so additions land in it.
   fs.readFile(SHADOW_STATE_FILE, 'utf8')
@@ -357,6 +360,7 @@ function connectAisStream() {
   };
 
   ws.on("message", (data) => {
+    globalForAis.aisMessageCount++;
     try {
       const parsed = JSON.parse(data.toString());
       const mmsi = parsed.MetaData?.MMSI;
@@ -396,9 +400,12 @@ function connectAisStream() {
           if (track.length === 0 || now - track[track.length - 1].ts >= TRACK_SAMPLE_MS) {
             const newLat = report.Latitude;
             const newLng = report.Longitude;
+            if (typeof newLat !== 'number' || isNaN(newLat) || newLat < -90 || newLat > 90 ||
+                typeof newLng !== 'number' || isNaN(newLng) || newLng < -180 || newLng > 180) {
+              // skip — invalid GPS fix
             // Reject ghost positions: if the implied speed from the last recorded
             // point exceeds MAX_SHIP_KPH the new fix is a GPS artifact, not movement.
-            if (track.length > 0) {
+            } else if (track.length > 0) {
               const prev = track[track.length - 1];
               const dtH = (now - prev.ts) / 3_600_000;
               const distKm = trackDistKm(prev.lat, prev.lng, newLat, newLng);
@@ -488,6 +495,18 @@ export async function GET(req: Request) {
       { tracks, total: tracks.length, timestamp: new Date().toISOString() },
       { headers: { 'Cache-Control': 'no-store' } }
     );
+  }
+
+  // ?debug=1 — internal diagnostic: AIS connection + cache state.
+  if (searchParams.get('debug') === '1') {
+    return NextResponse.json({
+      aisMessageCount: globalForAis.aisMessageCount,
+      isAisConnecting: globalForAis.isAisConnecting,
+      shipsCacheSize: shipsCache.size,
+      shadowMmsiSize: shadowMmsi.size,
+      shadowTracksSize: shadowTracks.size,
+      timestamp: new Date().toISOString(),
+    }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
   const now = Date.now();
