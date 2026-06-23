@@ -117,12 +117,15 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const dataRef = useRef<any>(data);
+  const weaponThreatsRef = useRef<any[]>([]);
   const [mapReady, setMapReady] = useState(false);
   const prevStyleRef = useRef(mapStyle);
 
-  // Keep dataRef current on every render so stale-closure click handlers
-  // registered in map.on('load') can read live data without being re-registered.
+  // Keep dataRef and weaponThreatsRef current on every render so stale-closure
+  // click handlers registered in map.on('load') can read live data without
+  // being re-registered.
   dataRef.current = data;
+  weaponThreatsRef.current = Array.isArray(data.weapon_threats) ? data.weapon_threats : [];
 
   // Create aircraft icon on canvas (for WebGL symbol layer)
   const createIcon = useCallback((map: maplibregl.Map, id: string, color: string, size: number) => {
@@ -1264,6 +1267,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const p = e.features[0].properties as any;
       const coords = (e.features[0].geometry as any).coordinates;
       const isDistrict = p.level === 'district';
+      // p.oblast is the English parent-oblast name for both oblast and district
+      // alerts (e.g. "Kyiv oblast"). WeaponThreat.oblast uses the same format.
+      const oblastName = (p.oblast || p.regionName || '') as string;
+      const threats = weaponThreatsRef.current.filter((t: any) =>
+        typeof t.oblast === 'string' &&
+        t.oblast.toLowerCase() === oblastName.toLowerCase()
+      );
       popup(coords, `<div style="${pStyle}border:1px solid rgba(255,23,68,0.4);">
         <div style="color:#FF1744;font-size:13px;font-weight:700;margin-bottom:6px;">🚨 AIR RAID ALERT</div>
         <div style="font-size:11px;color:#E8E6E0;margin-bottom:2px;">${esc(p.regionName)||'Unknown region'}</div>
@@ -1272,6 +1282,16 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           <div><span style="color:#5C5A54;">SCOPE</span><br/><span style="color:#FF1744;">${isDistrict ? 'DISTRICT' : 'OBLAST'}</span></div>
           <div><span style="color:#5C5A54;">SINCE</span><br/><span style="color:#E8E6E0;">${p.startedAt ? new Date(p.startedAt).toUTCString().slice(5,17)+' UTC' : '—'}</span></div>
         </div>
+        ${threats.length > 0 ? `
+        <div style="margin-top:8px;border-top:1px solid rgba(255,23,68,0.2);padding-top:6px;">
+          <div style="font-size:8px;color:#5C5A54;margin-bottom:4px;letter-spacing:0.08em;">WEAPON THREATS · last 1.5h</div>
+          ${threats.map((t: any) => `
+            <div style="display:flex;align-items:baseline;gap:4px;margin-bottom:2px;">
+              <span style="font-size:9px;color:#FF9500;font-weight:700;">${esc(t.weaponType?.toUpperCase()||'?')}</span>
+              <span style="font-size:9px;color:#E8E6E0;">${esc(t.text?.slice(0,80)||'')}</span>
+            </div>
+          `).join('')}
+        </div>` : ''}
         <a href="https://map.ukrainealarm.com" target="_blank" style="${linkStyle}color:#FF1744;border:1px solid rgba(255,23,68,0.4);background:rgba(255,23,68,0.1);">🔗 LIVE ALERT MAP</a>
       </div>`);
     });
