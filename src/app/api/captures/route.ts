@@ -21,7 +21,7 @@ interface NewsItem { title?: string; description?: string; source?: string; side
 
 // Active contact zone only. Covers Kherson/Zaporizhzhia north through the Kursk
 // incursion axis. Excludes deep Russia (Bryansk 53°N, Adygea 44°N, Rostov east of 40°E).
-const CONTACT_BBOX = { latMin: 45.5, latMax: 52.5, lngMin: 31.5, lngMax: 40.0 };
+const CONTACT_BBOX = { latMin: 45.5, latMax: 52.5, lngMin: 31.5, lngMax: 41.0 }; // lngMax stays ~41 to exclude Russian staging areas beyond the Luhansk/Starobilsk axis
 
 // Capture/liberation/control-change wording. Mirrors strategic-thermal's ADVANCE_TERMS
 // (kept in sync deliberately — that route drops these, this one keeps them).
