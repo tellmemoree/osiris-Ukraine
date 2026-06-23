@@ -1072,20 +1072,6 @@ export default function Dashboard() {
         </div>
       </motion.div>
 
-      {/* ── NOTIFICATION BELL (desktop) ── */}
-      <motion.button
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3 }}
-        onClick={() => { setNotifOpen(true); setUnreadCount(0); }}
-        className="status-bar-desktop absolute top-7 right-[310px] z-[210] pointer-events-auto w-8 h-8 flex items-center justify-center rounded-lg glass-panel text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-        title="Notification log"
-      >
-        <Bell className="w-3.5 h-3.5" />
-        {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#FF3D3D] text-white text-[8px] font-mono font-bold flex items-center justify-center">
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
-        )}
-      </motion.button>
 
       {/* ── TOP-RIGHT STATUS (desktop) — C2 DISPLAY ── */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3 }} className="status-bar-desktop absolute top-4 right-6 z-[200] pointer-events-none flex items-center gap-4 text-[9px] font-mono tracking-widest text-[var(--text-muted)]">
@@ -1248,6 +1234,22 @@ export default function Dashboard() {
           <button onClick={() => { setShowEntityGraph(!showEntityGraph); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); setShowSearch(false); }} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showEntityGraph ? 'bg-[#D4AF37]/20' : 'hover:bg-white/10'}`}>
             <Network className={`w-4 h-4 ${showEntityGraph ? 'text-[#D4AF37]' : 'text-white/60'}`} />
           </button>
+        </div>
+
+        {/* Notification bell */}
+        <div className="relative">
+          <button
+            onClick={() => { setNotifOpen(true); setUnreadCount(0); }}
+            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10 ${unreadCount > 0 ? 'text-[#FF3D3D]' : 'text-white/60'}`}
+            title="Notification log"
+          >
+            <Bell className="w-4 h-4" />
+          </button>
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-[#FF3D3D] text-white text-[7px] font-mono font-bold flex items-center justify-center pointer-events-none">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
         </div>
 
       </div>}

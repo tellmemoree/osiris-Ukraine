@@ -255,9 +255,6 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
         <div className="flex items-center gap-2">
           <Radio className="w-3.5 h-3.5 text-[#FF4081]" />
           <span className="hud-text text-[10px] text-[var(--text-primary)]">LIVE ALERTS</span>
-          <span className="gotham-tag gotham-tag--critical" style={{ fontSize: '7px', padding: '1px 5px' }}>{allAlerts.filter(a => a.type === 'news' && a.side === 'ua').length} UA</span>
-          <span className="gotham-tag" style={{ fontSize: '7px', padding: '1px 5px', color: '#5B8FF9', borderColor: 'rgba(91,143,249,0.5)' }}>{allAlerts.filter(a => a.type === 'news' && a.side === 'ru').length} RU</span>
-          <span className="gotham-tag gotham-tag--info" style={{ fontSize: '7px', padding: '1px 4px' }}>{allAlerts.filter(a => a.type === 'news' && a.side === 'world').length} WORLD</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-[#FF4081] animate-osiris-pulse" />
