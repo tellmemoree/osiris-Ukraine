@@ -23,6 +23,7 @@ import AxisBriefing from '@/components/AxisBriefing';
 import ThresholdToasts from '@/components/ThresholdToasts';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 import NotificationDrawer, { type NotificationRecord } from '@/components/NotificationDrawer';
+import LayerFreshness from '@/components/LayerFreshness';
 
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
@@ -115,6 +116,7 @@ export default function Dashboard() {
   const dataRef = useRef<any>({});
   const [dataVersion, setDataVersion] = useState(0);
   const data = dataRef.current;
+  const [layerTimestamps, setLayerTimestamps] = useState<Record<string, number>>({});
 
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const [mapView, setMapView] = useState({ zoom: 2.5, latitude: 20, longitude: 25.48 });
@@ -455,7 +457,7 @@ export default function Dashboard() {
   // Single source of truth for "how to fetch each layer's data" — shared by the
   // layer-toggle loader below and by the search bar's ensureSearchSources().
   const LAYER_LOADERS: Record<string, () => void> = useMemo(() => ({
-    flights: () => fetchEndpoint('/api/flights'),
+    flights: () => fetchEndpoint('/api/flights').then(() => setLayerTimestamps(p => ({ ...p, flights: Date.now() }))),
     satellites: () => fetchEndpoint('/api/satellites'),
     fires: () => fetchEndpoint('/api/fires'),
     cctv: () => fetchEndpoint('/api/cctv?region=all&v=2'),
@@ -466,15 +468,15 @@ export default function Dashboard() {
     weather: () => fetchEndpoint('/api/weather', d => ({ weather_events: d.events })),
     infrastructure: () => fetchEndpoint('/api/infrastructure', d => ({ infrastructure: d.infrastructure })),
     gdelt: () => fetchEndpoint('/api/conflict-events', d => ({ gdelt: d.events })),
-    air_raids: () => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })),
+    air_raids: () => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })).then(() => setLayerTimestamps(p => ({ ...p, air_raids: Date.now() }))),
     power_outages: () => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })),
-    kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })),
-    weapon_threats: () => fetchEndpoint('/api/weapon-threats', d => ({ weapon_threats: d.threats })),
-    drone_threats: () => fetchEndpoint('/api/drone-threats', d => ({ drone_threats: d.threats, drone_waves: d.waves })),
-    missile_threats: () => fetchEndpoint('/api/missile-threats', d => ({ missile_routes: d.routes })),
+    kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })).then(() => setLayerTimestamps(p => ({ ...p, kab_threats: Date.now() }))),
+    weapon_threats: () => fetchEndpoint('/api/weapon-threats', d => ({ weapon_threats: d.threats })).then(() => setLayerTimestamps(p => ({ ...p, weapon_threats: Date.now() }))),
+    drone_threats: () => fetchEndpoint('/api/drone-threats', d => ({ drone_threats: d.threats, drone_waves: d.waves })).then(() => setLayerTimestamps(p => ({ ...p, drone_threats: Date.now() }))),
+    missile_threats: () => fetchEndpoint('/api/missile-threats', d => ({ missile_routes: d.routes })).then(() => setLayerTimestamps(p => ({ ...p, missile_threats: Date.now() }))),
     ru_air_raids: () => fetchEndpoint('/api/ru-air-raids', d => ({ ru_air_raids: d.events })),
-    frontlines: () => fetchEndpoint('/api/frontlines', d => ({ frontlines: d.frontlines?.features || [] })),
-    captures: () => fetchEndpoint('/api/captures', d => ({ captures: d.captures })),
+    frontlines: () => fetchEndpoint('/api/frontlines', d => ({ frontlines: d.frontlines?.features || [] })).then(() => setLayerTimestamps(p => ({ ...p, frontlines: Date.now() }))),
+    captures: () => fetchEndpoint('/api/captures', d => ({ captures: d.captures })).then(() => setLayerTimestamps(p => ({ ...p, captures: Date.now() }))),
     air_quality: () => fetchEndpoint('/api/air-quality', d => ({ air_quality: d.stations })),
     thermal_aoi: () => fetchEndpoint('/api/strategic-thermal', d => ({ thermal_aoi: d.aois })),
     internet_outages: () => fetchEndpoint('/api/radar', d => ({ ioda_outages: d.outages })),
@@ -590,7 +592,7 @@ export default function Dashboard() {
   useEffect(() => {
     const intervals: ReturnType<typeof setInterval>[] = [];
     if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/flights'), 300000)); // 5 min (was 2 min)
+      intervals.push(setInterval(() => fetchEndpoint('/api/flights').then(() => setLayerTimestamps(p => ({ ...p, flights: Date.now() }))), 300000)); // 5 min (was 2 min)
     }
 
     if (activeLayers.balloons) {
@@ -603,22 +605,22 @@ export default function Dashboard() {
       intervals.push(setInterval(() => fetchEndpoint('/api/maritime', d => ({ maritime_ports: d.ports, maritime_chokepoints: d.chokepoints, maritime_ships: d.ships })), 10000)); // 10s
     }
     if (activeLayers.air_raids) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })), 60000)); // 1 min
+      intervals.push(setInterval(() => fetchEndpoint('/api/air-raids', d => ({ air_raids: d.alerts })).then(() => setLayerTimestamps(p => ({ ...p, air_raids: Date.now() }))), 60000)); // 1 min
     }
     if (activeLayers.kab_threats) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })), 60000)); // 1 min
+      intervals.push(setInterval(() => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })).then(() => setLayerTimestamps(p => ({ ...p, kab_threats: Date.now() }))), 60000)); // 1 min
     }
     if (activeLayers.drone_threats) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/drone-threats', d => ({ drone_threats: d.threats, drone_waves: d.waves })), 60000)); // 1 min — "last 1.5h" data
+      intervals.push(setInterval(() => fetchEndpoint('/api/drone-threats', d => ({ drone_threats: d.threats, drone_waves: d.waves })).then(() => setLayerTimestamps(p => ({ ...p, drone_threats: Date.now() }))), 60000)); // 1 min — "last 1.5h" data
     }
     if (activeLayers.missile_threats) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/missile-threats', d => ({ missile_routes: d.routes })), 60000)); // 1 min — "last 1.5h" data
+      intervals.push(setInterval(() => fetchEndpoint('/api/missile-threats', d => ({ missile_routes: d.routes })).then(() => setLayerTimestamps(p => ({ ...p, missile_threats: Date.now() }))), 60000)); // 1 min — "last 1.5h" data
     }
     if (activeLayers.power_outages) {
       intervals.push(setInterval(() => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })), 300000)); // 5 min
     }
     if (activeLayers.frontlines) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/frontlines', d => ({ frontlines: d.frontlines?.features || [] })), 1800000)); // 30 min
+      intervals.push(setInterval(() => fetchEndpoint('/api/frontlines', d => ({ frontlines: d.frontlines?.features || [] })).then(() => setLayerTimestamps(p => ({ ...p, frontlines: Date.now() }))), 1800000)); // 30 min
     }
     if (activeLayers.air_quality) {
       intervals.push(setInterval(() => fetchEndpoint('/api/air-quality', d => ({ air_quality: d.stations })), 3600000)); // 1 h
@@ -627,7 +629,7 @@ export default function Dashboard() {
       intervals.push(setInterval(() => fetchEndpoint('/api/strategic-thermal', d => ({ thermal_aoi: d.aois })), 3600000)); // 1 h
     }
     if (activeLayers.captures) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/captures', d => ({ captures: d.captures })), 300000)); // 5 min
+      intervals.push(setInterval(() => fetchEndpoint('/api/captures', d => ({ captures: d.captures })).then(() => setLayerTimestamps(p => ({ ...p, captures: Date.now() }))), 300000)); // 5 min
     }
     if (activeLayers.global_incidents) {
       intervals.push(setInterval(() => fetchEndpoint('/api/conflict-events', d => ({ gdelt: d.events })), 300000)); // 5 min
@@ -1000,6 +1002,11 @@ export default function Dashboard() {
           onMapReady={() => setTimeout(() => splashResolveRef.current?.(), 600)}
         />
       </ErrorBoundary>
+
+      {/* ── LAYER FRESHNESS INDICATOR (desktop only) ── */}
+      {!isMobile && (
+        <LayerFreshness activeLayers={activeLayers} layerTimestamps={layerTimestamps} />
+      )}
 
       {/* ── TIMELINE CONTROL (desktop only) ── */}
       <AnimatePresence>
@@ -1580,6 +1587,26 @@ export default function Dashboard() {
 
       {/* Keyboard Shortcuts Overlay */}
       <KeyboardShortcuts />
+
+      {/* ── CONFLICT EVENTS CONFIDENCE LEGEND ── */}
+      {activeLayers.global_incidents && !isMobile && (
+        <div className="absolute bottom-6 right-12 z-[150] pointer-events-none">
+          <div className="glass-panel px-2 py-1.5 text-[8px] font-mono">
+            <div className="text-[var(--cyan-primary)]/70 mb-1 tracking-wider font-bold">CONFLICT INTEL</div>
+            {([
+              { color: '#FF3D3D', label: 'CONFIRMED',  sub: '\u22652 sources' },
+              { color: '#FF9500', label: 'REPORTED',   sub: '1 source'   },
+              { color: '#FFD54F', label: 'UNVERIFIED', sub: 'Telegram'   },
+            ] as const).map(({ color, label, sub }) => (
+              <div key={label} className="flex items-center gap-1.5 mb-0.5">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                <span className="text-white/80">{label}</span>
+                <span className="text-white/30">{sub}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── GLOBAL STATUS TICKER (bottom) ── */}
       <GlobalStatusBar />
