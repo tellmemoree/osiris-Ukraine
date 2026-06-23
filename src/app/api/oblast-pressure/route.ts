@@ -289,9 +289,14 @@ async function computePressure(): Promise<PressureResponse> {
     }
   }
 
-  // Score frontline / Russia-border oblasts only
+  // Score oblasts: static frontline set + any with an active alert or KAB count.
+  // This catches nationwide barrage nights when western oblasts (Lviv, Vinnytsia) are struck.
+  const dynamicOblasts = new Set(PRESSURE_OBLASTS);
+  for (const name of activeBallistic) if (name in OBLAST_CENTROIDS) dynamicOblasts.add(name);
+  for (const name of kabCounts.keys()) if (name in OBLAST_CENTROIDS) dynamicOblasts.add(name);
+
   const oblasts: OblastScore[] = Object.entries(OBLAST_CENTROIDS)
-    .filter(([name_en]) => PRESSURE_OBLASTS.has(name_en))
+    .filter(([name_en]) => dynamicOblasts.has(name_en))
     .map(([name_en, [lng, lat]]) => {
     const ballistic = activeBallistic.has(name_en) ? 1.0 : 0;
     const kabCount  = kabCounts.get(name_en) ?? 0;
