@@ -237,6 +237,7 @@ export async function GET() {
 - Shadow fleet MMSI mappings (learned state)
 - Frontline snapshots (delta detection)
 - Thermal hits (confirmation history)
+- Drone / missile / KAB route-track entries (`drone-route-tracks.json`, `missile-route-tracks.json`, `kab-tracks.json`) — rolling 24h/12h/6h windows via `loadTrackEntries` / `mergeAndSaveTracks` in `src/lib/threat-tracks.ts`; seeds in-memory accumulator on cold-start so layers survive Docker rebuilds
 
 ### Error Handling
 
