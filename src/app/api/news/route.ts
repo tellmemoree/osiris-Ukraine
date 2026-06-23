@@ -52,12 +52,32 @@ const TELEGRAM_CHANNELS = [...UA_CHANNELS, ...RU_CHANNELS];
 
 const RU_CHANNEL_SET = new Set(RU_CHANNELS.map((c) => c.toLowerCase()));
 
+// Russian-actor signals: MoD official voice, "liberation" framing, RU military named as subject.
+// Fires even when a UA channel relays a Russian claim verbatim, so the tab split stays clean.
+const RU_ACTOR_RE = /мо\s*рф|міноборони\s*рф|министерство\s*обороны|освобожд|освободил|армия\s*росси|вс\s*рф\s+(?:заняли|взяли|продвин|штурм|наступ)|russian\s+(?:forces?|army|troops?)\s+(?:advance|captur|seiz|storm|enter|take|occup)/i;
+
+// Ukrainian-actor signals: official ZSU/GenStaff voice, recapture framing.
+const UA_ACTOR_RE = /зсу\s+(?:відбил|звільнил|знищил|вдарил|атакувал)|сили\s+оборони|генштаб(?:\s+зсу)?|ukrainian\s+(?:forces?|army|troops?)\s+(?:liberat|recaptur|repel|strike|destroy|advance)/i;
+
 // Which side of the war a story comes from: 'ua' = Ukrainian/neutral war OSINT,
 // 'ru' = Russian milblogger/MoD, 'world' = non-Telegram RSS fallback. Drives the
 // Live-Alerts tab split so the RU feed reads separately from the UA one.
-function sideForSource(source: string): 'ua' | 'ru' | 'world' {
+//
+// Actor detection runs first on Telegram posts: if the text unambiguously names
+// one actor as the subject, that overrides channel membership. Channel membership
+// is the fallback for ambiguous or mixed-actor articles.
+function sideForSource(source: string, text = ''): 'ua' | 'ru' | 'world' {
   const m = source.match(/^t\.me\/(.+)$/i);
   if (!m) return 'world';
+
+  if (text) {
+    const isRuActor = RU_ACTOR_RE.test(text);
+    const isUaActor = UA_ACTOR_RE.test(text);
+    if (isRuActor && !isUaActor) return 'ru';
+    if (isUaActor && !isRuActor) return 'ua';
+    // Both or neither → fall through to channel
+  }
+
   return RU_CHANNEL_SET.has(m[1].toLowerCase()) ? 'ru' : 'ua';
 }
 
@@ -590,7 +610,7 @@ async function buildNews(): Promise<unknown> {
         link: article.link,
         published: article.pubDate,
         source: article.source,
-        side: sideForSource(article.source),
+        side: sideForSource(article.source, `${article.title ?? ''} ${article.description ?? ''}`),
         risk_score: riskScore,
         coords: placed,
         coords_default: coordsDefault,
