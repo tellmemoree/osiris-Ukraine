@@ -87,8 +87,14 @@ export default function FrontlineTracker({ isMobile = false }: { isMobile?: bool
       </div>
 
       <div className="space-y-1.5">
-        <Delta label="24h" v={d.delta_1d} />
-        <Delta label={d.since_date ? `vs ${d.since_date}` : '7d'} v={d.delta_7d} />
+        {d.snapshots < 2 ? (
+          <div className="text-[10px] text-white/30 leading-snug">Calibrating — first delta available after 24h</div>
+        ) : (
+          <>
+            <Delta label="24h" v={d.delta_1d} />
+            <Delta label={d.since_date ? `vs ${d.since_date}` : '7d'} v={d.delta_7d} />
+          </>
+        )}
       </div>
 
       {d.note && <div className="mt-2 text-[10px] leading-snug text-white/35">{d.note}</div>}
