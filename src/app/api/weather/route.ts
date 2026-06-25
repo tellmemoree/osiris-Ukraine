@@ -122,7 +122,13 @@ export async function GET() {
           } else if (category === 'volcanoes') {
             typeLabel = 'Volcano Eruption';
             icon = 'volcano';
-            severity = 'high';
+            // Age-gate: skip eruptions older than 14 days (data stays in EONET open-events far longer)
+            const eventMs = geom.date ? new Date(geom.date).getTime() : 0;
+            const ageMs = Date.now() - eventMs;
+            if (ageMs > 14 * 24 * 60 * 60 * 1000) continue;
+            // Recency-derived severity: fresher eruptions are more operationally relevant
+            severity = ageMs < 3 * 24 * 60 * 60 * 1000 ? 'high'
+              : ageMs < 7 * 24 * 60 * 60 * 1000 ? 'medium' : 'low';
           } else if (category === 'seaIce') {
             typeLabel = 'Iceberg / Sea Ice';
             icon = 'ice';
