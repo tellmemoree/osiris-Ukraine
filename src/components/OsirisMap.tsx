@@ -87,6 +87,7 @@ interface OsirisMapProps {
   initialCenter?: [number, number];
   initialZoom?: number;
   replayTime?: Date | null;
+  focusedAxisBbox?: [number, number, number, number] | null;
   onMapReady?: () => void;
 }
 
@@ -122,7 +123,7 @@ const WEAPON_TOGGLE: Record<string, string> = {
   S300:      'missile_s300',
 };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom, replayTime = null, onMapReady }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, highlight, projection = 'globe', mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', initialCenter, initialZoom, replayTime = null, focusedAxisBbox = null, onMapReady }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -316,7 +317,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       }
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'frontline-delta', 'air-quality', 'ioda-outages', 'malware-nodes', 'thermal-aoi', 'captures', 'network-mesh', 'shadow-fleet-tracks', 'alarm-vectors'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'air-raid-alerts', 'power-outages', 'kab-threats', 'frontlines', 'frontline-delta', 'axis-focus', 'air-quality', 'ioda-outages', 'malware-nodes', 'thermal-aoi', 'captures', 'network-mesh', 'shadow-fleet-tracks', 'alarm-vectors'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
@@ -459,6 +460,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           'line-dasharray': [2, 4]
         }
       });
+
+      // Axis briefing bbox focus highlight
+      map.addLayer({ id: 'axis-focus-fill', type: 'fill', source: 'axis-focus',
+        paint: { 'fill-color': '#FFD24A', 'fill-opacity': 0.07 } });
+      map.addLayer({ id: 'axis-focus-line', type: 'line', source: 'axis-focus',
+        paint: { 'line-color': '#FFD24A', 'line-width': 1.5, 'line-opacity': 0.8, 'line-dasharray': [3, 3] } });
 
       // Air quality (Open-Meteo) — PM2.5 station dots, colored by AQI band.
       map.addLayer({ id: 'aq-glow', type: 'circle', source: 'air-quality', paint: {
@@ -2038,6 +2045,24 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('frontline-delta', frontlinesActive && frontlineDelta ? frontlineDelta : []);
   }, [mapReady, data, activeLayers, setGeo]);
 
+  // Axis briefing: draw bbox rectangle or clear when focus changes
+  useEffect(() => {
+    if (!mapReady) return;
+    if (!focusedAxisBbox) {
+      setGeo('axis-focus', []);
+      return;
+    }
+    const [minLng, minLat, maxLng, maxLat] = focusedAxisBbox;
+    const ring: [number, number][] = [
+      [minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat], [minLng, minLat]
+    ];
+    setGeo('axis-focus', [{
+      type: 'Feature' as const,
+      geometry: { type: 'Polygon' as const, coordinates: [ring] },
+      properties: {}
+    }]);
+  }, [mapReady, focusedAxisBbox, setGeo]);
+
   useEffect(() => {
     if (!mapReady) return;
     const cutoff = replayTime ?? new Date();
@@ -2634,6 +2659,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['frontline-fill','frontline-line','frontline-delta-fill','frontline-delta-line'], activeLayers.frontlines);
     setVis(['pressure-oblast-fill','pressure-oblast-outline'], activeLayers.oblast_pressure);
     setVis(['shadow-track-line'], activeLayers.shadow_fleet_tracks);
+    setVis(['aq-glow','aq-dots','aq-label'], activeLayers.air_quality);
   }, [mapReady, activeLayers, setVis]);
 
   // IP Sweep visualization
