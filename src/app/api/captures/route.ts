@@ -142,6 +142,8 @@ async function fetchNews(req: Request): Promise<NewsItem[]> {
   } catch { return []; }
 }
 
+const SIX_HOURS_MS = 6 * 3_600_000;
+
 export async function GET(req: Request) {
   if (cachedCaptures && Date.now() - lastFetch < CACHE_TTL) {
     return NextResponse.json(cachedCaptures, {
@@ -150,7 +152,13 @@ export async function GET(req: Request) {
   }
 
   try {
-    const news = await fetchNews(req);
+    const rawNews = await fetchNews(req);
+    // Drop articles older than 6h — contested territorial claims are frequently
+    // walked back and a 20h-old "capture" is misleading without staleness context.
+    const news = rawNews.filter(item => {
+      if (!item.published) return true;
+      return Date.now() - new Date(item.published).getTime() <= SIX_HOURS_MS;
+    });
 
     type Capture = {
       id: string; lat: number; lng: number; side: 'ru' | 'ua'; name: string;
