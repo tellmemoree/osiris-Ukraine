@@ -524,7 +524,7 @@ export default function Dashboard() {
 
   // ── LAYER-AWARE DATA LOADING — only fetch when layer is toggled ON ──
   useEffect(() => {
-    if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private) loadOnce('flights');
+    if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private || activeLayers.gps_jamming) loadOnce('flights');
     if (activeLayers.satellites) loadOnce('satellites');
     if (activeLayers.fires) loadOnce('fires');
     if (activeLayers.cctv) loadOnce('cctv');
@@ -589,7 +589,7 @@ export default function Dashboard() {
   // ── LAYER-AWARE POLLING — only poll data for active layers ──
   useEffect(() => {
     const intervals: ReturnType<typeof setInterval>[] = [];
-    if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private) {
+    if (activeLayers.flights || activeLayers.military || activeLayers.jets || activeLayers.private || activeLayers.gps_jamming) {
       intervals.push(setInterval(() => fetchEndpoint('/api/flights'), 300000)); // 5 min (was 2 min)
     }
 
