@@ -26,6 +26,8 @@ import {
   RSS_FEEDS,
   CONFLICT_KEYWORDS,
   clusterEvents,
+  escapeHtml,
+  safeHref,
 } from '@/lib/conflict-geo';
 
 export const dynamic = 'force-dynamic';
@@ -152,7 +154,7 @@ async function fetchRssEvents(): Promise<ConflictEvent[]> {
             id: `osint-${feed.source.replace(/\s+/g, '')}-${itemIdx}`,
             lat: coords[1], lng: coords[0],
             name: `[${feed.source}] ${title}`, url: link,
-            html: `<a href="${link}" target="_blank">${title}</a><br/><i>Source: ${feed.source}</i>`,
+            html: `<a href="${safeHref(link)}" target="_blank">${escapeHtml(title)}</a><br/><i>Source: ${escapeHtml(feed.source)}</i>`,
             eventType: 'conflict', sources: ['gdelt-rss'], confidence: 'reported', published,
           });
           itemIdx++;

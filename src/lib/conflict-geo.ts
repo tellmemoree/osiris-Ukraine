@@ -28,6 +28,20 @@ export interface ConflictEvent {
   deaths?: number;
 }
 
+// ── HTML escaping for the `html` field ───────────────────────────────────────
+// The `html` field is assembled from scraped RSS title/link. Escape it so the
+// value stays inside the repo's "escape all external/scraped data" contract,
+// even though no consumer renders it raw today (defense against a future sink).
+export function escapeHtml(s: string): string {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+// http(s)-only href, quote-escaped for the attribute (blocks javascript:/data:).
+export function safeHref(u: string): string {
+  const s = String(u ?? '').trim();
+  return /^https?:\/\//i.test(s) ? escapeHtml(s) : '#';
+}
+
 // ── RSS feeds ────────────────────────────────────────────────────────────────
 
 export const RSS_FEEDS = [

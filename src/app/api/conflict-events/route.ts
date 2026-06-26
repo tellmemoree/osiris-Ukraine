@@ -27,6 +27,8 @@ import {
   CONFLICT_KEYWORDS,
   geoMapText,
   clusterEvents,
+  escapeHtml,
+  safeHref,
 } from '@/lib/conflict-geo';
 import { extractGeoEvents } from '@/lib/telegram-threats';
 
@@ -168,7 +170,7 @@ async function fetchGdeltRss(): Promise<ConflictEvent[]> {
         lng: point[0] + jitterLng,
         name: `[${feed.source}] ${title}`,
         url: link,
-        html: `<a href="${link}" target="_blank">${title}</a><br/><i>Source: ${feed.source}</i>`,
+        html: `<a href="${safeHref(link)}" target="_blank">${escapeHtml(title)}</a><br/><i>Source: ${escapeHtml(feed.source)}</i>`,
         eventType: 'conflict',
         sources: ['gdelt-rss'],
         confidence: 'reported',

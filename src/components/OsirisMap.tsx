@@ -1910,7 +1910,11 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     const visible = all.filter((c: any) => {
       if (!c.date) return true;
       const t = new Date(c.date).getTime();
-      return t <= cutoffMs && (cutoffMs - t) < 86400000;
+      if (t > cutoffMs) return false;
+      // Skip the 24h lower-bound during replay so scrubbing shows the captures
+      // that were live at the scrubbed time (matches thermal/gdelt/news).
+      if (!replayTime && (cutoffMs - t) >= 86400000) return false;
+      return true;
     });
     setGeo('captures', visible.map((c: any) => ({
       type: 'Feature',
