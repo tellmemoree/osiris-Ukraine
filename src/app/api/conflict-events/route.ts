@@ -82,13 +82,6 @@ async function fetchGdelt(): Promise<ConflictEvent[]> {
         const name = String(nameRaw);
         const eventUrl = typeof props.url === 'string' ? props.url : typeof props.shareimage === 'string' ? props.shareimage : undefined;
 
-        const isDupe = allEvents.some(e =>
-          Math.abs(e.lat - coords[1]) < 0.5 &&
-          Math.abs(e.lng - coords[0]) < 0.5 &&
-          e.name === name,
-        );
-        if (isDupe) continue;
-
         const rawType = query.includes('protest') ? 'unrest' : query.includes('conflict') ? 'conflict' : 'political';
 
         allEvents.push({
