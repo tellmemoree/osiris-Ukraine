@@ -1,6 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { stealthFetch } from '@/lib/stealthFetch';
+import { loadDb, lookupType, prefetchTypes } from '@/lib/aircraftDb';
 
 /**
  * OSIRIS — Flight Data API
@@ -191,6 +192,9 @@ interface FlightResponse {
 
 const JAMMING_NACAP_THRESHOLD = 4;
 
+// Load aircraft type cache from disk at startup (non-blocking)
+loadDb().catch(() => {});
+
 // Last-good aircraft list — preserved across refreshes so a transient OpenSky
 // outage doesn't blank the map.
 let lastGoodAircraft: AdsbAircraft[] = [];
@@ -207,6 +211,15 @@ function buildResponse(aircraft: AdsbAircraft[]): FlightResponse {
   const jets: ClassifiedFlight[] = [];
   const military: ClassifiedFlight[] = [];
   const gpsJamming: JammingPoint[] = [];
+
+  // Enrich with type from cache (in-place so records carry the type forward
+  // until lastGoodAircraft is replaced by the next OpenSky refresh)
+  for (const a of aircraft) {
+    if (a.hex && !a.t) {
+      const cached = lookupType(a.hex);
+      if (cached) a.t = cached;
+    }
+  }
 
   for (const raw of aircraft) {
     const flight = classifyFlight(raw);
@@ -236,12 +249,20 @@ function buildResponse(aircraft: AdsbAircraft[]): FlightResponse {
 }
 
 async function refreshAll(): Promise<void> {
+  await loadDb(); // ensure disk cache is loaded (no-op after first call)
   const now = Date.now();
   if (now - openskyLastFetch > OPENSKY_TTL) {
     const fresh = await fetchGlobal();
     if (fresh !== null) {
       lastGoodAircraft = fresh;
       openskyLastFetch = now;
+      // Queue background type lookups for non-airline aircraft not yet in cache.
+      // Airline flights (3-letter code + digits) are already correctly classified
+      // by callsign, so their type lookups are lower priority.
+      const toFetch = fresh
+        .filter(a => a.hex && !AIRLINE_CODE_RE.test((a.flight ?? '').trim().toUpperCase()))
+        .map(a => a.hex!);
+      prefetchTypes(toFetch);
     }
     // fresh === null: keep lastGoodAircraft (last-good fallback)
   }
