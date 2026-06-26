@@ -104,32 +104,49 @@ export async function mergeAndSaveTracks(
 
 /**
  * Converts stored TrackEntry[] into RouteWave[] using the same logic as
- * buildRoute() in telegram-threats.ts (sort by ts, 45-min wave gaps,
- * skip consecutive same-oblast waypoints).
+ * buildRoute() in telegram-threats.ts (sort by ts, per-weapon wave gaps,
+ * skip consecutive same-oblast waypoints, propagate confidence).
  *
- * Call this with the 24h (or 12h) accumulated entry set to get the full
- * historical route back as waves the client already knows how to render.
+ * Call this with the 24h (or 12h) accumulated entry set (pre-filtered to one
+ * weapon type) to get the full historical route back as waves the client already
+ * knows how to render.
+ *
+ * Uses waveGapFor(weaponType) to mirror buildRoute() exactly — mismatched gap
+ * values would cause the reconstructed route to differ from what was stored.
+ * Falls back to WAVE_GAP_MS if no entries are present or weaponType is unknown.
  */
 export function buildWavesFromEntries(entries: TrackEntry[]): RouteWave[] {
   const sorted = [...entries].sort((a, b) => a.ts - b.ts);
 
+  // Derive weapon type from first entry; all entries in a typed call share the same type
+  const weaponType = sorted[0]?.weaponType as WeaponType | undefined;
+  const gapMs = weaponType ? waveGapFor(weaponType) : WAVE_GAP_MS;
+
   const waves: RouteWave[] = [];
   let current: RouteWaypoint[] = [];
+  let currentChannels = new Set<string>();
   let lastTs = 0;
 
   const flush = () => {
     if (current.length > 0) {
+      // Recompute confidence from accumulated channels — do not copy stale per-entry
+      // values which were frozen at the 1.5h corpus window, not the 12h rebuild window.
+      const conf = currentChannels.size;
+      for (const wp of current) wp.confidence = conf;
       waves.push({
         waveIndex:  waves.length,
         startedAt:  current[0].ts,
         waypoints:  [...current],
       });
       current = [];
+      currentChannels = new Set<string>();
     }
   };
 
   for (const entry of sorted) {
-    if (lastTs && entry.ts - lastTs > WAVE_GAP_MS) flush();
+    if (lastTs && entry.ts - lastTs > gapMs) flush();
+
+    currentChannels.add(entry.channel);
 
     const last = current[current.length - 1];
     if (last && last.oblast === entry.oblast) {
@@ -146,6 +163,7 @@ export function buildWavesFromEntries(entries: TrackEntry[]): RouteWave[] {
       text:           entry.text,
       channel:        entry.channel,
       alarmConfirmed: entry.alarmConfirmed,
+      confidence:     undefined, // stamped by flush() after full wave is known
     });
     lastTs = entry.ts;
   }

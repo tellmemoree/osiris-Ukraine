@@ -54,6 +54,7 @@ export interface RouteWaypoint {
   text: string;
   channel: string;
   alarmConfirmed?: boolean; // true when air-raid history records this oblast alarmed near ts
+  confidence?: number;      // number of distinct channels that reported this waypoint's wave
 }
 
 export interface RouteWave {
@@ -123,8 +124,9 @@ const WEAPON_VOCAB: Record<WeaponType, RegExp[]> = {
     /(?<!\p{L})х-?101(?!\p{L})/iu,    // Cyrillic Х (кириличний) — UA writers use Х not K
     /(?<!\p{L})kh?-?555(?!\p{L})/iu,
     /(?<!\p{L})х-?555(?!\p{L})/iu,
-    /крилата ракета/iu,
-    /(?<!\p{L})ракетн/iu,             // generic missile fallback: ракетна загроза / ракетний удар
+    /крилат\p{L}*\s+ракет/iu,          // "крилата ракета" and inflections — \p{L}* matches Cyrillic
+    /стратегічн\p{L}*\s+ракет/iu,     // "стратегічна ракета" and inflections
+    // Removed bare /ракетн/iu — caused false positives on ballistic / S-300 posts
   ],
   BALLISTIC: [
     /(?<!\p{L})іскандер(?!\p{L})/iu,
@@ -475,13 +477,39 @@ function firstOblastInText(text: string): OblastRef | null {
 // splitting single strikes into multiple "waves".
 export const WAVE_GAP_MS = 45 * 60 * 1000;
 
+// Per-weapon-type wave gap overrides.
+// Faster weapons (ballistic, Kinzhal, S-300) have shorter flight times and
+// tighter reporting windows; a 45-min gap would merge distinct attack waves.
+// CRUISE and DRONE keep the default 45-min gap.
+const WAVE_GAPS: Partial<Record<WeaponType, number>> = {
+  BALLISTIC: 15 * 60 * 1000,  // 15 min — Iskander/ballistic arc is ~5-8 min flight
+  KINZHAL:   10 * 60 * 1000,  // 10 min — hypersonic; separate strikes land close together
+  KH22:      20 * 60 * 1000,  // 20 min — supersonic; faster than cruise but slower than ballistic
+  S300:      10 * 60 * 1000,  // 10 min — surface-to-surface SAM repurposed; very short flight
+  // CRUISE: use WAVE_GAP_MS (45 min) — channels post 20-30 min apart for same missile
+  // DRONE:  use WAVE_GAP_MS (45 min) — Shahed swarms span hours, 45-min gap is correct
+};
+
+/**
+ * Returns the wave-gap threshold (ms) for a given weapon type.
+ * Used by both buildRoute() (new waypoints) and buildWavesFromEntries()
+ * (12h reconstruction from disk) — both must use the same threshold or
+ * the displayed routes will differ from what was stored.
+ */
+export function waveGapFor(wt: WeaponType): number {
+  return WAVE_GAPS[wt] ?? WAVE_GAP_MS;
+}
+
 /**
  * Builds temporal route waves for a given weapon type.
  *
- * Each wave is a contiguous series of sighting messages (no >25 min gap).
+ * Each wave is a contiguous series of sighting messages (no gap > waveGapFor(weaponType)).
  * Analysis / probability-assessment messages are excluded entirely.
  * Each qualifying message contributes at most one waypoint (first-mentioned
  * oblast in text order), preventing forecast posts from faking routes.
+ *
+ * confidence on each waypoint = number of distinct channels in the wave.
+ * A wave reported by 3 separate channels is higher-confidence than one from a single channel.
  */
 export function buildRoute(messages: TgMessage[], weaponType: WeaponType): RouteWave[] {
   const seenFingerprints = new Set<string>();
@@ -500,23 +528,34 @@ export function buildRoute(messages: TgMessage[], weaponType: WeaponType): Route
 
   const waves: RouteWave[] = [];
   let current: RouteWaypoint[] = [];
+  let currentChannels: Set<string> = new Set();
   let lastTs = 0;
 
   const flush = () => {
     if (current.length > 0) {
+      const confidence = currentChannels.size;
+      for (const wp of current) {
+        wp.confidence = confidence;
+      }
       waves.push({ waveIndex: waves.length, startedAt: current[0].ts, waypoints: current });
       current = [];
+      currentChannels = new Set();
     }
   };
 
   for (const msg of relevant) {
-    if (lastTs && msg.ts - lastTs > WAVE_GAP_MS) flush();
+    if (lastTs && msg.ts - lastTs > gapMs) flush();
 
     const ref = firstOblastInText(msg.text);
     if (!ref) { lastTs = msg.ts; continue; }
 
     const last = current[current.length - 1];
-    if (last && last.oblast === ref.oblast) { lastTs = msg.ts; continue; }
+    if (last && last.oblast === ref.oblast) {
+      // Still count this channel even for a duplicate-oblast message
+      currentChannels.add(msg.channel);
+      lastTs = msg.ts;
+      continue;
+    }
 
     current.push({
       lat:     ref.coords[1],
@@ -526,6 +565,7 @@ export function buildRoute(messages: TgMessage[], weaponType: WeaponType): Route
       text:    msg.text.length > 120 ? msg.text.slice(0, 120) + '…' : msg.text,
       channel: msg.channel,
     });
+    currentChannels.add(msg.channel);
     lastTs = msg.ts;
   }
 
