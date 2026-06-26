@@ -201,7 +201,7 @@ export default function TimelineControl({ replayTime, timelineRangeH, events, on
       {/* ── Scrubber track ── */}
       <div
         ref={trackRef}
-        className="relative h-7 cursor-pointer rounded overflow-hidden"
+        className="relative h-16 cursor-pointer rounded overflow-hidden"
         style={{ touchAction: 'none' }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

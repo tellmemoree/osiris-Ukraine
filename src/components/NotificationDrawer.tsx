@@ -87,7 +87,7 @@ export default function NotificationDrawer({
             transition={{ type: 'tween', duration: 0.25, ease: 'easeInOut' }}
             className="fixed z-[450] flex flex-col"
             style={{
-              top: 56,
+              top: 80,
               right: 0,
               bottom: 0,
               width: 'min(340px, calc(100vw - 24px))',
