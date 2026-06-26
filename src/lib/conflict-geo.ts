@@ -208,31 +208,37 @@ function bucketId(key: string): string {
 }
 
 /**
- * Clusters raw ConflictEvents by 0.3° spatial + 2-hour temporal bucket.
- * Single-pass merge per cluster; confidence is based on distinct source
- * *families* so gdelt + gdelt-rss (both GDELT-derived) count as one family.
+ * Clusters raw ConflictEvents by 0.3° spatial proximity + sliding 2-hour
+ * temporal window. Within each spatial cell, events are sorted by timestamp
+ * and split into clusters whenever the gap between consecutive events exceeds
+ * 2h — the same gap-based logic the threat-wave builder uses for Shahed waves.
  *
- * Confidence tiers:
+ * This replaces the old fixed-epoch bucket (Math.floor(ts / 7_200_000)) which
+ * split events 10 min apart that straddled a wall-clock boundary into separate
+ * markers, and fused unrelated events that happened to land in the same 2h slot.
+ *
+ * Confidence tiers (same as before):
  *   confirmed   — ≥ 2 distinct source families present
  *   unverified  — sole family is 'telegram'
  *   reported    — everything else
  */
 export function clusterEvents(raw: ConflictEvent[]): ConflictEvent[] {
-  const buckets = new Map<string, ConflictEvent[]>();
+  const TWO_HOURS = 2 * 60 * 60 * 1_000;
 
+  // Step 1: group by spatial cell (0.3° grid).
+  const spatialGroups = new Map<string, ConflictEvent[]>();
   for (const ev of raw) {
-    const ts = ev.published ? new Date(ev.published).getTime() : Date.now();
-    const timeBucket = Number.isNaN(ts) ? Math.floor(Date.now() / 7_200_000) : Math.floor(ts / 7_200_000);
-    const key = `${Math.round(ev.lat / 0.3)}|${Math.round(ev.lng / 0.3)}|${timeBucket}`;
-    const bucket = buckets.get(key) ?? [];
-    bucket.push(ev);
-    buckets.set(key, bucket);
+    const spatialKey = `${Math.round(ev.lat / 0.3)}|${Math.round(ev.lng / 0.3)}`;
+    const group = spatialGroups.get(spatialKey) ?? [];
+    group.push(ev);
+    spatialGroups.set(spatialKey, group);
   }
 
   const merged: ConflictEvent[] = [];
 
-  for (const [key, cluster] of buckets) {
-    // Single pass: accumulate everything needed for the merged event.
+  const mergeCluster = (spatialKey: string, cluster: ConflictEvent[]) => {
+    if (cluster.length === 0) return;
+
     let latSum = 0, lngSum = 0, totalDeaths = 0;
     let longestName = '';
     let earliestTs = Infinity;
@@ -263,13 +269,14 @@ export function clusterEvents(raw: ConflictEvent[]): ConflictEvent[] {
     const earliestPublished = isFinite(earliestTs) ? new Date(earliestTs).toISOString() : undefined;
 
     let confidence: Confidence;
-    if (familySet.size >= 2) {
-      confidence = 'confirmed';
-    } else if (familySet.size === 1 && familySet.has('telegram')) {
-      confidence = 'unverified';
-    } else {
-      confidence = 'reported';
-    }
+    if (familySet.size >= 2) confidence = 'confirmed';
+    else if (familySet.size === 1 && familySet.has('telegram')) confidence = 'unverified';
+    else confidence = 'reported';
+
+    // Stable ID: spatial cell + hour-floored earliest timestamp. Flooring to the
+    // hour gives the same ID across consecutive API calls for the same cluster.
+    const hourBucket = isFinite(earliestTs) ? Math.floor(earliestTs / 3_600_000) : Math.floor(Date.now() / 3_600_000);
+    const key = `${spatialKey}|${hourBucket}`;
 
     merged.push({
       id: bucketId(key),
@@ -284,6 +291,33 @@ export function clusterEvents(raw: ConflictEvent[]): ConflictEvent[] {
       published: earliestPublished,
       deaths: totalDeaths > 0 ? totalDeaths : undefined,
     });
+  };
+
+  // Step 2: within each spatial cell, sort by time then split on gaps > 2h.
+  for (const [spatialKey, group] of spatialGroups) {
+    group.sort((a, b) => {
+      const ta = a.published ? new Date(a.published).getTime() : Date.now();
+      const tb = b.published ? new Date(b.published).getTime() : Date.now();
+      return ta - tb;
+    });
+
+    let currentCluster: ConflictEvent[] = [];
+    for (const ev of group) {
+      const ts = ev.published ? new Date(ev.published).getTime() : Date.now();
+      if (currentCluster.length === 0) {
+        currentCluster.push(ev);
+      } else {
+        const lastEv = currentCluster[currentCluster.length - 1];
+        const lastTs = lastEv.published ? new Date(lastEv.published).getTime() : Date.now();
+        if (ts - lastTs > TWO_HOURS) {
+          mergeCluster(spatialKey, currentCluster);
+          currentCluster = [ev];
+        } else {
+          currentCluster.push(ev);
+        }
+      }
+    }
+    mergeCluster(spatialKey, currentCluster);
   }
 
   return merged;
