@@ -292,6 +292,7 @@ AIS_API_KEY                    # aisstream.io — live vessel positions (aisstre
 # OSINT enrichment
 SHODAN_API_KEY                 # IP intel: open ports, CVEs, tags — free tier works; read by osiris-intel container
 ABUSEIPDB_KEY                  # IP abuse reputation (api.abuseipdb.com) — get free key at abuseipdb.com
+OPENSANCTIONS_API_KEY          # OpenSanctions entity API (structured props: IMO, passport, registration) — free key at opensanctions.org/api/
 CENSYS_API_ID                  # Censys API ID (PAT or legacy key)
 CENSYS_API_SECRET              # Optional; only for legacy key+secret auth
 
