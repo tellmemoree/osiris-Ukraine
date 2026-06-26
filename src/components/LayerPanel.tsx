@@ -187,6 +187,17 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
         ? data.maritime_ships.filter((s: { shadow_fleet?: boolean }) => s?.shadow_fleet === true).length
         : null;
     }
+    // news_intel count must match OsirisMap's 24h freshness filter so the badge
+    // reflects what's actually rendered, not the full unfiltered news array.
+    if (layer.key === 'news_intel') {
+      if (!Array.isArray(data.news)) return null;
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const n = data.news.filter((item: any) =>
+        item.coords?.length === 2 && item.published &&
+        new Date(item.published).getTime() >= cutoff
+      ).length;
+      return n > 0 ? n : null;
+    }
     return getCount(layer.dataKey);
   };
 
