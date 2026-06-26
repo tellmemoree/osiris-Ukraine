@@ -165,7 +165,10 @@ export async function GET(req: Request) {
     // Dedup per place+side (~0.05°/~5 km). Same settlement claimed by the same side =
     // one marker (count the corroborating reports); a contested place claimed by BOTH
     // sides keeps two markers, which is itself the signal.
+    // count = distinct reporting channels/sources, not total articles. Two articles
+    // from the same milblogger re-posting the same claim do not bump the count.
     const byCell = new Map<string, Capture>();
+    const cellSources = new Map<string, Set<string>>(); // distinct sources per cell key
     const locationSides = new Map<string, Set<'ru' | 'ua'>>(); // track which sides claim each location
     let n = 0;
     for (const item of news) {
@@ -183,7 +186,15 @@ export async function GET(req: Request) {
 
         const key = `${locKey}|${side}`;
         const existing = byCell.get(key);
-        if (existing) { existing.count++; continue; }
+        if (existing) {
+          // Only increment count when this is a new distinct source channel.
+          const sources = cellSources.get(key)!;
+          sources.add(item.source ?? '');
+          existing.count = sources.size;
+          continue;
+        }
+        const initSources = new Set([item.source ?? '']);
+        cellSources.set(key, initSources);
         byCell.set(key, {
           id: `cap-${++n}`, lat, lng, side,
           name: (item.title || 'Territorial change').slice(0, 120),
