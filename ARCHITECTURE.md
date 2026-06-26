@@ -106,6 +106,22 @@ page.tsx (useEffect)
 
 **Note:** Routes do **not** accept `bbox=` query parameters. Fetching is global per layer, not viewport-aware.
 
+### Correlated Events Aggregator
+
+```
+/api/correlated-events                       ← Multi-signal correlation (air-raid + weapon + kab + drone + missile)
+  ├─ Self-fetches: /api/air-raids, /api/weapon-threats, /api/kab-threats,
+  │               /api/drone-threats, /api/missile-threats
+  ├─ Promise.allSettled + AbortSignal.timeout(8000) per source (failed source → skipped)
+  ├─ 60-minute rolling window; missile route flattens routes[].waves[].waypoints[]
+  ├─ Join: emit CorrelatedEvent per oblast with ≥ 2 distinct signal types
+  ├─ alarm_confirmed = true when 'air_raid' type is present for that oblast
+  ├─ match_tightness_min = (maxTs - minTs) / 60_000 across all signals
+  ├─ 60s module-level cache + inflight-coalescence; stale-on-error fallback
+  ├─ Env: OSIRIS_SELF_ORIGIN (default http://localhost:3001)
+  └─ Exports: Signal, CorrelatedEvent, CorrelatedEventsResponse (panel imports these)
+```
+
 ### Conflict Event Aggregator
 
 ```
