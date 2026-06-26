@@ -474,11 +474,14 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         // unconfirmed: half-opacity; confirmed: near-full
         'circle-opacity': ['case', ['boolean', ['get', 'confirmed'], false], 0.88, 0.38] as any,
         'circle-stroke-width': ['case', ['boolean', ['get', 'confirmed'], false], 1.5, 2] as any,
-        // fire-confirmed → black; video-confirmed → gold; unconfirmed → bright amber warning ring
-        'circle-stroke-color': ['case',
-          ['boolean', ['get', 'hit'], false], '#000000',
-          ['boolean', ['get', 'videoConfirmed'], false], '#FFD700',
-          '#FF8C00'] as any,
+        // Stroke color encodes confidence tier (high→green, med→amber, low→grey, news→blue).
+        // The hit/videoConfirmed status stays on stroke-width above, not on color.
+        'circle-stroke-color': ['match', ['get', 'confidence'],
+          'high', '#00E676',
+          'med',  '#FFD700',
+          'low',  '#9E9E9E',
+          'news', '#64B5F6',
+          '#9E9E9E'] as any,
         'circle-stroke-opacity': ['case', ['boolean', ['get', 'confirmed'], false], 0.45, 0.9] as any,
       }});
       // Label confirmed strikes (fire OR video) with the site/article name
@@ -514,7 +517,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         ],
         'circle-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.40, 3, 0.88],
         'circle-stroke-width': ['case', ['boolean', ['get', 'conflicted'], false], 2.5, 1.5],
-        'circle-stroke-color': ['case', ['boolean', ['get', 'conflicted'], false], '#FF8C00', '#ffffff'],
+        // Stroke color encodes confidence tier; conflicted status stays on stroke-width above.
+        'circle-stroke-color': ['match', ['get', 'confidence'],
+          'high', '#00E676',
+          'med',  '#FFD700',
+          'low',  '#9E9E9E',
+          '#9E9E9E'],
         'circle-stroke-opacity': ['interpolate', ['linear'], ['get', 'count'], 1, 0.15, 3, 0.45],
       }});
 
@@ -573,12 +581,14 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       map.addLayer({ id: 'drone-route-nodes', type: 'circle', source: 'drone-route',
         filter: ['==', ['geometry-type'], 'Point'],
         paint: {
-          'circle-radius': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 6, 4],
+          // Gate: alarmConfirmed OR confidence >= 2 (corroborated by 2+ channels) → full treatment.
+          // Mirrors missile-route-nodes gate exactly; drone color palette (purple) is kept.
+          'circle-radius': ['case', ['any', ['boolean', ['get', 'alarmConfirmed'], false], ['>=', ['coalesce', ['get', 'confidence'], 1], 2]], 6, 4],
           'circle-color': '#CE93D8',
-          'circle-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.8],
-          'circle-stroke-width': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 2.5, 1.5],
-          'circle-stroke-color': ['case', ['boolean', ['get', 'alarmConfirmed'], false], '#FF1744', '#E040FB'],
-          'circle-stroke-opacity': ['case', ['boolean', ['get', 'alarmConfirmed'], false], 1.0, 0.7],
+          'circle-opacity': ['case', ['any', ['boolean', ['get', 'alarmConfirmed'], false], ['>=', ['coalesce', ['get', 'confidence'], 1], 2]], 1.0, 0.8],
+          'circle-stroke-width': ['case', ['any', ['boolean', ['get', 'alarmConfirmed'], false], ['>=', ['coalesce', ['get', 'confidence'], 1], 2]], 2.5, 1.5],
+          'circle-stroke-color': ['case', ['any', ['boolean', ['get', 'alarmConfirmed'], false], ['>=', ['coalesce', ['get', 'confidence'], 1], 2]], '#FF1744', '#E040FB'],
+          'circle-stroke-opacity': ['case', ['any', ['boolean', ['get', 'alarmConfirmed'], false], ['>=', ['coalesce', ['get', 'confidence'], 1], 2]], 1.0, 0.7],
         }});
       map.addLayer({ id: 'drone-route-label', type: 'symbol', source: 'drone-route', minzoom: 4,
         filter: ['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'isLatest'], true]],
@@ -2051,7 +2061,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('captures', visible.map((c: any) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-      properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description, conflicted: c.conflicted, other_name: c.other_name, other_link: c.other_link, other_source: c.other_source, other_side: c.other_side },
+      properties: { id: c.id, name: c.name, side: c.side, source: c.source, link: c.link, date: c.date, count: c.count, description: c.description, conflicted: c.conflicted, other_name: c.other_name, other_link: c.other_link, other_source: c.other_source, other_side: c.other_side, confidence: (c as any).confidence ?? null },
     })));
   }, [mapReady, data.captures, activeLayers.captures, setGeo, replayTime]);
 
@@ -2376,7 +2386,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         features.push({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [w.lng, w.lat] },
-          properties: { oblast: w.oblast, ts: w.ts, text: w.text, isLatest: i === wps.length - 1, sequence: i + 1, waveIndex: wave.waveIndex, alarmConfirmed: !!w.alarmConfirmed },
+          properties: { oblast: w.oblast, ts: w.ts, text: w.text, isLatest: i === wps.length - 1, sequence: i + 1, waveIndex: wave.waveIndex, alarmConfirmed: !!w.alarmConfirmed, confidence: (w as any).confidence ?? 1 },
         });
       });
     }
