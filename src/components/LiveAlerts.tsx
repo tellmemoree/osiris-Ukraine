@@ -59,7 +59,11 @@ function hashAlert(alert: any): string {
   const type = alert.type ?? 'unknown';
   const title = (alert.title ?? '').slice(0, 60);
   const source = alert.source ?? '';
-  return `${type}|${source}|${title}`;
+  // Include the unique URL so distinct articles whose first 60 title chars match
+  // (common for war headlines) don't collide into one id — which would produce
+  // duplicate React keys and make a single dismiss drop multiple alerts.
+  const url = alert.url ?? alert.link ?? '';
+  return `${type}|${source}|${url}|${title}`;
 }
 
 export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsProps) {
