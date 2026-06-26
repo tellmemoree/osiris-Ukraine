@@ -23,7 +23,7 @@ export interface ConflictEvent {
   html?: string;
   eventType: EventType;
   sources: string[];
-  confidence: Confidence;
+  confidence?: Confidence; // set by clusterEvents(); absent on raw pre-cluster events
   published?: string; // ISO 8601 UTC
   deaths?: number;
 }
