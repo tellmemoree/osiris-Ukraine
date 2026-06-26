@@ -363,17 +363,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       }});
 
       // Ukraine admin boundary fill sources (static assets).
-      // Filled red when air-raid alerts are active — oblast OR district level.
+      // Separate source copies for raid vs outage fills so their colours don't blend.
       map.addSource('ukraine-oblast-fill', { type: 'geojson', data: '/ukraine-oblasts.geojson' });
+      map.addSource('ukraine-oblast-raid-fill', { type: 'geojson', data: '/ukraine-oblasts.geojson' });
       map.addSource('ukraine-district-fill', { type: 'geojson', data: '/ukraine-districts.geojson' });
 
       // Oblast fill — shown when level==='oblast' alert; district fill when level==='district'.
       // Both layers sit below the dot layers so dots render on top.
-      map.addLayer({ id: 'raid-oblast-fill', type: 'fill', source: 'ukraine-oblast-fill',
+      map.addLayer({ id: 'raid-oblast-fill', type: 'fill', source: 'ukraine-oblast-raid-fill',
         filter: ['in', ['get', 'name_en'], ['literal', []]],
         paint: { 'fill-color': '#FF1744', 'fill-opacity': 0.22 }
       });
-      map.addLayer({ id: 'raid-oblast-outline', type: 'line', source: 'ukraine-oblast-fill',
+      map.addLayer({ id: 'raid-oblast-outline', type: 'line', source: 'ukraine-oblast-raid-fill',
         filter: ['in', ['get', 'name_en'], ['literal', []]],
         paint: { 'line-color': '#FF1744', 'line-width': 1.5, 'line-opacity': 0.55 }
       });
