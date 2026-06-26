@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Bell, MoreHorizontal, Play, FileText, Network } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, ChevronDown, ChevronUp, Bell, MoreHorizontal, Play, FileText, Network, GitMerge } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -20,6 +20,7 @@ import FrontlineTracker from '@/components/FrontlineTracker';
 import TimelineControl, { TimelineEvent } from '@/components/TimelineControl';
 import { parseThermalLatest } from '@/lib/osint-utils';
 import AxisBriefing from '@/components/AxisBriefing';
+import ThreatTimeline from '@/components/ThreatTimeline';
 import ThresholdToasts from '@/components/ThresholdToasts';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 import NotificationDrawer, { type NotificationRecord } from '@/components/NotificationDrawer';
@@ -165,6 +166,7 @@ export default function Dashboard() {
   }, [osirisTheme]);
   const [showFrontlineTracker, setShowFrontlineTracker] = useState(false);
   const [showAxisBriefing, setShowAxisBriefing] = useState(false);
+  const [showThreatTimeline, setShowThreatTimeline] = useState(false);
   const [replayTime, setReplayTime] = useState<Date | null>(null);
   const [timelineRangeH, setTimelineRangeH] = useState(24);
   const [showTimeline, setShowTimeline] = useState(false);
@@ -1255,6 +1257,15 @@ export default function Dashboard() {
           <MapPinned className={`w-4 h-4 ${showAxisBriefing ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
         </button>
 
+        {/* Threat Timeline toggle */}
+        <button
+          onClick={() => setShowThreatTimeline(t => !t)}
+          className={`p-2 rounded transition-colors ${showThreatTimeline ? 'bg-orange-500/20 text-orange-400' : 'text-white/40 hover:text-white/70'}`}
+          title="Threat Timeline"
+        >
+          <GitMerge size={16} />
+        </button>
+
         {/* Entity graph (Intelligence Layer) toggle */}
         <div className="relative group">
           <button onClick={() => { setShowEntityGraph(!showEntityGraph); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); setShowSearch(false); }} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${showEntityGraph ? 'bg-[#D4AF37]/20' : 'hover:bg-white/10'}`}>
@@ -1516,6 +1527,22 @@ export default function Dashboard() {
             className="absolute bottom-6 right-14 z-[205] pointer-events-none"
           >
             <AxisBriefing show={showAxisBriefing} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Threat Timeline panel (desktop) ── */}
+      <AnimatePresence>
+        {!isMobile && showThreatTimeline && (
+          <motion.div
+            key="threat-timeline"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            className="absolute bottom-6 z-[205] pointer-events-auto"
+            style={{ right: showAxisBriefing ? '19rem' : '3.5rem' }}
+          >
+            <ThreatTimeline show={showThreatTimeline} />
           </motion.div>
         )}
       </AnimatePresence>
