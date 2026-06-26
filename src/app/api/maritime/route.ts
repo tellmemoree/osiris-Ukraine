@@ -197,7 +197,23 @@ const globalForAis = globalThis as unknown as {
   tracksSaveTimer: ReturnType<typeof setTimeout> | null;
   // Diagnostic: total messages received from the AIS WebSocket since last init.
   aisMessageCount: number;
+  // Timestamp of the last received aisstream.io message (null = never since restart).
+  lastAisMessageAt: number | null;
+  // VesselAPI fallback — REST AIS sweep when aisstream is silent.
+  vesselApiLastFetch: number;
+  vesselApiCallsToday: number;
+  vesselApiCallsResetAt: number;
+  vesselApiTimer: ReturnType<typeof setTimeout> | null;
+  // GFW identity enrichment cache: MMSI → {flag ISO-3, imo, name, fetchedAt}.
+  gfwEnrichment: Map<number, { flag?: string; imo?: string; name?: string; fetchedAt: number }>;
+  gfwEnrichTimer: ReturnType<typeof setTimeout> | null;
 };
+
+function nextMidnightUtc(): number {
+  const d = new Date();
+  d.setUTCHours(24, 0, 0, 0);
+  return d.getTime();
+}
 
 if (!globalForAis.shipsCache) {
   globalForAis.shipsCache = new Map();
@@ -207,6 +223,13 @@ if (!globalForAis.shipsCache) {
   globalForAis.shadowTracks = new Map();
   globalForAis.tracksSaveTimer = null;
   globalForAis.aisMessageCount = 0;
+  globalForAis.lastAisMessageAt = null;
+  globalForAis.vesselApiLastFetch = 0;
+  globalForAis.vesselApiCallsToday = 0;
+  globalForAis.vesselApiCallsResetAt = nextMidnightUtc();
+  globalForAis.vesselApiTimer = null;
+  globalForAis.gfwEnrichment = new Map();
+  globalForAis.gfwEnrichTimer = null;
   // Best-effort restore of the learned sanctioned-MMSI set. Mutates the same
   // Set the `shadowMmsi` const below references, so additions land in it.
   fs.readFile(SHADOW_STATE_FILE, 'utf8')
@@ -361,6 +384,7 @@ function connectAisStream() {
 
   ws.on("message", (data) => {
     globalForAis.aisMessageCount++;
+    globalForAis.lastAisMessageAt = Date.now();
     try {
       const parsed = JSON.parse(data.toString());
       const mmsi = parsed.MetaData?.MMSI;
@@ -473,6 +497,214 @@ function connectAisStream() {
 // Start connection process asynchronously
 connectAisStream();
 
+// ── VesselAPI Fallback ────────────────────────────────────────────────────────
+// REST AIS sweep when aisstream.io has been silent for >30 min.
+// Budget: 150 calls/month free → 6 zones × 1 call each → ~25 sweeps/month → every ~29h.
+// |dLat|+|dLon| ≤ 4° hard limit per box (API rejects larger spans).
+
+const VESSEL_API_ZONES = [
+  // Ukraine/Russia war corridor (top priority)
+  { name: 'Odessa Corridor', latBottom: 46, latTop: 48, lonLeft: 30, lonRight: 32 },
+  { name: 'Black Sea NW',    latBottom: 43, latTop: 45, lonLeft: 30, lonRight: 32 },
+  { name: 'Kerch / Azov',    latBottom: 45, latTop: 47, lonLeft: 35, lonRight: 37 },
+  { name: 'Bosphorus',       latBottom: 40, latTop: 42, lonLeft: 28, lonRight: 30 },
+  // Shadow fleet export routes
+  { name: 'Hormuz',          latBottom: 25, latTop: 27, lonLeft: 56, lonRight: 58 },
+  { name: 'Malacca',         latBottom:  1, latTop:  3, lonLeft: 103, lonRight: 105 },
+];
+const VESSEL_API_DAILY_CAP = 6;
+const VESSEL_API_REFRESH_MS = 29 * 60 * 60 * 1000;
+
+interface VesselApiRaw {
+  mmsi?: number; MMSI?: number;
+  name?: string; vesselName?: string; shipName?: string;
+  lat?: number; latitude?: number;
+  lon?: number; lng?: number; longitude?: number;
+  sog?: number; speed?: number;
+  cog?: number; heading?: number; trueHeading?: number;
+}
+
+async function vesselApiFetchPage(
+  latBottom: number, latTop: number, lonLeft: number, lonRight: number,
+  nextToken?: string
+): Promise<{ ships: VesselApiRaw[]; nextToken?: string; split?: boolean }> {
+  const key = process.env.VESSEL_API_KEY;
+  if (!key) return { ships: [] };
+  const p = new URLSearchParams({
+    'filter.latBottom': String(latBottom), 'filter.latTop': String(latTop),
+    'filter.lonLeft': String(lonLeft),     'filter.lonRight': String(lonRight),
+    'pagination.limit': '50',
+  });
+  if (nextToken) p.set('pagination.nextToken', nextToken);
+  const res = await fetch(`https://api.vesselapi.com/v1/location/vessels/bounding-box?${p}`,
+    { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15000) });
+  if (res.status === 400) {
+    const body = await res.json().catch(() => ({}));
+    const code: string = body?.error?.code ?? body?.code ?? '';
+    if (code === 'bounding_box_too_dense' || code === 'invalid_parameter') return { ships: [], split: true };
+    return { ships: [] };
+  }
+  if (!res.ok) return { ships: [] };
+  const json = await res.json();
+  const ships: VesselApiRaw[] = json?.data ?? json?.vessels ?? [];
+  const next: string | undefined = json?.pagination?.nextToken ?? json?.nextToken;
+  return { ships, nextToken: next };
+}
+
+async function vesselApiFetchBox(
+  latBottom: number, latTop: number, lonLeft: number, lonRight: number,
+  budget: { remaining: number }
+): Promise<VesselApiRaw[]> {
+  if (budget.remaining <= 0) return [];
+  budget.remaining--;
+  const first = await vesselApiFetchPage(latBottom, latTop, lonLeft, lonRight);
+  if (first.split) {
+    const dLat = latTop - latBottom, dLon = lonRight - lonLeft;
+    if (dLat >= dLon) {
+      const mid = (latBottom + latTop) / 2;
+      return [...await vesselApiFetchBox(latBottom, mid, lonLeft, lonRight, budget),
+              ...await vesselApiFetchBox(mid, latTop, lonLeft, lonRight, budget)];
+    } else {
+      const mid = (lonLeft + lonRight) / 2;
+      return [...await vesselApiFetchBox(latBottom, latTop, lonLeft, mid, budget),
+              ...await vesselApiFetchBox(latBottom, latTop, mid, lonRight, budget)];
+    }
+  }
+  const ships = [...first.ships];
+  let cursor = first.nextToken;
+  while (cursor && budget.remaining > 0) {
+    budget.remaining--;
+    const page = await vesselApiFetchPage(latBottom, latTop, lonLeft, lonRight, cursor);
+    ships.push(...page.ships);
+    cursor = page.nextToken;
+  }
+  return ships;
+}
+
+async function runVesselApiSweep() {
+  if (!process.env.VESSEL_API_KEY) return;
+  if (Date.now() >= globalForAis.vesselApiCallsResetAt) {
+    globalForAis.vesselApiCallsToday = 0;
+    globalForAis.vesselApiCallsResetAt = nextMidnightUtc();
+  }
+  const callsLeft = VESSEL_API_DAILY_CAP - globalForAis.vesselApiCallsToday;
+  if (callsLeft <= 0) return;
+  const budget = { remaining: callsLeft };
+  let added = 0;
+  for (const zone of VESSEL_API_ZONES) {
+    if (budget.remaining <= 0) break;
+    const vessels = await vesselApiFetchBox(zone.latBottom, zone.latTop, zone.lonLeft, zone.lonRight, budget);
+    for (const v of vessels) {
+      const mmsi = v.mmsi ?? v.MMSI;
+      const lat = v.lat ?? v.latitude;
+      const lng = v.lon ?? v.lng ?? v.longitude;
+      if (!mmsi || !lat || !lng) continue;
+      const existing = globalForAis.shipsCache.get(mmsi);
+      if (!existing || (existing as any).source === 'vesselapi') {
+        globalForAis.shipsCache.set(mmsi, {
+          id: mmsi, mmsi, lat, lng,
+          speed: v.sog ?? v.speed ?? 0,
+          heading: v.cog ?? v.heading ?? v.trueHeading,
+          name: (v.name ?? v.vesselName ?? v.shipName ?? '').trim() || undefined,
+          timestamp: Date.now(),
+          source: 'vesselapi',
+        } as Ship & { source: string });
+        added++;
+      }
+    }
+  }
+  globalForAis.vesselApiCallsToday += callsLeft - budget.remaining;
+  globalForAis.vesselApiLastFetch = Date.now();
+  console.log(`[OSIRIS] VesselAPI sweep: ${callsLeft - budget.remaining} calls, ${added} ships added`);
+}
+
+if (!globalForAis.vesselApiTimer) {
+  runVesselApiSweep().catch(() => {});
+  globalForAis.vesselApiTimer = setTimeout(function tick() {
+    runVesselApiSweep().catch(() => {});
+    globalForAis.vesselApiTimer = setTimeout(tick, VESSEL_API_REFRESH_MS);
+  }, VESSEL_API_REFRESH_MS);
+}
+
+// ── GFW Identity Enrichment ───────────────────────────────────────────────────
+// Enriches shadow-fleet ships with registry data from Global Fishing Watch:
+// confirmed flag state, IMO number, vessel name (authoritative over AIS self-report).
+// Rate: 1 request every 5s — full 370-MMSI shadow fleet enriches in ~30 min.
+// Cache TTL: 7 days per entry.
+
+const GFW_ENRICH_FILE = path.join(SHADOW_STATE_DIR, 'gfw-enrichment.json');
+const GFW_ENRICH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const GFW_ENRICH_INTERVAL_MS = 5000;
+
+// Best-effort restore of GFW enrichment cache from disk.
+if (globalForAis.gfwEnrichment.size === 0) {
+  fs.readFile(GFW_ENRICH_FILE, 'utf8')
+    .then(txt => {
+      const arr = JSON.parse(txt) as { mmsi: number; flag?: string; imo?: string; name?: string; fetchedAt: number }[];
+      if (!Array.isArray(arr)) return;
+      const cutoff = Date.now() - GFW_ENRICH_TTL_MS;
+      for (const e of arr) {
+        if (typeof e.mmsi === 'number' && e.fetchedAt > cutoff) {
+          globalForAis.gfwEnrichment.set(e.mmsi, { flag: e.flag, imo: e.imo, name: e.name, fetchedAt: e.fetchedAt });
+        }
+      }
+    })
+    .catch(() => {});
+}
+
+async function gfwEnrichNext() {
+  const key = process.env.GFW_API_KEY;
+  if (!key) return scheduleGfwEnrich();
+  // Find next shadow-fleet MMSI that needs enrichment (not yet enriched or stale).
+  const cutoff = Date.now() - GFW_ENRICH_TTL_MS;
+  let target: number | null = null;
+  for (const mmsi of shadowMmsi) {
+    const entry = globalForAis.gfwEnrichment.get(mmsi);
+    if (!entry || entry.fetchedAt < cutoff) { target = mmsi; break; }
+  }
+  if (target === null) return scheduleGfwEnrich(); // all current MMSIs enriched
+  try {
+    const params = new URLSearchParams({
+      query: `ssvid:${target}`,
+      'datasets[0]': 'public-global-vessel-identity:latest',
+      limit: '1',
+    });
+    const res = await fetch(`https://gateway.api.globalfishingwatch.org/v3/vessels/search?${params}`,
+      { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10000) });
+    if (res.ok) {
+      const json = await res.json();
+      const info = json?.entries?.[0]?.selfReportedInfo?.[0];
+      if (info) {
+        const record = { flag: info.flag, imo: info.imo ?? undefined, name: info.shipname ?? undefined, fetchedAt: Date.now() };
+        globalForAis.gfwEnrichment.set(target, record);
+        // Persist asynchronously
+        const payload = [...globalForAis.gfwEnrichment.entries()].map(([mmsi, v]) => ({ mmsi, ...v }));
+        fs.mkdir(SHADOW_STATE_DIR, { recursive: true })
+          .then(() => fs.writeFile(GFW_ENRICH_FILE, JSON.stringify(payload), 'utf8'))
+          .catch(() => {});
+      }
+    }
+  } catch { /* best-effort */ }
+  scheduleGfwEnrich();
+}
+
+function scheduleGfwEnrich() {
+  globalForAis.gfwEnrichTimer = setTimeout(gfwEnrichNext, GFW_ENRICH_INTERVAL_MS);
+}
+
+if (!globalForAis.gfwEnrichTimer) scheduleGfwEnrich();
+
+// Helper: ISO-3166-1 alpha-3 → flag emoji (covers common shadow-fleet registries).
+function iso3ToEmoji(iso3: string): string {
+  const map: Record<string, string> = {
+    RUS:'🇷🇺', IRN:'🇮🇷', ARE:'🇦🇪', PAN:'🇵🇦', LBR:'🇱🇷', MLT:'🇲🇹', MHL:'🇲🇭',
+    VCT:'🇻🇨', TZA:'🇹🇿', GAB:'🇬🇦', CMR:'🇨🇲', COM:'🇰🇲', SLE:'🇸🇱', PLW:'🇵🇼',
+    TON:'🇹🇴', BLZ:'🇧🇿', MDV:'🇲🇻', KNA:'🇰🇳', ATG:'🇦🇬', CYP:'🇨🇾',
+    CHN:'🇨🇳', KOR:'🇰🇷', GRC:'🇬🇷', NOR:'🇳🇴', JPN:'🇯🇵', SGP:'🇸🇬',
+  };
+  return map[iso3] ?? '';
+}
+
 // Regular vessels expire 10 min after their last AIS report. Shadow-fleet vessels
 // are kept indefinitely — going AIS-dark is their signature evasion; last-known
 // position is itself intelligence and should not expire until they transmit again.
@@ -511,12 +743,10 @@ export async function GET(req: Request) {
 
   const now = Date.now();
   for (const [mmsi, ship] of shipsCache.entries()) {
-    // Use the live watchlist too, not just the stored flag, so a vessel learned
-    // (via type-5 IMO) after its last position fix still gets the long retention.
     const isShadow = ship.shadow_fleet || shadowMmsi.has(mmsi);
-    if (!isShadow && now - ship.timestamp > STALE_MS) {
-      shipsCache.delete(mmsi);
-    }
+    const isVesselApi = (ship as any).source === 'vesselapi';
+    const ttl = isShadow ? Infinity : isVesselApi ? 25 * 60 * 60 * 1000 : STALE_MS;
+    if (ttl !== Infinity && now - ship.timestamp > ttl) shipsCache.delete(mmsi);
   }
 
   const ships = Array.from(shipsCache.values());
@@ -591,16 +821,32 @@ export async function GET(req: Request) {
     };
   });
 
+  const lastMsg = globalForAis.lastAisMessageAt;
+  const aisLive = lastMsg !== null && (now - lastMsg) < 30 * 60 * 1000;
+  const aisStatus = {
+    live: aisLive,
+    last_message_at: lastMsg ? new Date(lastMsg).toISOString() : null,
+    source: aisLive ? 'aisstream' : (globalForAis.vesselApiLastFetch > 0 ? 'vesselapi' : 'cache'),
+    vessel_api_last_fetch: globalForAis.vesselApiLastFetch > 0
+      ? new Date(globalForAis.vesselApiLastFetch).toISOString() : null,
+    vessel_api_calls_today: globalForAis.vesselApiCallsToday,
+    gfw_enriched: globalForAis.gfwEnrichment.size,
+  };
+
   // Return the full vessel set — no response cap. Every tracked ship reaches the
   // client/map (cache is still bounded at 20k upstream + the 10-min staleness
-  // prune above). Enrich with flag state derived from the MMSI (ITU MID → ISO).
+  // prune above). Enrich with flag state: GFW authoritative data for shadow fleet,
+  // MMSI-derived flag for all others.
   const responseShips = ships.map((s) => {
+    const gfw = s.shadow_fleet ? globalForAis.gfwEnrichment.get(s.mmsi) : undefined;
     const f = flagFromMmsi(s.mmsi);
+    const gfwEmoji = gfw?.flag ? iso3ToEmoji(gfw.flag) : undefined;
     const minutesSinceUpdate = Math.round((now - s.timestamp) / 60000);
     return {
       ...s,
-      flag: f ? f.iso : null,
-      flag_emoji: f ? f.emoji : null,
+      flag: gfw?.flag ?? (f ? f.iso : null),
+      flag_emoji: gfwEmoji || (f ? f.emoji : null),
+      imo: gfw?.imo ?? undefined,
       minutes_since_update: minutesSinceUpdate,
       last_position_at: new Date(s.timestamp).toISOString(),
       stale: minutesSinceUpdate > 10,
@@ -615,6 +861,7 @@ export async function GET(req: Request) {
     total_chokepoints: dynamicChokepoints.length,
     total_ships: responseShips.length,
     timestamp: new Date().toISOString(),
+    ais_status: aisStatus,
   }, {
     headers: { 
       'Cache-Control': 'no-store, no-cache, must-revalidate',
