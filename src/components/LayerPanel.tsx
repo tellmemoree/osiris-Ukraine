@@ -103,6 +103,7 @@ const getLayerGroups = (theme: 'core' | 'ghost') => {
       { key: 'air_raids', label: 'Air Raid Alerts', icon: Siren, color: '#FF1744', dataKey: 'air_raids' },
       { key: 'kab_threats', label: 'KAB / Glide-Bomb', icon: Bomb, color: '#FF6B00', dataKey: 'kab_threats' },
       { key: 'drone_threats', label: 'Drone / UAV Swarms', icon: Plane, color: '#CE93D8', dataKey: 'drone_threats' },
+      { key: 'alarm_vectors', label: 'Wave Vectors (inferred)', icon: Activity, color: '#FF9800', dataKey: '' },
       { key: 'missile_threats', label: 'Missile Threats', icon: Zap, color: '#FF4444', dataKey: 'missile_routes' },
       { key: 'power_outages', label: 'Power Outages', icon: Zap, color: '#FFD500', dataKey: 'power_outages' },
       { key: 'oblast_pressure', label: 'Oblast Pressure', icon: Activity, color: '#FF7043', dataKey: 'oblast_pressure' },
@@ -358,36 +359,53 @@ function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'co
                         
                         return (
                           <div key={layer.key}>
-                            <button
-                              onClick={() => toggle(layer.key)}
-                              className="w-full flex items-center gap-3 px-2 py-1.5 rounded bg-transparent hover:bg-white/5 transition-colors group"
-                            >
-                              <div
-                                className={`w-2 h-2 rounded-full border flex-shrink-0 transition-all duration-300 ${isLayerActive ? 'bg-current border-current scale-100' : 'bg-transparent border-white/30 scale-75'}`}
-                                style={{ color: isLayerActive ? layer.color : 'inherit', boxShadow: isLayerActive ? `0 0 8px ${layer.color}` : 'none' }}
-                              />
-                              <span className={`text-[11px] font-mono uppercase tracking-wider flex-1 text-left transition-colors duration-200 ${isLayerActive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`}>
-                                {layer.label}
-                              </span>
-                              {count !== null && (
-                                <span className="text-[9px] font-mono tabular-nums opacity-60">
-                                  {count.toLocaleString()}
-                                </span>
-                              )}
-                            </button>
-                            {layer.key === 'thermal_aoi' && isLayerActive && (
+                            {layer.key === 'alarm_vectors' ? (
                               <button
-                                onClick={(e) => { e.stopPropagation(); toggle('thermal_aoi_fires_only'); }}
+                                onClick={() => toggle(layer.key)}
                                 className="w-full flex items-center gap-2 pl-6 pr-2 py-1 rounded bg-transparent hover:bg-white/5 transition-colors"
                               >
                                 <div
-                                  className={`w-1.5 h-1.5 rounded-sm border flex-shrink-0 transition-all ${activeLayers.thermal_aoi_fires_only ? 'bg-current border-current' : 'bg-transparent border-white/25'}`}
-                                  style={{ color: '#FF6B00' }}
+                                  className={`w-1.5 h-1.5 rounded-sm border flex-shrink-0 transition-all ${isLayerActive ? 'bg-current border-current' : 'bg-transparent border-white/25'}`}
+                                  style={{ color: '#FF9800' }}
                                 />
-                                <span className={`text-[10px] font-mono tracking-wider flex-1 text-left ${activeLayers.thermal_aoi_fires_only ? 'text-orange-400' : 'text-white/35'}`}>
-                                  active fires only
+                                <span className={`text-[10px] font-mono tracking-wider flex-1 text-left ${isLayerActive ? 'text-orange-400' : 'text-white/35'}`}>
+                                  {layer.label}
                                 </span>
                               </button>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => toggle(layer.key)}
+                                  className="w-full flex items-center gap-3 px-2 py-1.5 rounded bg-transparent hover:bg-white/5 transition-colors group"
+                                >
+                                  <div
+                                    className={`w-2 h-2 rounded-full border flex-shrink-0 transition-all duration-300 ${isLayerActive ? 'bg-current border-current scale-100' : 'bg-transparent border-white/30 scale-75'}`}
+                                    style={{ color: isLayerActive ? layer.color : 'inherit', boxShadow: isLayerActive ? `0 0 8px ${layer.color}` : 'none' }}
+                                  />
+                                  <span className={`text-[11px] font-mono uppercase tracking-wider flex-1 text-left transition-colors duration-200 ${isLayerActive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`}>
+                                    {layer.label}
+                                  </span>
+                                  {count !== null && (
+                                    <span className="text-[9px] font-mono tabular-nums opacity-60">
+                                      {count.toLocaleString()}
+                                    </span>
+                                  )}
+                                </button>
+                                {layer.key === 'thermal_aoi' && isLayerActive && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); toggle('thermal_aoi_fires_only'); }}
+                                    className="w-full flex items-center gap-2 pl-6 pr-2 py-1 rounded bg-transparent hover:bg-white/5 transition-colors"
+                                  >
+                                    <div
+                                      className={`w-1.5 h-1.5 rounded-sm border flex-shrink-0 transition-all ${activeLayers.thermal_aoi_fires_only ? 'bg-current border-current' : 'bg-transparent border-white/25'}`}
+                                      style={{ color: '#FF6B00' }}
+                                    />
+                                    <span className={`text-[10px] font-mono tracking-wider flex-1 text-left ${activeLayers.thermal_aoi_fires_only ? 'text-orange-400' : 'text-white/35'}`}>
+                                      active fires only
+                                    </span>
+                                  </button>
+                                )}
+                              </>
                             )}
                           </div>
                         );
