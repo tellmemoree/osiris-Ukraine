@@ -4,18 +4,31 @@ import { stealthFetch } from '@/lib/stealthFetch';
 
 /**
  * OSIRIS — Flight Data API
- * Fetches real-time aircraft positions from adsb.lol (no API key required)
- * Covers 6 global regions for maximum coverage
+ * N.America: OpenSky bounding-box (returns 7000+ aircraft in ~0.4s; no dist limit).
+ * Rest of world: adsb.lol radius queries (no API key required).
+ *
+ * N.America via adsb.lol was replaced with OpenSky because the US has extremely
+ * dense ADS-B coverage — even a dist=300nm radius returns 3+ MB responses that
+ * download at ~10KB/s from this host (always timing out). OpenSky's bounding-box
+ * endpoint serves the whole continental US in under 0.5s.
+ * OpenSky free tier: 400 calls/day. We refresh N.America at most once per 5 min
+ * (288 calls/day) to stay safely within the limit.
  */
 
+// adsb.lol regions — N.America is handled separately via OpenSky
 const REGIONS = [
-  { lat: 39.8, lon: -98.5, dist: 2000 },   // North America
-  { lat: 50.0, lon: 15.0, dist: 2000 },     // Europe
-  { lat: 35.0, lon: 105.0, dist: 2000 },    // Asia
-  { lat: -25.0, lon: 133.0, dist: 2000 },   // Australia
-  { lat: 0.0, lon: 20.0, dist: 2500 },      // Africa
-  { lat: -15.0, lon: -60.0, dist: 2000 },   // South America
+  { lat: 50.0, lon: 15.0, dist: 2000 },    // Europe
+  { lat: 35.0, lon: 105.0, dist: 2000 },   // Asia
+  { lat: -25.0, lon: 133.0, dist: 2000 },  // Australia
+  { lat: 0.0, lon: 20.0, dist: 2500 },     // Africa
+  { lat: -15.0, lon: -60.0, dist: 2000 },  // South America
 ];
+
+// OpenSky bounding box: continental US + Canada + Mexico
+const OPENSKY_NA_URL = 'https://opensky-network.org/api/states/all?lamin=24&lamax=55&lomin=-125&lomax=-66';
+const NA_REGION_KEY = 99; // synthetic regionCache key for N.America
+const OPENSKY_NA_TTL = 300_000; // 5 min — caps at ~288 calls/day, under free-tier limit
+let naLastFetch = 0;
 
 // Helicopter type codes
 const HELI_TYPES = new Set([
@@ -73,6 +86,47 @@ interface AdsbAircraft {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// OpenSky state vector field indices
+const OS_HEX = 0, OS_FLIGHT = 1, OS_LON = 5, OS_LAT = 6;
+const OS_BARO_M = 7, OS_ON_GROUND = 8, OS_VEL_MS = 9, OS_TRACK = 10, OS_SQUAWK = 14;
+
+// Fetch N.America aircraft via OpenSky bounding-box. OpenSky returns altitude in
+// metres and speed in m/s; we convert to feet/knots to match adsb.lol's format
+// so classifyFlight() works unchanged. No aircraft-type info is available, so
+// classification falls back to callsign-only (some precision loss is acceptable).
+async function fetchNAmerica(): Promise<AdsbAircraft[] | null> {
+  try {
+    const res = await stealthFetch(OPENSKY_NA_URL, { hardTimeoutMs: 8000 });
+    if (!res.ok) return null;
+    const data = await res.json() as { states?: (string | number | boolean | null)[][] };
+    return (data.states ?? []).reduce<AdsbAircraft[]>((acc, s) => {
+      const hex = s[OS_HEX] as string | null;
+      const lat = s[OS_LAT] as number | null;
+      const lon = s[OS_LON] as number | null;
+      if (!hex || lat == null || lon == null) return acc;
+      const baroM = s[OS_BARO_M] as number | null;
+      const onGround = s[OS_ON_GROUND] as boolean | null;
+      const velMs = s[OS_VEL_MS] as number | null;
+      acc.push({
+        hex,
+        flight: ((s[OS_FLIGHT] as string | null) ?? '').trim() || undefined,
+        lat,
+        lon,
+        // Store 0 ft when on ground so classifyFlight's isGrounded (< 100 ft) fires
+        alt_baro: onGround ? 0 : (baroM != null ? Math.round(baroM / 0.3048) : undefined),
+        gs: velMs != null ? velMs / 0.5144 : undefined,
+        track: (s[OS_TRACK] as number | null) ?? undefined,
+        squawk: (s[OS_SQUAWK] as string | null) ?? undefined,
+        dbFlags: 0,
+      });
+      return acc;
+    }, []);
+  } catch (e) {
+    console.warn('N.America (OpenSky) fetch failed:', e);
+    return null;
+  }
+}
+
 // adsb.lol rate-limits bursty/parallel requests hard: firing all 6 regions at
 // once returns 429 for all but one, so only a single region's aircraft ever
 // reach the map (the "planes in one place only" bug). We therefore fetch
@@ -84,7 +138,7 @@ async function fetchRegion(region: typeof REGIONS[0]): Promise<AdsbAircraft[] | 
   const url = `https://api.adsb.lol/v2/lat/${region.lat}/lon/${region.lon}/dist/${region.dist}`;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await stealthFetch(url, { signal: AbortSignal.timeout(12000) });
+      const res = await stealthFetch(url, { signal: AbortSignal.timeout(22000), hardTimeoutMs: 22000 });
       if (res.status === 429) {
         await sleep(1500);
         continue;
@@ -257,7 +311,18 @@ function buildResponse(): FlightResponse {
 
 // Sweep all regions sequentially (adsb.lol 429s parallel bursts), updating each
 // region's last-good cache only on success, then rebuild the combined snapshot.
+// N.America is refreshed via OpenSky on its own 5-min TTL; all other regions use
+// adsb.lol with the standard CACHE_TTL cadence.
 async function refreshAll(): Promise<void> {
+  // N.America (OpenSky) — skip if recently fetched to respect free-tier rate limit
+  if (Date.now() - naLastFetch > OPENSKY_NA_TTL) {
+    const naAc = await fetchNAmerica();
+    if (naAc !== null) {
+      regionCache.set(NA_REGION_KEY, naAc);
+      naLastFetch = Date.now();
+    }
+  }
+
   const start = sweepOffset;
   sweepOffset = (sweepOffset + 1) % REGIONS.length;
   for (let n = 0; n < REGIONS.length; n++) {
