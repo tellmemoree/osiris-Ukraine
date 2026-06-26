@@ -1,6 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { stealthFetch } from '@/lib/stealthFetch';
+import { loadDb, lookupAircraft } from '@/lib/aircraftDb';
 
 /**
  * OSIRIS — Flight Data API
@@ -191,6 +192,9 @@ interface FlightResponse {
 
 const JAMMING_NACAP_THRESHOLD = 4;
 
+// Load aircraft type cache from disk at startup (non-blocking)
+loadDb().catch(() => {});
+
 // Last-good aircraft list — preserved across refreshes so a transient OpenSky
 // outage doesn't blank the map.
 let lastGoodAircraft: AdsbAircraft[] = [];
@@ -207,6 +211,16 @@ function buildResponse(aircraft: AdsbAircraft[]): FlightResponse {
   const jets: ClassifiedFlight[] = [];
   const military: ClassifiedFlight[] = [];
   const gpsJamming: JammingPoint[] = [];
+
+  // Enrich with type and military flag from the Mictronics DB (in-place so
+  // records carry the data forward until the next OpenSky refresh replaces them)
+  for (const a of aircraft) {
+    if (!a.hex) continue;
+    const entry = lookupAircraft(a.hex);
+    if (!a.t && entry.type) a.t = entry.type;
+    if (!a.r && entry.reg)  a.r = entry.reg;
+    if (entry.military)     a.dbFlags = (a.dbFlags ?? 0) | 1;
+  }
 
   for (const raw of aircraft) {
     const flight = classifyFlight(raw);
@@ -236,6 +250,7 @@ function buildResponse(aircraft: AdsbAircraft[]): FlightResponse {
 }
 
 async function refreshAll(): Promise<void> {
+  await loadDb(); // ensure disk cache is loaded (no-op after first call)
   const now = Date.now();
   if (now - openskyLastFetch > OPENSKY_TTL) {
     const fresh = await fetchGlobal();
