@@ -241,6 +241,13 @@ export async function GET(req: Request) {
       ua.other_side = 'ru';
     }
 
+
+function captureConfidence(count: number, date: string | undefined, conflicted: boolean): 'high' | 'med' | 'low' {
+  const ageDays = date ? (Date.now() - new Date(date).getTime()) / 86400000 : 999;
+  if (count >= 3 && ageDays < 3) return 'high';
+  if (count >= 2 || conflicted) return 'med';
+  return 'low';
+}
     for (const c of byCell.values()) {
       c.confidence = captureConfidence(c.count, c.date, c.conflicted);
     }

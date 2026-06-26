@@ -16,7 +16,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { WAVE_GAP_MS, msgFingerprint, type RouteWave, type RouteWaypoint } from '@/lib/telegram-threats';
+import { WAVE_GAP_MS, waveGapFor, msgFingerprint, type WeaponType, type RouteWave, type RouteWaypoint } from '@/lib/telegram-threats';
 
 const DATA_DIR = path.join(os.homedir(), '.osiris-data');
 

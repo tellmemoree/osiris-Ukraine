@@ -544,6 +544,7 @@ export function buildRoute(messages: TgMessage[], weaponType: WeaponType): Route
     })
     .sort((a, b) => a.ts - b.ts);
 
+  const gapMs = waveGapFor(weaponType);
   const waves: RouteWave[] = [];
   let current: RouteWaypoint[] = [];
   let currentChannels: Set<string> = new Set();
