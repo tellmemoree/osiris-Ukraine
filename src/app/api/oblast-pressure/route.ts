@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
  * A failed source contributes 0 to its component — never kills the route.
  *
  * Cache: 60s in-memory + inflight-coalescence (one pending Promise, not one per request).
- * Env:   OSIRIS_SELF_ORIGIN — default http://localhost:3001
+ * Env:   OSIRIS_SELF_ORIGIN — default http://127.0.0.1:3000 (container port)
  */
 
 // ---------------------------------------------------------------------------
@@ -221,7 +221,7 @@ function scoreToLevel(score: number): 'low' | 'med' | 'high' | 'critical' {
 // ---------------------------------------------------------------------------
 
 async function computePressure(): Promise<PressureResponse> {
-  const base = process.env.OSIRIS_SELF_ORIGIN ?? 'http://localhost:3001';
+  const base = process.env.OSIRIS_SELF_ORIGIN ?? 'http://127.0.0.1:3000';
 
   // Fetch all 4 sources concurrently; a timeout or error on any source is non-fatal.
   const [airRes, kabRes, flRes, outRes] = await Promise.allSettled([
