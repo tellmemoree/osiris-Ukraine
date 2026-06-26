@@ -48,6 +48,12 @@ const HISTORICAL_YEAR_RE = /\b(201[4-9]|202[0-4])\b/;
 // (e.g. "деталі армійської реформи") but has no territorial content.
 const POLITICAL_RE = /реформ|reform|мобілізац|mobili[zs]|законопроект|закон про|бюджет|budget|призов|conscript|нагород|указ президент|указ про|decree|перемов|переговор|санкц|sanction/i;
 
+// ── Module-level cache ───────────────────────────────────────────────────────
+const CACHE_TTL = 60_000;
+type CapturesPayload = { captures: unknown[]; counts: { total: number; ru: number; ua: number }; timestamp: string };
+let cachedCaptures: CapturesPayload | null = null;
+let lastFetch = 0;
+
 function isTerritorialAdvance(item: NewsItem): boolean {
   const title = (item.title || '').toLowerCase();
   const t = `${title} ${(item.description || '').toLowerCase()}`;
@@ -137,6 +143,12 @@ async function fetchNews(req: Request): Promise<NewsItem[]> {
 }
 
 export async function GET(req: Request) {
+  if (cachedCaptures && Date.now() - lastFetch < CACHE_TTL) {
+    return NextResponse.json(cachedCaptures, {
+      headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
+    });
+  }
+
   try {
     const news = await fetchNews(req);
 
@@ -209,14 +221,16 @@ export async function GET(req: Request) {
     }
 
     const captures = [...byCell.values()];
-    return NextResponse.json(
-      {
-        captures,
-        counts: { total: captures.length, ru: captures.filter(c => c.side === 'ru').length, ua: captures.filter(c => c.side === 'ua').length },
-        timestamp: new Date().toISOString(),
-      },
-      { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } }
-    );
+    const payload: CapturesPayload = {
+      captures,
+      counts: { total: captures.length, ru: captures.filter(c => c.side === 'ru').length, ua: captures.filter(c => c.side === 'ua').length },
+      timestamp: new Date().toISOString(),
+    };
+    cachedCaptures = payload;
+    lastFetch = Date.now();
+    return NextResponse.json(payload, {
+      headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
+    });
   } catch (error) {
     console.error('Captures error:', error);
     return NextResponse.json({ captures: [], error: 'Failed to compute captures' }, { status: 500 });
