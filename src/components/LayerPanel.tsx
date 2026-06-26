@@ -15,6 +15,7 @@ interface LayerPanelProps {
   isMobile?: boolean;
   theme?: 'core' | 'ghost';
   setTheme?: (theme: 'core' | 'ghost') => void;
+  onLayerDisable?: (key: string) => void;
 }
 
 const getLayerGroups = (theme: 'core' | 'ghost') => {
@@ -146,13 +147,17 @@ function Shield(props: any) {
   );
 }
 
-function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme }: LayerPanelProps) {
+function LayerPanel({ data, activeLayers, setActiveLayers, isMobile, theme = 'core', setTheme, onLayerDisable }: LayerPanelProps) {
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
 
   const LAYER_GROUPS = getLayerGroups(theme);
   const ALL_LAYERS = LAYER_GROUPS.flatMap(g => g.layers);
 
-  const toggle = (key: string) => setActiveLayers((prev: any) => ({ ...prev, [key]: !prev[key] }));
+  const toggle = (key: string) => {
+    const isCurrentlyOn = activeLayers[key];
+    setActiveLayers((prev: any) => ({ ...prev, [key]: !prev[key] }));
+    if (isCurrentlyOn && onLayerDisable) onLayerDisable(key);
+  };
 
   // Toggle every layer in a group at once: if any are on, turn the whole group
   // off; otherwise turn them all on.

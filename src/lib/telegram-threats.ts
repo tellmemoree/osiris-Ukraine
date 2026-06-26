@@ -340,13 +340,24 @@ const GEO_EVENT_CAP = 50;
 // Lazily imported to avoid circular dependency (conflict-geo imports nothing from here).
 // We use a dynamic import pattern to keep the module graph clean.
 let _geoMapText: ((text: string) => [number, number] | null) | null = null;
+let _findPlaceCoords: ((text: string) => [number, number] | null) | null = null;
 
 async function getGeoMapText(): Promise<(text: string) => [number, number] | null> {
   if (!_geoMapText) {
     const m = await import('@/lib/conflict-geo');
     _geoMapText = m.geoMapText;
+    _findPlaceCoords = m.findPlaceCoords;
   }
   return _geoMapText;
+}
+
+async function getFindPlaceCoords(): Promise<(text: string) => [number, number] | null> {
+  if (!_findPlaceCoords) {
+    const m = await import('@/lib/conflict-geo');
+    _geoMapText = m.geoMapText;
+    _findPlaceCoords = m.findPlaceCoords;
+  }
+  return _findPlaceCoords!;
 }
 
 /**
@@ -365,6 +376,7 @@ export async function extractGeoEvents(): Promise<{
   sources: string[];
 }[]> {
   const geoMap = await getGeoMapText();
+  const findPlace = await getFindPlaceCoords();
   const msgs = await getThreatCorpus();
 
   const out: {
@@ -383,17 +395,23 @@ export async function extractGeoEvents(): Promise<{
     const hasEvent = EVENT_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase()));
     if (!hasEvent) continue;
 
-    // Prefer Cyrillic-aware oblast matching; fall back to Latin GEO_DICT scan.
-    const oblastRef = firstOblastInText(msg.text);
+    // Priority: (1) ranked town-first resolver, (2) oblast matcher, (3) GEO_DICT fallback.
+    // findPlaceCoords returns [lat, lng]; everything else uses [lng, lat] — do not mix.
     let lat: number;
     let lng: number;
 
-    if (oblastRef) {
-      [lng, lat] = oblastRef.coords; // coords are [lng, lat] in OBLAST_REFS
+    const ranked = findPlace(msg.text); // returns [lat, lng]
+    if (ranked) {
+      [lat, lng] = ranked;
     } else {
-      const coords = geoMap(msg.text);
-      if (!coords) continue;
-      [lng, lat] = coords; // geoMapText returns [lng, lat]
+      const oblastRef = firstOblastInText(msg.text);
+      if (oblastRef) {
+        [lng, lat] = oblastRef.coords; // coords are [lng, lat] in OBLAST_REFS
+      } else {
+        const coords = geoMap(msg.text);
+        if (!coords) continue;
+        [lng, lat] = coords; // geoMapText returns [lng, lat]
+      }
     }
 
     // eventType mapping

@@ -24,6 +24,7 @@ import {
   RSS_FEEDS,
   CONFLICT_KEYWORDS,
   geoMapText,
+  findPlaceCoords,
   clusterEvents,
   escapeHtml,
   safeHref,
@@ -154,15 +155,20 @@ async function fetchGdeltRss(): Promise<ConflictEvent[]> {
       const isConflict = CONFLICT_KEYWORDS.some(kw => textToSearch.includes(kw));
       if (!isConflict) continue;
 
-      const point = geoMapText(textToSearch);
-      if (!point) continue;
-
-      const jitterLng = ((eventId * 137.5) % 200 - 100) / 100 * 1.5;
-      const jitterLat = ((eventId * 251.3) % 200 - 100) / 100 * 1.5;
+      // Try ranked town-first resolver first
+      const ranked = findPlaceCoords(textToSearch); // returns [lat, lng]
+      let lat: number, lng: number;
+      if (ranked) {
+        [lat, lng] = ranked;
+      } else {
+        const fallback = geoMapText(textToSearch); // returns [lng, lat]
+        if (!fallback) continue;
+        [lng, lat] = fallback;
+      }
       allEvents.push({
         id: `osint-${feed.source.replace(/\s+/g, '')}-${eventId++}`,
-        lat: point[1] + jitterLat,
-        lng: point[0] + jitterLng,
+        lat,
+        lng,
         name: `[${feed.source}] ${title}`,
         url: link,
         html: `<a href="${safeHref(link)}" target="_blank">${escapeHtml(title)}</a><br/><i>Source: ${escapeHtml(feed.source)}</i>`,
