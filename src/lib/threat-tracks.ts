@@ -16,7 +16,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { WAVE_GAP_MS, type RouteWave, type RouteWaypoint } from '@/lib/telegram-threats';
+import { WAVE_GAP_MS, msgFingerprint, type RouteWave, type RouteWaypoint } from '@/lib/telegram-threats';
 
 const DATA_DIR = path.join(os.homedir(), '.osiris-data');
 
@@ -37,6 +37,7 @@ export interface TrackEntry {
   lng:            number;
   text:           string;
   alarmConfirmed: boolean;
+  fingerprint?:   string;  // optional — old on-disk entries lack it
 }
 
 // ── disk I/O ──────────────────────────────────────────────────────────────────
@@ -168,15 +169,19 @@ export function wavesToTrackEntries(
   weaponType: string,
 ): TrackEntry[] {
   return waves.flatMap(wave =>
-    wave.waypoints.map(wp => ({
-      weaponType,
-      ts:             new Date(wp.ts).getTime(),
-      channel:        wp.channel,
-      oblast:         wp.oblast,
-      lat:            wp.lat,
-      lng:            wp.lng,
-      text:           wp.text,
-      alarmConfirmed: !!wp.alarmConfirmed,
-    })),
+    wave.waypoints.map(wp => {
+      const ts = new Date(wp.ts).getTime();
+      return {
+        weaponType,
+        ts,
+        channel:        wp.channel,
+        oblast:         wp.oblast,
+        lat:            wp.lat,
+        lng:            wp.lng,
+        text:           wp.text,
+        alarmConfirmed: !!wp.alarmConfirmed,
+        fingerprint:    msgFingerprint(wp.text, ts),
+      };
+    }),
   );
 }

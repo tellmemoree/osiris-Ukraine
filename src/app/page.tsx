@@ -24,6 +24,7 @@ import ThreatTimeline from '@/components/ThreatTimeline';
 import ThresholdToasts from '@/components/ThresholdToasts';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 import NotificationDrawer, { type NotificationRecord } from '@/components/NotificationDrawer';
+import ThreatHUD from '@/components/ThreatHUD';
 
 const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
@@ -219,6 +220,7 @@ export default function Dashboard() {
     kab_threats: false,
     drone_threats: false,
     missile_threats: false,
+    alarm_vectors: false,
     ru_air_raids: false,
     frontlines: false,
     captures: false,
@@ -472,7 +474,7 @@ export default function Dashboard() {
     power_outages: () => fetchEndpoint('/api/power-outages', d => ({ power_outages: d.outages })),
     kab_threats: () => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })),
     weapon_threats: () => fetchEndpoint('/api/weapon-threats', d => ({ weapon_threats: d.threats })),
-    drone_threats: () => fetchEndpoint('/api/drone-threats', d => ({ drone_threats: d.threats, drone_waves: d.waves })),
+    drone_threats: () => fetchEndpoint('/api/drone-threats', d => ({ drone_threats: d.threats, drone_waves: d.waves, drone_uav_count: d.uav_count ?? 0, alarm_vectors: d.alarm_vectors ?? [] })),
     missile_threats: () => fetchEndpoint('/api/missile-threats', d => ({ missile_routes: d.routes })),
     ru_air_raids: () => fetchEndpoint('/api/ru-air-raids', d => ({ ru_air_raids: d.events })),
     frontlines: () => fetchEndpoint('/api/frontlines', d => ({ frontlines: d.frontlines?.features || [] })),
@@ -611,7 +613,7 @@ export default function Dashboard() {
       intervals.push(setInterval(() => fetchEndpoint('/api/kab-threats', d => ({ kab_threats: d.threats })), 60000)); // 1 min
     }
     if (activeLayers.drone_threats) {
-      intervals.push(setInterval(() => fetchEndpoint('/api/drone-threats', d => ({ drone_threats: d.threats, drone_waves: d.waves })), 60000)); // 1 min — "last 1.5h" data
+      intervals.push(setInterval(() => fetchEndpoint('/api/drone-threats', d => ({ drone_threats: d.threats, drone_waves: d.waves, drone_uav_count: d.uav_count ?? 0, alarm_vectors: d.alarm_vectors ?? [] })), 60000)); // 1 min — "last 1.5h" data
     }
     if (activeLayers.missile_threats) {
       intervals.push(setInterval(() => fetchEndpoint('/api/missile-threats', d => ({ missile_routes: d.routes })), 60000)); // 1 min — "last 1.5h" data
@@ -768,6 +770,7 @@ export default function Dashboard() {
     (data.commercial_flights?.length||0)+(data.private_flights?.length||0)+(data.private_jets?.length||0)+(data.military_flights?.length||0)
   ), [data.commercial_flights, data.private_flights, data.private_jets, data.military_flights]);
 
+  const uavCount = (data.drone_uav_count as number | undefined) ?? 0;
 
   return (
     <main className="fixed inset-0 w-full h-full bg-[var(--bg-void)] overflow-hidden">
@@ -1014,6 +1017,9 @@ export default function Dashboard() {
           onMapReady={() => setTimeout(() => splashResolveRef.current?.(), 600)}
         />
       </ErrorBoundary>
+
+      {/* ── THREAT HUD — active UAV count during drone raids ── */}
+      <ThreatHUD uavCount={uavCount} />
 
       {/* ── TIMELINE CONTROL (desktop only) ── */}
       <AnimatePresence>
