@@ -5,17 +5,15 @@
  * bucket, and assigns confidence tiers (confirmed / reported / unverified).
  *
  * Sources:
- *   gdelt       — GDELT GEO 2.0 (frequently 404; best-effort)
+ *   gdelt       — GDELT GEO 2.0 (3s timeout; hard-skips on 404/non-200)
  *   gdelt-rss   — GDELT RSS (BBC, Al Jazeera, ISW, Ukrinform, etc.)
  *   telegram    — UA threat corpus via telegram-threats.ts
  *   ucdp        — UCDP GED events API (requires UCDP_ACCESS_TOKEN)
- *   reliefweb   — STUB (v1=410; v2 needs pre-registered appname, currently 403)
  *
  * Cache TTL: 5 min (data volatility: near-real-time war reporting).
  * SSRF guard: not needed — all URLs are hardcoded (no user-supplied hosts).
  * Env vars:
  *   UCDP_ACCESS_TOKEN   — optional; UCDP GED endpoint gated behind this
- *   RELIEFWEB_APPNAME   — optional; ReliefWeb v2 appname (currently blocked)
  */
 
 import { NextResponse } from 'next/server';
@@ -56,7 +54,7 @@ async function fetchGdelt(): Promise<ConflictEvent[]> {
       const url = `https://api.gdeltproject.org/api/v2/geo/geo?query=${encodedQuery}&format=GeoJSON&timespan=24h&maxpoints=100`;
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
       type GdeltGeo = { features?: { geometry?: { coordinates?: number[] }; properties?: Record<string, unknown> }[] };
       let geojson: GdeltGeo | null = null;
       try {
@@ -248,50 +246,6 @@ async function fetchUcdp(): Promise<ConflictEvent[]> {
   }
 }
 
-// ── ReliefWeb (STUB) ─────────────────────────────────────────────────────────
-
-async function fetchReliefWeb(): Promise<ConflictEvent[]> {
-  // ReliefWeb v1 is HTTP 410 decommissioned; v2 requires pre-registered appname
-  // (currently 403). Set RELIEFWEB_APPNAME once approved.
-  const appname = process.env.RELIEFWEB_APPNAME;
-  if (!appname) return [];
-
-  try {
-    const res = await fetch(
-      `https://api.reliefweb.int/v2/reports?appname=${encodeURIComponent(appname)}&filter[field]=country.name&filter[value]=Ukraine&limit=50`,
-      { signal: AbortSignal.timeout(8000) },
-    );
-    if (!res.ok) return [];
-
-    const data = await res.json() as {
-      data?: { fields?: { title?: string; url?: string; date?: { created?: string } } }[];
-    };
-
-    const items = data.data ?? [];
-    const events: ConflictEvent[] = [];
-    let i = 0;
-    for (const item of items) {
-      const f = item.fields ?? {};
-      const name = f.title ?? 'ReliefWeb report';
-      const coords = geoMapText(name);
-      if (!coords) continue;
-      events.push({
-        id: `reliefweb-${i++}`,
-        lat: coords[1],
-        lng: coords[0],
-        name,
-        url: f.url,
-        eventType: 'conflict',
-        sources: ['reliefweb'],
-        published: f.date?.created ? new Date(f.date.created).toISOString() : undefined,
-      });
-    }
-    return events;
-  } catch {
-    return [];
-  }
-}
-
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function GET(): Promise<NextResponse> {
@@ -306,7 +260,7 @@ export async function GET(): Promise<NextResponse> {
     );
   }
 
-  const fetchers = [fetchGdelt(), fetchGdeltRss(), extractTelegramEvents(), fetchUcdp(), fetchReliefWeb()];
+  const fetchers = [fetchGdelt(), fetchGdeltRss(), extractTelegramEvents(), fetchUcdp()];
   const settled = await Promise.allSettled(fetchers);
 
   const flat: ConflictEvent[] = [];
