@@ -170,9 +170,14 @@ export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props)
           );
         }
 
-        // Multiple alerts: render GroupCard which owns the auto-dismiss timer
+        // Multiple alerts: group card with expand/collapse and shared auto-dismiss
+        const worstAlert = ruleAlerts.reduce((best, a) =>
+          (SEV_RANK[a.severity] ?? 0) > (SEV_RANK[best.severity] ?? 0) ? a : best
+        );
+        const color = SEV_COLOR[worstAlert.severity] ?? '#FFD700';
+        const isExpanded = groupExpanded.has(rule);
         return (
-          <GroupCard
+          <div
             key={rule}
             className="glass-panel pointer-events-auto overflow-hidden"
             style={{ width: 300, borderColor: `${color}33` }}
