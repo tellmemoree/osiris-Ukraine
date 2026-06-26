@@ -59,7 +59,8 @@ function hashAlert(alert: any): string {
   const type = alert.type ?? 'unknown';
   const title = (alert.title ?? '').slice(0, 60);
   const source = alert.source ?? '';
-  return `${type}|${source}|${title}`;
+  const url = alert.url ?? '';
+  return `${type}|${source}|${title}|${url}`;
 }
 
 export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsProps) {

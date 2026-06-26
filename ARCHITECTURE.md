@@ -129,7 +129,7 @@ page.tsx (useEffect)
   ├─ GDELT GEO 2.0 (frequently 404; best-effort, no auth)
   ├─ GDELT RSS (12 feeds: BBC/AJ/ISW/Ukrinform etc; parallel fetch)
   ├─ Telegram corpus via telegram-threats.ts:extractGeoEvents()
-  ├─ UCDP Candidate Events (requires UCDP_ACCESS_TOKEN; optional)
+  ├─ UCDP GED Events /api/gedevents/ (requires UCDP_ACCESS_TOKEN; optional)
   ├─ ReliefWeb v2 (requires RELIEFWEB_APPNAME; currently stubbed/403)
   ├─ src/lib/conflict-geo.ts — shared GEO_DICT, RSS_FEEDS, clusterEvents()
   ├─ 0.3°/2h spatial+temporal dedup → confidence tiers by source *family*

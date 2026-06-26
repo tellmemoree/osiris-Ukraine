@@ -28,6 +28,11 @@ import {
 } from '@/lib/conflict-geo';
 import { extractGeoEvents } from '@/lib/telegram-threats';
 
+/** Minimal HTML escaper for values embedded in the `html` field. */
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 export const dynamic = 'force-dynamic';
 
 // ── Module-level cache ───────────────────────────────────────────────────────
@@ -158,7 +163,7 @@ async function fetchGdeltRss(): Promise<ConflictEvent[]> {
         lng: point[0] + jitterLng,
         name: `[${feed.source}] ${title}`,
         url: link,
-        html: `<a href="${link}" target="_blank">${title}</a><br/><i>Source: ${feed.source}</i>`,
+        html: `<a href="${escHtml(link)}" target="_blank">${escHtml(title)}</a><br/><i>Source: ${escHtml(feed.source)}</i>`,
         eventType: 'conflict',
         sources: ['gdelt-rss'],
         published,
