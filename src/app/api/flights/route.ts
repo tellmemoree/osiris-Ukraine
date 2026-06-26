@@ -1,7 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { stealthFetch } from '@/lib/stealthFetch';
-import { loadDb, lookupType, prefetchTypes } from '@/lib/aircraftDb';
+import { loadDb, lookupAircraft } from '@/lib/aircraftDb';
 
 /**
  * OSIRIS — Flight Data API
@@ -212,13 +212,14 @@ function buildResponse(aircraft: AdsbAircraft[]): FlightResponse {
   const military: ClassifiedFlight[] = [];
   const gpsJamming: JammingPoint[] = [];
 
-  // Enrich with type from cache (in-place so records carry the type forward
-  // until lastGoodAircraft is replaced by the next OpenSky refresh)
+  // Enrich with type and military flag from the Mictronics DB (in-place so
+  // records carry the data forward until the next OpenSky refresh replaces them)
   for (const a of aircraft) {
-    if (a.hex && !a.t) {
-      const cached = lookupType(a.hex);
-      if (cached) a.t = cached;
-    }
+    if (!a.hex) continue;
+    const entry = lookupAircraft(a.hex);
+    if (!a.t && entry.type) a.t = entry.type;
+    if (!a.r && entry.reg)  a.r = entry.reg;
+    if (entry.military)     a.dbFlags = (a.dbFlags ?? 0) | 1;
   }
 
   for (const raw of aircraft) {
@@ -256,13 +257,6 @@ async function refreshAll(): Promise<void> {
     if (fresh !== null) {
       lastGoodAircraft = fresh;
       openskyLastFetch = now;
-      // Queue background type lookups for non-airline aircraft not yet in cache.
-      // Airline flights (3-letter code + digits) are already correctly classified
-      // by callsign, so their type lookups are lower priority.
-      const toFetch = fresh
-        .filter(a => a.hex && !AIRLINE_CODE_RE.test((a.flight ?? '').trim().toUpperCase()))
-        .map(a => a.hex!);
-      prefetchTypes(toFetch);
     }
     // fresh === null: keep lastGoodAircraft (last-good fallback)
   }
