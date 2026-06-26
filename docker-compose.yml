@@ -54,12 +54,18 @@ services:
     container_name: osiris-intel
     ports:
       - "4000:4000"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - intel-cache:/data/intel
     restart: unless-stopped
     networks:
       - default
 
 volumes:
   nginx-cache:
+  intel-cache:
 
 networks:
   umami_default:

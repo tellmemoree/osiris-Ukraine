@@ -714,7 +714,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       }});
       map.addLayer({ id: 'ioda-dots', type: 'circle', source: 'ioda-outages', paint: {
         'circle-radius': ['interpolate',['linear'],['zoom'], 1,4, 5,7, 10,12],
-        'circle-color': ['interpolate',['linear'],['get','score'], 0,'#00E5FF', 50,'#FFD700', 100,'#FF1744'],
+        'circle-color': ['interpolate',['linear'],['get','score'], 0,'#00E5FF', 15000,'#FFD700', 50000,'#FF1744'],
         'circle-opacity': 0.85,
         'circle-stroke-width': 2, 'circle-stroke-color': '#00E5FF', 'circle-stroke-opacity': 0.5,
       }});
@@ -1508,11 +1508,12 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const p = e.features[0].properties as any;
       const coords = (e.features[0].geometry as any).coordinates;
       popup(coords, `<div style="${pStyle}border:1px solid rgba(0,229,255,0.3);">
-        <div style="color:#00E5FF;font-size:14px;font-weight:700;margin-bottom:4px;">INTERNET OUTAGE</div>
-        <div style="font-size:9px;color:#E8E6E0;margin-bottom:8px;">${esc(p.country)}</div>
+        <div style="color:#00E5FF;font-size:14px;font-weight:700;margin-bottom:4px;">INTERNET OUTAGE <span style="font-size:9px;color:#76FF03;background:rgba(118,255,3,0.15);padding:1px 4px;border-radius:2px;">LIVE</span></div>
+        <div style="font-size:9px;color:#E8E6E0;margin-bottom:8px;">${esc(p.countryName || p.country)}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;">
           <div><span style="color:#5C5A54;">SEVERITY</span><br/><span style="color:#E8E6E0;">${esc(p.level)}</span></div>
-          <div><span style="color:#5C5A54;">SCORE</span><br/><span style="color:#E8E6E0;">${(Number(p.score)*100).toFixed(1)}%</span></div>
+          <div><span style="color:#5C5A54;">SCORE</span><br/><span style="color:#E8E6E0;">${Number(p.score).toLocaleString()}</span></div>
+          <div style="grid-column:1/-1"><span style="color:#5C5A54;">SIGNALS</span><br/><span style="color:#E8E6E0;">${esc(p.datasource || '?')}</span></div>
         </div>
         <a href="https://ioda.inetintel.cc.gatech.edu/" target="_blank" style="${linkStyle}color:#00E5FF;border:1px solid rgba(0,229,255,0.4);background:rgba(0,229,255,0.1);">[?] IODA GEORGIA TECH</a>
         <button onclick="window.openOsirisIntel({ type: 'country', country: '${jsAttr(p.country)}' })" style="width:100%;margin-top:6px;padding:6px 12px;background:rgba(118,255,3,0.15);border:1px solid rgba(118,255,3,0.5);color:#76FF03;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:bold;letter-spacing:0.1em;border-radius:4px;cursor:pointer;">[ COUNTRY INTEL ]</button>
