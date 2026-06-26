@@ -30,6 +30,11 @@ import {
 } from '@/lib/conflict-geo';
 import { extractGeoEvents } from '@/lib/telegram-threats';
 
+/** Minimal HTML escaper for values embedded in the `html` field. */
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 export const dynamic = 'force-dynamic';
 
 // ── Module-level cache ───────────────────────────────────────────────────────

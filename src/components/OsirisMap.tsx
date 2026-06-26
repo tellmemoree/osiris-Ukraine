@@ -281,21 +281,30 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       const flightGov = isGhost ? phantomPurple : '#FF9500';
       const flightMil = isGhost ? phantomPurple : '#FF3D3D';
 
-      // Create icons — isolated in a try/catch so a canvas/addImage failure
-      // (e.g. iOS Safari returning a null 2d context under memory/context
-      // pressure) can NEVER abort the rest of map init.
+      // Create icons — each category isolated in its own try/catch so a
+      // canvas/addImage failure (e.g. iOS Safari returning a null 2d context
+      // under memory/context pressure) in one category can NEVER abort the
+      // others from registering.
       try {
         createIcon(map, 'plane-cyan', flightCom, 24);
         createIcon(map, 'plane-green', flightPriv, 24);
         createIcon(map, 'plane-pink', flightGov, 24);
         createIcon(map, 'plane-red', flightMil, 24);
         createIcon(map, 'plane-grey', isGhost ? phantomPurple : '#555555', 24);
-        // Helicopter variants (one per flight-category colour) — selected per
-        // feature via aircraft_category in the flight symbol layers below.
+      } catch (e) {
+        console.error('[OsirisMap] plane icon init failed (continuing without plane icons):', e);
+      }
+      // Helicopter variants (one per flight-category colour) — selected per
+      // feature via aircraft_category in the flight symbol layers below.
+      try {
         createHeliIcon(map, 'heli-cyan', flightCom, 24);
         createHeliIcon(map, 'heli-green', flightPriv, 24);
         createHeliIcon(map, 'heli-pink', flightGov, 24);
         createHeliIcon(map, 'heli-red', flightMil, 24);
+      } catch (e) {
+        console.error('[OsirisMap] heli icon init failed (continuing without heli icons):', e);
+      }
+      try {
         createDot(map, 'dot-gold', isGhost ? phantomPurple : '#D4AF37', 8);
         createDot(map, 'dot-red', '#FF3D3D', 10);
         createDot(map, 'dot-orange', '#FF9500', 10);
@@ -303,7 +312,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         createDot(map, 'dot-fire', '#FF6B00', 10);
         createDot(map, 'dot-cctv', cameraColor, 10);
       } catch (e) {
-        console.error('[OsirisMap] icon init failed (continuing without icons):', e);
+        console.error('[OsirisMap] dot icon init failed (continuing without dot icons):', e);
       }
 
       // Sources

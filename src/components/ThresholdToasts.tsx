@@ -125,7 +125,7 @@ export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props)
     }
   }, [alerts, dismissed, onNewAlert]);
 
-  const visible = alerts.filter(a => !dismissed.has(a.id)).slice(0, 5);
+  const visible = alerts.filter(a => !dismissed.has(a.id));
   if (!visible.length) return null;
 
   // Build group map keyed on alert.rule
@@ -134,7 +134,8 @@ export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props)
     if (!groups.has(a.rule)) groups.set(a.rule, []);
     groups.get(a.rule)!.push(a);
   }
-  const groupList = Array.from(groups.entries()).slice(0, 4);
+  // Cap rendered groups (not raw alerts) to 5
+  const groupList = Array.from(groups.entries()).slice(0, 5);
 
   const dismissGroup = (ruleAlerts: ThresholdAlert[]) => {
     setDismissed(prev => new Set([...prev, ...ruleAlerts.map(a => a.id)]));
@@ -150,17 +151,6 @@ export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props)
       }
       return next;
     });
-  };
-
-  // Pick worst-severity color across a group
-  const worstColor = (ruleAlerts: ThresholdAlert[]): string => {
-    let best = ruleAlerts[0];
-    for (const a of ruleAlerts) {
-      if ((SEV_RANK[a.severity] ?? 0) > (SEV_RANK[best.severity] ?? 0)) {
-        best = a;
-      }
-    }
-    return SEV_COLOR[best.severity] ?? '#FFD700';
   };
 
   return (
@@ -180,12 +170,9 @@ export default function ThresholdToasts({ alerts, onLocate, onNewAlert }: Props)
           );
         }
 
-        // Multiple alerts: render a group card
-        const color = worstColor(ruleAlerts);
-        const isExpanded = groupExpanded.has(rule);
-
+        // Multiple alerts: render GroupCard which owns the auto-dismiss timer
         return (
-          <div
+          <GroupCard
             key={rule}
             className="glass-panel pointer-events-auto overflow-hidden"
             style={{ width: 300, borderColor: `${color}33` }}
