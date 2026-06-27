@@ -209,6 +209,10 @@ async function computeCorrelatedEvents(): Promise<CorrelatedEventsResponse> {
       const oblast = typeof a.oblast === 'string' ? a.oblast : null;
       if (!oblast) continue;
       const ts = (typeof a.startedAt === 'string' && a.startedAt) ? a.startedAt : responseTs;
+      // Apply the same 60-min window as all other signal types — an alert that
+      // started hours ago is already reflected in the pressure index; treating it
+      // as a fresh signal inflates match_tightness_min and creates false correlations.
+      if (new Date(ts).getTime() < cutoff) continue;
       const acc = ensureOblast(oblast);
       recordCoords(acc, a.lat, a.lng);
       acc.signals.push({
@@ -331,16 +335,16 @@ async function computeCorrelatedEvents(): Promise<CorrelatedEventsResponse> {
     const match_tightness_min = Math.round((maxTs - minTs) / 60_000);
     const ts = new Date(maxTs).toISOString();
 
-    // Resolve coords: first signal with finite coords, then centroid, then (0,0)
-    let lat = 0;
-    let lng = 0;
+    // Resolve coords: first signal with finite coords, then centroid.
+    // Skip if neither is available — a (0,0) null-island point is worse than omission.
+    const centroid = OBLAST_CENTROIDS[oblast];
+    let lat: number, lng: number;
     if (acc.coords !== null) {
       [lng, lat] = acc.coords;
+    } else if (centroid) {
+      [lng, lat] = centroid;
     } else {
-      const centroid = OBLAST_CENTROIDS[oblast];
-      if (centroid) {
-        [lng, lat] = centroid;
-      }
+      continue;
     }
 
     events.push({ oblast, lat, lng, signals, alarm_confirmed, match_tightness_min, ts });

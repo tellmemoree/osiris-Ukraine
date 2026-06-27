@@ -286,9 +286,11 @@ export async function GET(): Promise<NextResponse> {
     }
   }
 
-  // Only fall back to stale cache when every source threw — not when they
-  // legitimately returned zero events (genuine silence should clear the map).
-  if (rejectedCount === fetchers.length && cachedData) {
+  // Fall back to stale cache when all fetchers returned empty — all fetchers
+  // swallow errors and resolve with [], so rejectedCount is never > 0 in practice.
+  // Serving stale when flat is empty is safe: genuine zero-event windows for
+  // Ukraine conflict are essentially impossible; empty means upstream failure.
+  if (flat.length === 0 && cachedData && cachedData.length > 0) {
     const uniqueSources = Array.from(new Set(cachedData.flatMap(e => e.sources)));
     return NextResponse.json(
       { events: cachedData, total: cachedData.length, timestamp: new Date(lastFetch).toISOString(), sources: uniqueSources, stale: true },

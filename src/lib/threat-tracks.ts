@@ -93,9 +93,9 @@ export async function mergeAndSaveTracks(
   const cutoff  = Date.now() - ttlMs;
   const existing = (await loadTrackEntries(file)).filter(e => e.ts > cutoff);
 
-  const seen = new Set(existing.map(e => `${e.weaponType}:${e.channel}:${e.ts}`));
+  const seen = new Set(existing.map(e => `${e.weaponType}:${e.channel}:${e.ts}:${e.oblast}`));
   for (const entry of incoming) {
-    const key = `${entry.weaponType}:${entry.channel}:${entry.ts}`;
+    const key = `${entry.weaponType}:${entry.channel}:${entry.ts}:${entry.oblast}`;
     if (!seen.has(key)) {
       existing.push(entry);
       seen.add(key);
