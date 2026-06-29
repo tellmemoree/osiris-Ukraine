@@ -31,11 +31,6 @@ import {
 } from '@/lib/conflict-geo';
 import { extractGeoEvents } from '@/lib/telegram-threats';
 
-/** Minimal HTML escaper for values embedded in the `html` field. */
-function escHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 export const dynamic = 'force-dynamic';
 
 // ── Module-level cache ───────────────────────────────────────────────────────
@@ -94,7 +89,7 @@ async function fetchGdelt(): Promise<ConflictEvent[]> {
           lng: coords[0],
           name,
           url: eventUrl,
-          html: typeof props.html === 'string' ? props.html : undefined,
+          html: typeof props.html === 'string' ? escapeHtml(props.html) : undefined,
           eventType: rawType as EventType,
           sources: ['gdelt'],
           deaths: undefined,

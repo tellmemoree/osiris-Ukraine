@@ -2390,10 +2390,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   useEffect(() => {
     if (!mapReady) return;
     const cutoff = replayTime ?? new Date();
+    const cutoffMs = cutoff.getTime();
     const allThreats = activeLayers.kab_threats && data.kab_threats ? data.kab_threats : [];
-    const threats = allThreats.filter((t: any) =>
-      t.lat && t.lng && (!t.startedAt || new Date(t.startedAt).getTime() <= cutoff.getTime())
-    );
+    const threats = allThreats.filter((t: any) => {
+      if (!t.lat || !t.lng) return false;
+      if (t.startedAt) {
+        const ts = new Date(t.startedAt).getTime();
+        if (ts > cutoffMs) return false;
+        // Skip the 24h lower-bound during replay, matching the other timeline layers.
+        if (!replayTime && (cutoffMs - ts) >= 86400000) return false;
+      }
+      return true;
+    });
     setGeo('kab-threats', threats.map((t: any) => ({
       type: 'Feature', geometry: { type: 'Point', coordinates: [t.lng, t.lat] },
       properties: {
