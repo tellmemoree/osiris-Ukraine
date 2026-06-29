@@ -106,6 +106,22 @@ page.tsx (useEffect)
 
 **Note:** Routes do **not** accept `bbox=` query parameters. Fetching is global per layer, not viewport-aware.
 
+### Correlated Events Aggregator
+
+```
+/api/correlated-events                       ← Multi-signal correlation (air-raid + weapon + kab + drone + missile)
+  ├─ Self-fetches: /api/air-raids, /api/weapon-threats, /api/kab-threats,
+  │               /api/drone-threats, /api/missile-threats
+  ├─ Promise.allSettled + AbortSignal.timeout(8000) per source (failed source → skipped)
+  ├─ 60-minute rolling window; missile route flattens routes[].waves[].waypoints[]
+  ├─ Join: emit CorrelatedEvent per oblast with ≥ 2 distinct signal types
+  ├─ alarm_confirmed = true when 'air_raid' type is present for that oblast
+  ├─ match_tightness_min = (maxTs - minTs) / 60_000 across all signals
+  ├─ 60s module-level cache + inflight-coalescence; stale-on-error fallback
+  ├─ Env: OSIRIS_SELF_ORIGIN (default http://localhost:3001)
+  └─ Exports: Signal, CorrelatedEvent, CorrelatedEventsResponse (panel imports these)
+```
+
 ### Conflict Event Aggregator
 
 ```
@@ -113,7 +129,7 @@ page.tsx (useEffect)
   ├─ GDELT GEO 2.0 (frequently 404; best-effort, no auth)
   ├─ GDELT RSS (12 feeds: BBC/AJ/ISW/Ukrinform etc; parallel fetch)
   ├─ Telegram corpus via telegram-threats.ts:extractGeoEvents()
-  ├─ UCDP Candidate Events (requires UCDP_ACCESS_TOKEN; optional)
+  ├─ UCDP GED Events /api/gedevents/ (requires UCDP_ACCESS_TOKEN; optional)
   ├─ ReliefWeb v2 (requires RELIEFWEB_APPNAME; currently stubbed/403)
   ├─ src/lib/conflict-geo.ts — shared GEO_DICT, RSS_FEEDS, clusterEvents()
   ├─ 0.3°/2h spatial+temporal dedup → confidence tiers by source *family*
@@ -127,6 +143,22 @@ page.tsx (useEffect)
   ├─ Exists only for: /api/health, /api/stats, /api/scm-suppliers
   ├─ Returns same { events, total, timestamp, source } shape as before
   └─ Migrate callers to /api/conflict-events and delete this file
+```
+
+### Entity Graph (osiris-intel container, port 4000)
+
+```
+/api/entity/expand → proxy → http://osiris-intel:4000/resolve
+  ├─ Aircraft: ICAO airline SPARQL, FAA N-number registry, expanded registration prefix table
+  ├─ Vessel:  Wikidata name search (wdSearch) + IMO/owner/flag/tonnage/year SPARQL
+  ├─ Company: Wikidata (wdSearch) + OpenCorporates officers/jurisdiction (500 req/day free)
+  ├─ Person:  Wikidata SPARQL (birth date, nationality, positions)
+  ├─ IP:      ip-api.com + RIPEstat ASN + Shodan ports/CVEs + AbuseIPDB reputation
+  ├─ Country: Wikidata SPARQL (capital, leader, neighbors)
+  └─ Sanctions: OFAC SDN + EU FSF + UN SC + UK HMT (OpenSanctions CSV, 24h refresh, tagged per list)
+
+Rebuild: docker compose build osiris-intel && docker compose up -d osiris-intel
+Env vars required for full enrichment: SHODAN_API_KEY (in osiris container .env), ABUSEIPDB_KEY
 ```
 
 ### Intelligence Feed Flow
@@ -237,6 +269,7 @@ export async function GET() {
 - Shadow fleet MMSI mappings (learned state)
 - Frontline snapshots (delta detection)
 - Thermal hits (confirmation history)
+- Drone / missile / KAB route-track entries (`drone-route-tracks.json`, `missile-route-tracks.json`, `kab-tracks.json`) — rolling 24h/12h/6h windows via `loadTrackEntries` / `mergeAndSaveTracks` in `src/lib/threat-tracks.ts`; seeds in-memory accumulator on cold-start so layers survive Docker rebuilds
 
 ### Error Handling
 
@@ -257,7 +290,9 @@ export async function GET() {
 AIS_API_KEY                    # aisstream.io — live vessel positions (aisstream API key)
 
 # OSINT enrichment
-SHODAN_API_KEY                 # Free tier works for lookups; paid (~$49) for discovery
+SHODAN_API_KEY                 # IP intel: open ports, CVEs, tags — free tier works; read by osiris-intel container
+ABUSEIPDB_KEY                  # IP abuse reputation (api.abuseipdb.com) — get free key at abuseipdb.com
+OPENSANCTIONS_API_KEY          # OpenSanctions entity API (structured props: IMO, passport, registration) — free key at opensanctions.org/api/
 CENSYS_API_ID                  # Censys API ID (PAT or legacy key)
 CENSYS_API_SECRET              # Optional; only for legacy key+secret auth
 

@@ -71,7 +71,8 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
 
   const [expanded, setExpanded] = useState(true);
   const [maximized, setMaximized] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'ukraine' | 'russia' | 'world' | 'news' | 'quakes' | 'feeds'>('all');
+  const [filter, setFilter] = useState<'all' | 'ukraine' | 'russia' | 'world' | 'news' | 'quakes'>('all');
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   // Track dismissed IDs in component state so the UI re-renders on dismiss.
   // seenAlertIds (module-level) is the authoritative source; this mirrors it for reactivity.
@@ -182,36 +183,27 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
     });
   }
 
-  BUILTIN_FEEDS.forEach(f => {
-    allAlerts.push({
-      type: 'feed', title: f.name,
-      source: `${f.city}, ${f.country}`,
-      lat: f.lat, lng: f.lng,
-      feedUrl: f.url, severity: 'LOW', category: f.category,
-    });
-  });
+  // BUILTIN_FEEDS and TELEGRAM_SOURCES are rendered in a separate demoted "SOURCES" section
+  // below the alert list — not in allAlerts — so they don't inflate counts or crowd live alerts.
 
-  TELEGRAM_SOURCES.forEach(t => {
-    allAlerts.push({
-      type: 'feed', title: t.name,
-      source: `t.me/${t.channel}`,
-      side: t.side,
-      severity: 'LOW', category: 'conflict',
-      url: `https://t.me/s/${t.channel}`,
-    });
+  // Sort newest-first; feeds (no time) go to the end.
+  allAlerts.sort((a, b) => {
+    if (!a.time && !b.time) return 0;
+    if (!a.time) return 1;
+    if (!b.time) return -1;
+    return new Date(b.time).getTime() - new Date(a.time).getTime();
   });
 
   // Assign stable IDs and filter out dismissed alerts.
   const alertsWithIds = allAlerts.map(a => ({ ...a, _id: hashAlert(a) }));
   const visibleAlerts = alertsWithIds.filter(a => !dismissedIds.has(a._id));
 
-  const filtered = filter === 'all'     ? visibleAlerts.filter(a => a.type !== 'feed') :
-    filter === 'ukraine' ? visibleAlerts.filter(a => a.type === 'news' && a.side === 'ua') :
+  const filtered = filter === 'ukraine' ? visibleAlerts.filter(a => a.type === 'news' && a.side === 'ua') :
     filter === 'russia'  ? visibleAlerts.filter(a => a.type === 'news' && a.side === 'ru') :
     filter === 'world'   ? visibleAlerts.filter(a => a.type === 'news' && a.side === 'world') :
     filter === 'news'    ? visibleAlerts.filter(a => a.type === 'news') :
     filter === 'quakes'  ? visibleAlerts.filter(a => a.type === 'quake') :
-    visibleAlerts.filter(a => a.type === 'feed');
+    visibleAlerts;
 
   // Group by alert.type (fallback: alert.side, then 'general').
   const groupKey = (a: any): string => a.type ?? a.side ?? 'general';
@@ -259,9 +251,6 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
         <div className="flex items-center gap-2">
           <Radio className="w-3.5 h-3.5 text-[#FF4081]" />
           <span className="hud-text text-[10px] text-[var(--text-primary)]">LIVE ALERTS</span>
-          <span className="gotham-tag gotham-tag--critical" style={{ fontSize: '7px', padding: '1px 5px' }}>{allAlerts.filter(a => a.type === 'news' && a.side === 'ua').length} UA</span>
-          <span className="gotham-tag" style={{ fontSize: '7px', padding: '1px 5px', color: '#5B8FF9', borderColor: 'rgba(91,143,249,0.5)' }}>{allAlerts.filter(a => a.type === 'news' && a.side === 'ru').length} RU</span>
-          <span className="gotham-tag gotham-tag--info" style={{ fontSize: '7px', padding: '1px 4px' }}>{allAlerts.filter(a => a.type === 'news' && a.side === 'world').length} WORLD</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-[#FF4081] animate-osiris-pulse" />
@@ -283,7 +272,7 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
           >
             {/* Filters */}
             <div className={`flex-shrink-0 flex flex-wrap gap-1 ${maximized ? 'px-6 py-4 border-b border-[#2A2A28] bg-[#111111]' : 'px-3 py-2 border-b border-[rgba(255,255,255,0.05)]'}`}>
-              {(['all', 'ukraine', 'russia', 'world', 'news', 'quakes', 'feeds'] as const).map(f => {
+              {(['all', 'ukraine', 'russia', 'world', 'news', 'quakes'] as const).map(f => {
                 const meta = TAB_META[f] ?? { text: f.toUpperCase() };
                 return (
                 <button
@@ -426,6 +415,44 @@ export default function LiveAlerts({ data, onLocate, onWatchFeed }: LiveAlertsPr
                   ))}
                 </div>
               )}
+
+              {/* ── Channel directory — demoted below the live alert stream ── */}
+              <div className="flex-shrink-0 border-t border-[rgba(255,255,255,0.05)] mt-1">
+                <button
+                  onClick={() => setSourcesOpen(o => !o)}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-[9px] font-mono text-[#5C5A54] hover:text-[#8A8880] transition-colors"
+                >
+                  <span className="tracking-widest">SOURCES ({BUILTIN_FEEDS.length + TELEGRAM_SOURCES.length})</span>
+                  {sourcesOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
+                {sourcesOpen && (
+                  <div className="px-3 pb-2 grid grid-cols-2 gap-1 max-h-40 overflow-y-auto">
+                    {BUILTIN_FEEDS.map(f => (
+                      <button
+                        key={f.url}
+                        onClick={() => onWatchFeed?.(f.url, f.name)}
+                        className="text-left text-[9px] font-mono text-[#8A8880] hover:text-[var(--cyan-primary)] truncate py-0.5"
+                        title={`${f.name} — ${f.city}, ${f.country}`}
+                      >
+                        {f.name}
+                      </button>
+                    ))}
+                    {TELEGRAM_SOURCES.map(t => (
+                      <a
+                        key={t.channel}
+                        href={`https://t.me/s/${t.channel}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[9px] font-mono text-[#8A8880] hover:text-[var(--cyan-primary)] truncate py-0.5"
+                        title={t.name}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {t.name}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </motion.div>
         )}

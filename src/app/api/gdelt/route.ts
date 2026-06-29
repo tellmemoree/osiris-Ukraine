@@ -9,10 +9,10 @@
  *   - /api/stats     (incident count)
  *   - /api/scm-suppliers (risk enrichment)
  *
- * It delegates all work to /api/conflict-events, then re-shapes the response
- * to the legacy shape: { events, total, timestamp, source }.
- * The `source` field is kept as a string for callers that check it, but now
- * reflects the multi-source aggregator name.
+ * It reimplements GDELT GEO 2.0 and GDELT RSS fetching locally (not delegating
+ * to /api/conflict-events), then returns the legacy shape: { events, total, timestamp, source }.
+ * The `source` field is kept as a string for callers that check it.
+ * UCDP and Telegram sources are intentionally omitted — this shim returns GDELT-only data.
  *
  * Do NOT add new callers here. Point new code at /api/conflict-events.
  */
@@ -95,7 +95,7 @@ async function fetchGdeltEvents(): Promise<ConflictEvent[]> {
           lng: coords[0],
           name,
           url: eventUrl,
-          html: typeof props.html === 'string' ? props.html : undefined,
+          html: typeof props.html === 'string' ? escapeHtml(props.html) : undefined,
           eventType: rawType as EventType,
           sources: ['gdelt'],
           confidence: 'reported',
@@ -174,7 +174,7 @@ export async function GET() {
   try {
     if (cachedEvents && now - lastFetch < CACHE_TTL) {
       return NextResponse.json(
-        { events: cachedEvents, total: cachedEvents.length, timestamp: new Date(lastFetch).toISOString(), source: 'conflict-events aggregator (cached)' },
+        { events: cachedEvents, total: cachedEvents.length, timestamp: new Date(lastFetch).toISOString(), source: 'gdelt (cached)' },
         { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } },
       );
     }

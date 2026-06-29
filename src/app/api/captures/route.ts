@@ -21,7 +21,7 @@ interface NewsItem { title?: string; description?: string; source?: string; side
 
 // Active contact zone only. Covers Kherson/Zaporizhzhia north through the Kursk
 // incursion axis. Excludes deep Russia (Bryansk 53°N, Adygea 44°N, Rostov east of 40°E).
-const CONTACT_BBOX = { latMin: 45.5, latMax: 52.5, lngMin: 31.5, lngMax: 40.0 };
+const CONTACT_BBOX = { latMin: 45.5, latMax: 52.5, lngMin: 31.5, lngMax: 41.0 }; // lngMax stays ~41 to exclude Russian staging areas beyond the Luhansk/Starobilsk axis
 
 // Capture/liberation/control-change wording. Mirrors strategic-thermal's ADVANCE_TERMS
 // (kept in sync deliberately — that route drops these, this one keeps them).
@@ -47,6 +47,12 @@ const HISTORICAL_YEAR_RE = /\b(201[4-9]|202[0-4])\b/;
 // Political/administrative news whose title contains advance-like vocabulary
 // (e.g. "деталі армійської реформи") but has no territorial content.
 const POLITICAL_RE = /реформ|reform|мобілізац|mobili[zs]|законопроект|закон про|бюджет|budget|призов|conscript|нагород|указ президент|указ про|decree|перемов|переговор|санкц|sanction/i;
+
+// ── Module-level cache ───────────────────────────────────────────────────────
+const CACHE_TTL = 60_000;
+type CapturesPayload = { captures: unknown[]; counts: { total: number; ru: number; ua: number }; timestamp: string };
+let cachedCaptures: CapturesPayload | null = null;
+let lastFetch = 0;
 
 function isTerritorialAdvance(item: NewsItem): boolean {
   const title = (item.title || '').toLowerCase();
@@ -136,15 +142,30 @@ async function fetchNews(req: Request): Promise<NewsItem[]> {
   } catch { return []; }
 }
 
+const SIX_HOURS_MS = 6 * 3_600_000;
+
 export async function GET(req: Request) {
+  if (cachedCaptures && Date.now() - lastFetch < CACHE_TTL) {
+    return NextResponse.json(cachedCaptures, {
+      headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
+    });
+  }
+
   try {
-    const news = await fetchNews(req);
+    const rawNews = await fetchNews(req);
+    // Drop articles older than 6h — contested territorial claims are frequently
+    // walked back and a 20h-old "capture" is misleading without staleness context.
+    const news = rawNews.filter(item => {
+      if (!item.published) return true;
+      return Date.now() - new Date(item.published).getTime() <= SIX_HOURS_MS;
+    });
 
     type Capture = {
       id: string; lat: number; lng: number; side: 'ru' | 'ua'; name: string;
       source?: string; side_reported?: string; link?: string; date?: string; count: number;
       description?: string;
       conflicted: boolean;
+      confidence: 'high' | 'med' | 'low';
       other_name?: string;
       other_link?: string;
       other_source?: string;
@@ -153,7 +174,10 @@ export async function GET(req: Request) {
     // Dedup per place+side (~0.05°/~5 km). Same settlement claimed by the same side =
     // one marker (count the corroborating reports); a contested place claimed by BOTH
     // sides keeps two markers, which is itself the signal.
+    // count = distinct reporting channels/sources, not total articles. Two articles
+    // from the same milblogger re-posting the same claim do not bump the count.
     const byCell = new Map<string, Capture>();
+    const cellSources = new Map<string, Set<string>>(); // distinct sources per cell key
     const locationSides = new Map<string, Set<'ru' | 'ua'>>(); // track which sides claim each location
     let n = 0;
     for (const item of news) {
@@ -171,13 +195,22 @@ export async function GET(req: Request) {
 
         const key = `${locKey}|${side}`;
         const existing = byCell.get(key);
-        if (existing) { existing.count++; continue; }
+        if (existing) {
+          // Only increment count when this is a new distinct source channel.
+          const sources = cellSources.get(key)!;
+          sources.add(item.source ?? '');
+          existing.count = sources.size;
+          continue;
+        }
+        const initSources = new Set([item.source ?? '']);
+        cellSources.set(key, initSources);
         byCell.set(key, {
           id: `cap-${++n}`, lat, lng, side,
           name: (item.title || 'Territorial change').slice(0, 120),
           source: item.source, side_reported: item.side, link: item.link, date: item.published, count: 1,
           description: item.description?.slice(0, 220),
           conflicted: false,
+          confidence: 'low',
         });
       }
     }
@@ -208,15 +241,28 @@ export async function GET(req: Request) {
       ua.other_side = 'ru';
     }
 
+
+function captureConfidence(count: number, date: string | undefined, conflicted: boolean): 'high' | 'med' | 'low' {
+  const ageDays = date ? (Date.now() - new Date(date).getTime()) / 86400000 : 999;
+  if (count >= 3 && ageDays < 3) return 'high';
+  if (count >= 2 || conflicted) return 'med';
+  return 'low';
+}
+    for (const c of byCell.values()) {
+      c.confidence = captureConfidence(c.count, c.date, c.conflicted);
+    }
+
     const captures = [...byCell.values()];
-    return NextResponse.json(
-      {
-        captures,
-        counts: { total: captures.length, ru: captures.filter(c => c.side === 'ru').length, ua: captures.filter(c => c.side === 'ua').length },
-        timestamp: new Date().toISOString(),
-      },
-      { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } }
-    );
+    const payload: CapturesPayload = {
+      captures,
+      counts: { total: captures.length, ru: captures.filter(c => c.side === 'ru').length, ua: captures.filter(c => c.side === 'ua').length },
+      timestamp: new Date().toISOString(),
+    };
+    cachedCaptures = payload;
+    lastFetch = Date.now();
+    return NextResponse.json(payload, {
+      headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
+    });
   } catch (error) {
     console.error('Captures error:', error);
     return NextResponse.json({ captures: [], error: 'Failed to compute captures' }, { status: 500 });

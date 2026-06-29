@@ -5,17 +5,15 @@
  * bucket, and assigns confidence tiers (confirmed / reported / unverified).
  *
  * Sources:
- *   gdelt       — GDELT GEO 2.0 (frequently 404; best-effort)
+ *   gdelt       — GDELT GEO 2.0 (3s timeout; hard-skips on 404/non-200)
  *   gdelt-rss   — GDELT RSS (BBC, Al Jazeera, ISW, Ukrinform, etc.)
  *   telegram    — UA threat corpus via telegram-threats.ts
  *   ucdp        — UCDP GED events API (requires UCDP_ACCESS_TOKEN)
- *   reliefweb   — STUB (v1=410; v2 needs pre-registered appname, currently 403)
  *
  * Cache TTL: 5 min (data volatility: near-real-time war reporting).
  * SSRF guard: not needed — all URLs are hardcoded (no user-supplied hosts).
  * Env vars:
  *   UCDP_ACCESS_TOKEN   — optional; UCDP GED endpoint gated behind this
- *   RELIEFWEB_APPNAME   — optional; ReliefWeb v2 appname (currently blocked)
  */
 
 import { NextResponse } from 'next/server';
@@ -26,6 +24,7 @@ import {
   RSS_FEEDS,
   CONFLICT_KEYWORDS,
   geoMapText,
+  findPlaceCoords,
   clusterEvents,
   escapeHtml,
   safeHref,
@@ -58,7 +57,7 @@ async function fetchGdelt(): Promise<ConflictEvent[]> {
       const url = `https://api.gdeltproject.org/api/v2/geo/geo?query=${encodedQuery}&format=GeoJSON&timespan=24h&maxpoints=100`;
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
       type GdeltGeo = { features?: { geometry?: { coordinates?: number[] }; properties?: Record<string, unknown> }[] };
       let geojson: GdeltGeo | null = null;
       try {
@@ -82,13 +81,6 @@ async function fetchGdelt(): Promise<ConflictEvent[]> {
         const name = String(nameRaw);
         const eventUrl = typeof props.url === 'string' ? props.url : typeof props.shareimage === 'string' ? props.shareimage : undefined;
 
-        const isDupe = allEvents.some(e =>
-          Math.abs(e.lat - coords[1]) < 0.5 &&
-          Math.abs(e.lng - coords[0]) < 0.5 &&
-          e.name === name,
-        );
-        if (isDupe) continue;
-
         const rawType = query.includes('protest') ? 'unrest' : query.includes('conflict') ? 'conflict' : 'political';
 
         allEvents.push({
@@ -97,10 +89,9 @@ async function fetchGdelt(): Promise<ConflictEvent[]> {
           lng: coords[0],
           name,
           url: eventUrl,
-          html: typeof props.html === 'string' ? props.html : undefined,
+          html: typeof props.html === 'string' ? escapeHtml(props.html) : undefined,
           eventType: rawType as EventType,
           sources: ['gdelt'],
-          confidence: 'reported',
           deaths: undefined,
         });
       }
@@ -159,21 +150,25 @@ async function fetchGdeltRss(): Promise<ConflictEvent[]> {
       const isConflict = CONFLICT_KEYWORDS.some(kw => textToSearch.includes(kw));
       if (!isConflict) continue;
 
-      const point = geoMapText(textToSearch);
-      if (!point) continue;
-
-      const jitterLng = ((eventId * 137.5) % 200 - 100) / 100 * 1.5;
-      const jitterLat = ((eventId * 251.3) % 200 - 100) / 100 * 1.5;
+      // Try ranked town-first resolver first
+      const ranked = findPlaceCoords(textToSearch); // returns [lat, lng]
+      let lat: number, lng: number;
+      if (ranked) {
+        [lat, lng] = ranked;
+      } else {
+        const fallback = geoMapText(textToSearch); // returns [lng, lat]
+        if (!fallback) continue;
+        [lng, lat] = fallback;
+      }
       allEvents.push({
         id: `osint-${feed.source.replace(/\s+/g, '')}-${eventId++}`,
-        lat: point[1] + jitterLat,
-        lng: point[0] + jitterLng,
+        lat,
+        lng,
         name: `[${feed.source}] ${title}`,
         url: link,
         html: `<a href="${safeHref(link)}" target="_blank">${escapeHtml(title)}</a><br/><i>Source: ${escapeHtml(feed.source)}</i>`,
         eventType: 'conflict',
         sources: ['gdelt-rss'],
-        confidence: 'reported',
         published,
       });
     }
@@ -194,7 +189,6 @@ async function extractTelegramEvents(): Promise<ConflictEvent[]> {
       name: r.name,
       eventType: r.eventType as EventType,
       sources: r.sources,
-      confidence: 'unverified' as const,
       published: r.published,
     }));
   } catch {
@@ -250,54 +244,8 @@ async function fetchUcdp(): Promise<ConflictEvent[]> {
         name: r.where_description ?? 'UCDP Event',
         eventType,
         sources: ['ucdp'],
-        confidence: 'reported' as const,
         published: r.date_start ? new Date(r.date_start).toISOString() : undefined,
         deaths: deaths > 0 ? deaths : undefined,
-      });
-    }
-    return events;
-  } catch {
-    return [];
-  }
-}
-
-// ── ReliefWeb (STUB) ─────────────────────────────────────────────────────────
-
-async function fetchReliefWeb(): Promise<ConflictEvent[]> {
-  // ReliefWeb v1 is HTTP 410 decommissioned; v2 requires pre-registered appname
-  // (currently 403). Set RELIEFWEB_APPNAME once approved.
-  const appname = process.env.RELIEFWEB_APPNAME;
-  if (!appname) return [];
-
-  try {
-    const res = await fetch(
-      `https://api.reliefweb.int/v2/reports?appname=${encodeURIComponent(appname)}&filter[field]=country.name&filter[value]=Ukraine&limit=50`,
-      { signal: AbortSignal.timeout(8000) },
-    );
-    if (!res.ok) return [];
-
-    const data = await res.json() as {
-      data?: { fields?: { title?: string; url?: string; date?: { created?: string } } }[];
-    };
-
-    const items = data.data ?? [];
-    const events: ConflictEvent[] = [];
-    let i = 0;
-    for (const item of items) {
-      const f = item.fields ?? {};
-      const name = f.title ?? 'ReliefWeb report';
-      const coords = geoMapText(name);
-      if (!coords) continue;
-      events.push({
-        id: `reliefweb-${i++}`,
-        lat: coords[1],
-        lng: coords[0],
-        name,
-        url: f.url,
-        eventType: 'conflict',
-        sources: ['reliefweb'],
-        confidence: 'reported',
-        published: f.date?.created ? new Date(f.date.created).toISOString() : undefined,
       });
     }
     return events;
@@ -320,7 +268,7 @@ export async function GET(): Promise<NextResponse> {
     );
   }
 
-  const fetchers = [fetchGdelt(), fetchGdeltRss(), extractTelegramEvents(), fetchUcdp(), fetchReliefWeb()];
+  const fetchers = [fetchGdelt(), fetchGdeltRss(), extractTelegramEvents(), fetchUcdp()];
   const settled = await Promise.allSettled(fetchers);
 
   const flat: ConflictEvent[] = [];
@@ -333,9 +281,11 @@ export async function GET(): Promise<NextResponse> {
     }
   }
 
-  // Only fall back to stale cache when every source threw — not when they
-  // legitimately returned zero events (genuine silence should clear the map).
-  if (rejectedCount === fetchers.length && cachedData) {
+  // Fall back to stale cache when all fetchers returned empty — all fetchers
+  // swallow errors and resolve with [], so rejectedCount is never > 0 in practice.
+  // Serving stale when flat is empty is safe: genuine zero-event windows for
+  // Ukraine conflict are essentially impossible; empty means upstream failure.
+  if (flat.length === 0 && cachedData && cachedData.length > 0) {
     const uniqueSources = Array.from(new Set(cachedData.flatMap(e => e.sources)));
     return NextResponse.json(
       { events: cachedData, total: cachedData.length, timestamp: new Date(lastFetch).toISOString(), sources: uniqueSources, stale: true },

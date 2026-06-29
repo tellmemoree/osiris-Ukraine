@@ -25,7 +25,7 @@ export const dynamic = 'force-dynamic';
 const WINDOW_HOURS = 1.5;
 const CACHE_TTL_MS = 60_000;
 
-const MISSILE_TYPES = ['CRUISE', 'BALLISTIC', 'KINZHAL', 'KH22'] as const;
+const MISSILE_TYPES = ['CRUISE', 'BALLISTIC', 'KINZHAL', 'KH22', 'S300'] as const;
 type MissileType = typeof MISSILE_TYPES[number];
 
 const MISSILE_META: Record<MissileType, { label: string; color: string }> = {
@@ -33,6 +33,7 @@ const MISSILE_META: Record<MissileType, { label: string; color: string }> = {
   BALLISTIC: { label: 'Ballistic',       color: '#FF8C00' },
   KINZHAL:   { label: 'Kinzhal',         color: '#FFD700' },
   KH22:      { label: 'Kh-22',           color: '#FF69B4' },
+  S300:      { label: 'S-300',           color: '#9C27B0' },
 };
 
 interface MissileRoute {

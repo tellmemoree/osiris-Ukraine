@@ -316,15 +316,20 @@ async function fetchLsaSafFires(): Promise<Fire[]> {
 // ignition: deduplicate within 1.5 km + 4 h window, keeping the highest FRP and
 // the freshest acquisition timestamp.
 function mergeFires(batches: Fire[][]): Fire[] {
-  // Grid-based spatial dedup: 0.02° cell ≈ 2.2 km covers the 1.5 km dedup radius.
-  // Checking the 3×3 cell neighbourhood is O(9) per fire instead of O(n).
+  // Grid-based spatial dedup: 0.015° lat cell ≈ 1.67 km covers the 1.5 km dedup radius.
+  // Longitude step is cosine-corrected so the cell stays ~1.5 km at all latitudes —
+  // without this, 0.015° lng ≈ 60 km at 55°N (cos(55°) ≈ 0.57), making the dedup
+  // window ~4× too wide in the east-west direction at high latitudes.
+  const LAT_STEP = 0.015;
   const FOUR_H_MS = 4 * 60 * 60 * 1000;
   const grid = new Map<string, Fire>();
   const result: Fire[] = [];
 
   for (const fire of batches.flat()) {
-    const cLat = Math.round(fire.lat / 0.02);
-    const cLng = Math.round(fire.lng / 0.02);
+    const cosLat = Math.cos(fire.lat * Math.PI / 180);
+    const lngStep = cosLat > 0.01 ? LAT_STEP / cosLat : LAT_STEP;
+    const cLat = Math.round(fire.lat / LAT_STEP);
+    const cLng = Math.round(fire.lng / lngStep);
     let dup: Fire | undefined;
     outer: for (let dLat = -1; dLat <= 1; dLat++) {
       for (let dLng = -1; dLng <= 1; dLng++) {

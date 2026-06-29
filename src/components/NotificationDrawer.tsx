@@ -1,7 +1,7 @@
 'use client';
 
-import { useRef } from 'react';
-import { X, Bell, MapPin, Trash2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { X, Bell, MapPin, Trash2, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ThresholdAlert } from '@/app/api/threshold-alerts/route';
 
@@ -53,6 +53,7 @@ export default function NotificationDrawer({
   onDismissGroup,
 }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   // Build groups: Map<groupKey, NotificationRecord[]>
   const groups: Map<string, NotificationRecord[]> = new Map();
@@ -60,6 +61,14 @@ export default function NotificationDrawer({
     const k = notifGroupKey(n);
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k)!.push(n);
+  }
+
+  function toggleGroup(gk: string) {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (next.has(gk)) next.delete(gk); else next.add(gk);
+      return next;
+    });
   }
 
   return (
@@ -87,7 +96,7 @@ export default function NotificationDrawer({
             transition={{ type: 'tween', duration: 0.25, ease: 'easeInOut' }}
             className="fixed z-[450] flex flex-col"
             style={{
-              top: 56,
+              top: 80,
               right: 0,
               bottom: 0,
               width: 'min(340px, calc(100vw - 24px))',
@@ -140,16 +149,27 @@ export default function NotificationDrawer({
                 </div>
               ) : (
                 <div className="flex flex-col py-2">
-                  {Array.from(groups.entries()).map(([gk, groupNotifs]) => (
+                  {Array.from(groups.entries()).map(([gk, groupNotifs]) => {
+                    const isCollapsed = collapsed.has(gk);
+                    return (
                     <div key={gk} className="mb-2">
                       {/* Group header */}
-                      <div className="flex items-center justify-between px-4 py-1.5">
-                        <span className="text-[8px] font-mono tracking-widest uppercase text-white/30">
-                          {gk} ({groupNotifs.length})
-                        </span>
+                      <div
+                        className="flex items-center justify-between px-4 py-1.5 cursor-pointer hover:bg-white/[0.03] transition-colors"
+                        onClick={() => toggleGroup(gk)}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <ChevronDown
+                            className="w-2.5 h-2.5 text-white/25 transition-transform"
+                            style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+                          />
+                          <span className="text-[8px] font-mono tracking-widest uppercase text-white/30">
+                            {gk} ({groupNotifs.length})
+                          </span>
+                        </div>
                         {onDismissGroup && (
                           <button
-                            onClick={() => onDismissGroup(groupNotifs.map(n => n.id))}
+                            onClick={e => { e.stopPropagation(); onDismissGroup(groupNotifs.map(n => n.id)); }}
                             title="Dismiss group"
                             className="text-[7px] font-mono text-white/20 hover:text-[#FF4081] transition-colors flex items-center gap-0.5"
                           >
@@ -159,7 +179,7 @@ export default function NotificationDrawer({
                         )}
                       </div>
 
-                      {groupNotifs.map((notif, i) => {
+                      {!isCollapsed && groupNotifs.map((notif, i) => {
                         const color = SEV_COLOR[notif.severity] ?? '#FFD700';
                         return (
                           <div
@@ -227,7 +247,8 @@ export default function NotificationDrawer({
                         );
                       })}
                     </div>
-                  ))}
+                  );
+                  })}
                 </div>
               )}
             </div>

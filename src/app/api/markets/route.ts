@@ -109,7 +109,15 @@ const OIL_NAMES: Record<string, string> = { 'CL=F': 'WTI Crude', 'BZ=F': 'Brent 
 const CRYPTO_NAMES: Record<string, string> = { 'BTC-USD': 'Bitcoin', 'ETH-USD': 'Ethereum' };
 const INDEX_NAMES: Record<string, string> = { 'ES=F': 'S&P 500', 'NQ=F': 'Nasdaq 100' };
 
+const CACHE_TTL = 60_000; // 1 min — markets don't need sub-minute freshness
+let cachedMarkets: Record<string, unknown> | null = null;
+let lastFetch = 0;
+
 export async function GET() {
+  const now = Date.now();
+  if (cachedMarkets && now - lastFetch < CACHE_TTL) {
+    return NextResponse.json(cachedMarkets, { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } });
+  }
   try {
     // Fetch all in parallel
     const [stockResults, oilResults, commodityResults, yahooResults, indexResults, cgCrypto] = await Promise.all([
@@ -144,7 +152,7 @@ export async function GET() {
     // --- SCM Integration: Chokepoint-Commodity Correlation ---
     const scm_alerts: string[] = [];
     try {
-      const origin = process.env.OSIRIS_SELF_ORIGIN ?? 'http://localhost:3001';
+      const origin = process.env.OSIRIS_SELF_ORIGIN ?? 'http://127.0.0.1:3000';
       const maritimeRes = await fetch(`${origin}/api/maritime`, { signal: AbortSignal.timeout(3000) });
       if (maritimeRes.ok) {
         const maritimeData = await maritimeRes.json();
@@ -172,14 +180,20 @@ export async function GET() {
       // Ignore if maritime is unreachable
     }
 
-    return NextResponse.json({
-      stocks, oil, commodities, crypto, indices, scm_alerts,
-      timestamp: new Date().toISOString(),
-    }, {
-      headers: { 'Cache-Control': 'no-store' }, // Prevent caching so alerts update real-time
+    cachedMarkets = { stocks, oil, commodities, crypto, indices, scm_alerts, timestamp: new Date().toISOString() };
+    lastFetch = now;
+    return NextResponse.json(cachedMarkets, {
+      headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
     });
   } catch (error) {
     console.error('Markets fetch error:', error);
+    // Serve the last good cache on a failed refresh rather than an empty 500
+    // (matches weather/earthquakes/oblast-pressure).
+    if (cachedMarkets) {
+      return NextResponse.json(cachedMarkets, {
+        headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120', 'X-Stale': 'true' },
+      });
+    }
     return NextResponse.json({ stocks: {}, oil: {}, commodities: {}, crypto: {}, indices: {}, scm_alerts: [], error: 'Failed' }, { status: 500 });
   }
 }

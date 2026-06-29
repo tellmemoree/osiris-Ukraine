@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getThreatCorpus, classifyWeapons, matchOblasts, buildRoute } from '@/lib/telegram-threats';
+import { getThreatCorpus, classifyWeapons, matchOblasts, buildRoute, extractUAVCount } from '@/lib/telegram-threats';
 import type { OblastRef, RouteWave } from '@/lib/telegram-threats';
-import { readAlarmHistory, isOblastAlarmed } from '@/lib/alarm-history';
+import { readAlarmHistory, isOblastAlarmed, buildAlarmVectors } from '@/lib/alarm-history';
+import type { AlarmVector } from '@/lib/alarm-history';
 import {
   DRONE_TRACKS_FILE, DRONE_TRACK_TTL_MS,
   loadTrackEntries, mergeAndSaveTracks, buildWavesFromEntries, wavesToTrackEntries,
@@ -42,11 +43,13 @@ interface DroneEvent {
 }
 
 interface DroneResponse {
-  threats:      DroneEvent[];
-  waves:        RouteWave[];
-  total:        number;
-  window_hours: number;
-  timestamp:    string;
+  threats:       DroneEvent[];
+  waves:         RouteWave[];
+  total:         number;
+  window_hours:  number;
+  timestamp:     string;
+  uav_count?:    number;
+  alarm_vectors?: AlarmVector[];
 }
 
 // ── module-level cache + cold-start seed ─────────────────────────────────────
@@ -114,14 +117,25 @@ async function buildDroneResponse(): Promise<DroneResponse> {
     }))
     .sort((x, y) => new Date(y.startedAt).getTime() - new Date(x.startedAt).getTime());
 
-  // Build current-corpus waves and annotate with alarm history
+  // Build current-corpus waves and annotate with alarm history; build alarm
+  // vectors in parallel (reads from disk — no upstream fetch).
   const currentWaves = buildRoute(messages, 'DRONE');
-  const alarmHistory = await readAlarmHistory();
+  const [alarmHistory, alarmVectors] = await Promise.all([
+    readAlarmHistory(),
+    buildAlarmVectors(),
+  ]);
   for (const wave of currentWaves) {
     for (const wp of wave.waypoints) {
       wp.alarmConfirmed = isOblastAlarmed(wp.oblast, wp.ts, alarmHistory);
     }
   }
+
+  // UAV count: apply after buildRoute() so messages are already deduplicated
+  // at the corpus level; extractUAVCount takes MAX across all drone messages.
+  const droneTexts = messages
+    .filter(msg => classifyWeapons(msg.text).includes('DRONE'))
+    .map(msg => msg.text);
+  const uavCount = extractUAVCount(droneTexts);
 
   // Merge new waypoints into 24h track history
   const newEntries = wavesToTrackEntries(currentWaves, 'DRONE');
@@ -133,9 +147,11 @@ async function buildDroneResponse(): Promise<DroneResponse> {
   return {
     threats,
     waves,
-    total:        threats.length,
-    window_hours: WINDOW_HOURS,
-    timestamp:    new Date().toISOString(),
+    total:         threats.length,
+    window_hours:  WINDOW_HOURS,
+    timestamp:     new Date().toISOString(),
+    uav_count:     uavCount,
+    alarm_vectors: alarmVectors,
   };
 }
 
@@ -156,11 +172,13 @@ export async function GET() {
     if (seed.length > 0) {
       const seedWaves = buildWavesFromEntries(seed);
       cached = {
-        threats:      [],
-        waves:        seedWaves,
-        total:        0,
-        window_hours: WINDOW_HOURS,
-        timestamp:    new Date().toISOString(),
+        threats:       [],
+        waves:         seedWaves,
+        total:         0,
+        window_hours:  WINDOW_HOURS,
+        timestamp:     new Date().toISOString(),
+        uav_count:     0,
+        alarm_vectors: [],
       };
     }
   }
@@ -173,7 +191,7 @@ export async function GET() {
     } catch {
       if (cached) return NextResponse.json(cached, { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } });
       return NextResponse.json(
-        { threats: [], waves: [], total: 0, window_hours: WINDOW_HOURS, error: 'Failed to fetch drone threats' },
+        { threats: [], waves: [], total: 0, window_hours: WINDOW_HOURS, uav_count: 0, alarm_vectors: [], error: 'Failed to fetch drone threats' },
         { status: 500 },
       );
     }
@@ -200,11 +218,13 @@ export async function GET() {
     console.error('[OSIRIS] drone-threats fetch error:', error);
     return NextResponse.json(
       {
-        threats:      [],
-        waves:        [],
-        total:        0,
-        window_hours: WINDOW_HOURS,
-        error:        error instanceof Error ? error.message : 'Failed to fetch drone threats',
+        threats:       [],
+        waves:         [],
+        total:         0,
+        window_hours:  WINDOW_HOURS,
+        uav_count:     0,
+        alarm_vectors: [],
+        error:         error instanceof Error ? error.message : 'Failed to fetch drone threats',
       },
       { status: 500 },
     );
