@@ -412,34 +412,39 @@ export default function Dashboard() {
     if (!time) return;
     const al = activeLayersRef.current;
     const sd = sessionDisabledRef.current;
+
+    // Decide which analyst-hidden layers to auto-enable from the refs FIRST.
+    // setState updaters must be pure (React may invoke them twice in StrictMode /
+    // concurrent rendering), so we never call setLayerToasts inside the
+    // setActiveLayers updater.
+    const toEnable = Object.values(TIMELINE_TYPE_TO_LAYER).filter(
+      layerKey => layerKey in al && !al[layerKey as keyof typeof al] && !sd.has(layerKey),
+    );
+    if (toEnable.length === 0) return;
+
     setActiveLayers(prev => {
       const next = { ...prev };
-      let changed = false;
-      Object.entries(TIMELINE_TYPE_TO_LAYER).forEach(([, layerKey]) => {
-        if (!(layerKey in next)) return;
-        if (!next[layerKey as keyof typeof next] && !sd.has(layerKey)) {
-          (next as Record<string, boolean>)[layerKey] = true;
-          changed = true;
-          setLayerToasts(toasts => {
-            if (toasts.some(t => t.layerKey === layerKey)) return toasts;
-            const toastId = `${layerKey}-${Date.now()}`;
-            return [...toasts, {
-              id: toastId, layerKey,
-              layerLabel: layerKey.replace(/_/g, ' '),
-              eventCount: 0,
-              timeLabel: 'timeline scrub',
-              onUndo: () => {
-                setActiveLayers((p: any) => ({ ...p, [layerKey]: false }));
-                setSessionDisabled((p: Set<string>) => new Set([...p, layerKey]));
-                setLayerToasts((p: TimelineLayerToastItem[]) => p.filter(t => t.layerKey !== layerKey));
-              },
-            }];
-          });
-        }
-      });
-      return changed ? next : prev;
+      for (const layerKey of toEnable) (next as Record<string, boolean>)[layerKey] = true;
+      return next;
     });
-  }, [timelineRangeH]); // eslint-disable-line react-hooks/exhaustive-deps
+    setLayerToasts(toasts => {
+      const add = toEnable
+        .filter(layerKey => !toasts.some(t => t.layerKey === layerKey))
+        .map(layerKey => ({
+          id: `${layerKey}-${Date.now()}`,
+          layerKey,
+          layerLabel: layerKey.replace(/_/g, ' '),
+          eventCount: 0,
+          timeLabel: 'timeline scrub',
+          onUndo: () => {
+            setActiveLayers((p: any) => ({ ...p, [layerKey]: false }));
+            setSessionDisabled((p: Set<string>) => new Set([...p, layerKey]));
+            setLayerToasts((p: TimelineLayerToastItem[]) => p.filter(t => t.layerKey !== layerKey));
+          },
+        }));
+      return add.length ? [...toasts, ...add] : toasts;
+    });
+  }, []); // reads refs + stable setters only
 
   const handleAxisFocus = useCallback((name: string | null, bbox: [number, number, number, number] | null) => {
     setFocusedAxis(name);
